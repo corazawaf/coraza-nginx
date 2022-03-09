@@ -142,7 +142,9 @@ void ngx_http_coraza_cleanup(void *data)
 
 	ctx = (ngx_http_coraza_ctx_t *)data;
 
-	coraza_free_transaction(ctx->coraza_transaction);
+	if (coraza_free_transaction(ctx->coraza_transaction) != NGX_OK) {
+		dd("cleanup -- transaction free failed: %d", res);
+	};
 }
 
 ngx_inline ngx_http_coraza_ctx_t *
@@ -199,15 +201,20 @@ char *
 ngx_conf_set_rules(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
 	int res;
-	char *rules;
+	char *rules = NULL;
 	ngx_str_t *value;
-	char *error;
+	char *error = NULL;
 	ngx_http_coraza_conf_t *mcf = conf;
 	ngx_http_coraza_main_conf_t *mmcf;
 
 	value = cf->args->elts;
 
-	res = coraza_rules_add(mcf->waf, (char *)value[1].data, &error);
+	if (ngx_str_to_char(value[1], rules, cf->pool) != NGX_OK) {
+		dd("Failed to get the rules");
+		return NGX_CONF_ERROR;
+	}
+
+	res = coraza_rules_add(mcf->waf, rules, &error);
 
 	if (res < 0)
 	{
@@ -225,15 +232,20 @@ char *
 ngx_conf_set_rules_file(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
 	int res;
-	char *rules_set;
+	char *rules_set = NULL;
 	ngx_str_t *value;
-	char **error;
+	char **error = NULL;
 	ngx_http_coraza_conf_t *mcf = conf;
 	ngx_http_coraza_main_conf_t *mmcf;
 
 	value = cf->args->elts;
 
-	res = coraza_rules_add(mcf->waf, (char *)value[1].data, &error);
+	if (ngx_str_to_char(value[1], rules_set, cf->pool) != NGX_OK) {
+		dd("Failed to get the rules_file");
+		return NGX_CONF_ERROR;
+	}
+
+	res = coraza_rules_add(mcf->waf, rules_set, error);
 
 	if (res < 0)
 	{
@@ -554,11 +566,11 @@ ngx_http_coraza_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 	dd("CHILD RULES");
 	coraza_rules_dump(c->rules_set);
 #endif
-	rules = coraza_rules_merge(c->waf, p->waf, &error);
+	rules = coraza_rules_merge(c->waf, p->waf, error);
 
 	if (rules < 0)
 	{
-		return error;
+		return *error;
 	}
 
 #if defined(CORAZA_DDEBUG) && (CORAZA_DDEBUG)
