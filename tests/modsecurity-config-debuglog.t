@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 #
-# ModSecurity, http://www.modsecurity.org/
+# Coraza, http://www.coraza.io/
 # Copyright (c) 2015 Trustwave Holdings, Inc. (http://www.trustwave.com/)
 #
 # You may not use this file except in compliance with
@@ -11,11 +11,11 @@
 #
 # If any of the files related to licensing are missing or if you have any
 # other questions related to licensing please contact Trustwave Holdings, Inc.
-# directly using the email address security@modsecurity.org.
+# directly using the email address security@coraza.io.
 #
 
 
-# Tests for ModSecurity module.
+# Tests for Coraza module.
 
 ###############################################################################
 
@@ -53,30 +53,30 @@ http {
         listen       127.0.0.1:8080;
         server_name  localhost;
 
-        modsecurity on;
-        modsecurity_rules '
+        coraza on;
+        coraza_rules '
             SecRuleEngine On
             SecRule ARGS "@streq whee" "id:10,phase:2"
             SecRule ARGS "@streq whee" "id:11,phase:2"
         ';
 
         location / {
-            modsecurity_rules '
-                SecRule ARGS "@streq root" "id:21,phase:1,status:302,redirect:http://www.modsecurity.org"
+            coraza_rules '
+                SecRule ARGS "@streq root" "id:21,phase:1,status:302,redirect:http://www.coraza.io"
                 SecDebugLog %%TESTDIR%%/debuglog-root.txt
                 SecDebugLogLevel 9
             ';
         }
 
         location /subfolder1 {
-            modsecurity_rules '
-                SecRule ARGS "@streq subfolder1" "id:31,phase:1,status:302,redirect:http://www.modsecurity.org"
+            coraza_rules '
+                SecRule ARGS "@streq subfolder1" "id:31,phase:1,status:302,redirect:http://www.coraza.io"
                 SecDebugLog %%TESTDIR%%/debuglog-subfolder1.txt
                 SecDebugLogLevel 9
             ';
             location /subfolder1/subfolder2 {
-                modsecurity_rules '
-                    SecRule ARGS "@streq subfolder2" "id:41,phase:1,status:302,redirect:http://www.modsecurity.org"
+                coraza_rules '
+                    SecRule ARGS "@streq subfolder2" "id:41,phase:1,status:302,redirect:http://www.coraza.io"
                     SecDebugLog %%TESTDIR%%/debuglog-subfolder2.txt
                     SecDebugLogLevel 9
                 ';

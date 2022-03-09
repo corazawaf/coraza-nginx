@@ -10,7 +10,7 @@
  *
  * If any of the files related to licensing are missing or if you have any
  * other questions related to licensing please contact Trustwave Holdings, Inc.
- * directly using the email address security@modsecurity.org.
+ * directly using the email address security@coraza.io.
  *
  */
 
@@ -356,7 +356,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     }
 
 /* XXX: can it happen ?  already processed i mean */
-/* XXX: check behaviour on 'ModSecurity off' */
+/* XXX: check behaviour on 'Coraza off' */
 
     if (ctx && ctx->processed)
     {
@@ -376,8 +376,8 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     ctx->processed = 1;
     /*
      *
-     * Assuming ModSecurity module is running immediately before the
-     * ngx_http_header_filter, we will be able to populate ModSecurity with
+     * Assuming Coraza module is running immediately before the
+     * ngx_http_header_filter, we will be able to populate Coraza with
      * headers from the headers_out structure.
      *
      * As ngx_http_header_filter place a direct call to the
@@ -452,13 +452,13 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     /*
      * Proxies will not like this... but it is necessary to unset
      * the content length in order to manipulate the content of
-     * response body in ModSecurity.
+     * response body in Coraza.
      *
-     * This header may arrive at the client before ModSecurity had
+     * This header may arrive at the client before Coraza had
      * a change to make any modification. That is why it is necessary
      * to set this to -1 here.
      *
-     * We need to have some kind of flag the decide if ModSecurity
+     * We need to have some kind of flag the decide if Coraza
      * will make a modification or not. If not, keep the content and
      * make the proxy servers happy.
      *

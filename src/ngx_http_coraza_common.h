@@ -1,5 +1,5 @@
 /*
- * ModSecurity connector for nginx, http://www.modsecurity.org/
+ * Coraza connector for nginx, http://www.coraza.io/
  * Copyright (c) 2015 Trustwave Holdings, Inc. (http://www.trustwave.com/)
  *
  * You may not use this file except in compliance with
@@ -9,7 +9,7 @@
  *
  * If any of the files related to licensing are missing or if you have any
  * other questions related to licensing please contact Trustwave Holdings, Inc.
- * directly using the email address security@modsecurity.org.
+ * directly using the email address security@coraza.io.
  *
  */
 
@@ -37,8 +37,8 @@
  *
  */
 
-#define CORAZA_NGINX_MAJOR "1"
-#define CORAZA_NGINX_MINOR "0"
+#define CORAZA_NGINX_MAJOR "0"
+#define CORAZA_NGINX_MINOR "1"
 #define CORAZA_NGINX_PATCHLEVEL "0"
 #define CORAZA_NGINX_TAG ""
 #define CORAZA_NGINX_TAG_NUM "100"
@@ -105,7 +105,7 @@ typedef struct {
 extern ngx_module_t ngx_http_coraza_module;
 
 /* ngx_http_coraza_module.c */
-int ngx_http_coraza_process_intervention (coraza_transaction_t transaction, ngx_http_request_t *r, ngx_int_t early_log);
+ngx_int_t ngx_http_coraza_process_intervention (coraza_transaction_t *transaction, ngx_http_request_t *r, ngx_int_t early_log);
 ngx_http_coraza_ctx_t *ngx_http_coraza_create_ctx(ngx_http_request_t *r);
 char *ngx_str_to_char(ngx_str_t a, ngx_pool_t *p);
 

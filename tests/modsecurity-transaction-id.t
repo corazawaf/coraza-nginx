@@ -2,7 +2,7 @@
 
 # (C) Andrei Belov
 
-# Tests for ModSecurity-nginx connector (modsecurity_transaction_id).
+# Tests for Coraza-nginx connector (coraza_transaction_id).
 
 ###############################################################################
 
@@ -33,7 +33,7 @@ events {
 http {
     %%TEST_GLOBALS_HTTP%%
 
-    modsecurity_transaction_id "tid-HTTP-DEFAULT-$request_id";
+    coraza_transaction_id "tid-HTTP-DEFAULT-$request_id";
 
     server {
         listen       127.0.0.1:8080;
@@ -41,8 +41,8 @@ http {
 
         location / {
             error_log %%TESTDIR%%/e_s1l1.log info;
-            modsecurity on;
-            modsecurity_rules '
+            coraza on;
+            coraza_rules '
                 SecRuleEngine On
                 SecDefaultAction "phase:1,log,deny,status:403"
                 SecRule ARGS "@streq block403" "id:4,phase:1,status:403,block"
@@ -54,12 +54,12 @@ http {
         listen       127.0.0.1:8080;
         server_name  server2;
 
-        modsecurity_transaction_id "tid-SERVER-DEFAULT-$request_id";
+        coraza_transaction_id "tid-SERVER-DEFAULT-$request_id";
 
         location / {
             error_log %%TESTDIR%%/e_s2l1.log info;
-            modsecurity on;
-            modsecurity_rules '
+            coraza on;
+            coraza_rules '
                 SecRuleEngine On
                 SecDefaultAction "phase:1,log,deny,status:403"
                 SecRule ARGS "@streq block403" "id:4,phase:1,status:403,block"
@@ -68,9 +68,9 @@ http {
 
         location /specific {
             error_log %%TESTDIR%%/e_s2l2.log info;
-            modsecurity on;
-            modsecurity_transaction_id "tid-LOCATION-SPECIFIC-$request_id";
-            modsecurity_rules '
+            coraza on;
+            coraza_transaction_id "tid-LOCATION-SPECIFIC-$request_id";
+            coraza_rules '
                 SecRuleEngine On
                 SecDefaultAction "phase:1,log,deny,status:403"
                 SecRule ARGS "@streq block403" "id:4,phase:1,status:403,block"
@@ -78,9 +78,9 @@ http {
         }
 
         location /debuglog {
-            modsecurity on;
-            modsecurity_transaction_id "tid-DEBUG-$request_id";
-            modsecurity_rules '
+            coraza on;
+            coraza_transaction_id "tid-DEBUG-$request_id";
+            coraza_rules '
                 SecRuleEngine On
                 SecDebugLog %%TESTDIR%%/modsec_debug.log
                 SecDebugLogLevel 4
@@ -90,9 +90,9 @@ http {
         }
 
         location /auditlog {
-            modsecurity on;
-            modsecurity_transaction_id "tid-AUDIT-$request_id";
-            modsecurity_rules '
+            coraza on;
+            coraza_transaction_id "tid-AUDIT-$request_id";
+            coraza_rules '
                 SecRuleEngine On
                 SecDefaultAction "phase:1,log,deny,status:403"
                 SecAuditEngine On
@@ -143,7 +143,7 @@ Host: server2
 
 EOF
 
-isnt(lines($t, 'modsec_debug.log', 'tid-DEBUG-'), 0, 'libmodsecurity debug log');
+isnt(lines($t, 'modsec_debug.log', 'tid-DEBUG-'), 0, 'libcoraza debug log');
 
 http(<<EOF);
 GET /auditlog/?what=block403 HTTP/1.0
@@ -151,7 +151,7 @@ Host: server2
 
 EOF
 
-isnt(lines($t, 'modsec_audit.log', 'tid-AUDIT-'), 0, 'libmodsecurity audit log');
+isnt(lines($t, 'modsec_audit.log', 'tid-AUDIT-'), 0, 'libcoraza audit log');
 
 ###############################################################################
 

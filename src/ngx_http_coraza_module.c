@@ -1,9 +1,9 @@
 /*
  * Coraza connector for nginx, http://www.coraza.io/
  *
- * Based on ModSecurity's connector.
+ * Based on Coraza's connector.
  * 
- * ModSecurity nginx connector
+ * Coraza nginx connector
  * Copyright (c) 2015 Trustwave Holdings, Inc. (http://www.trustwave.com/)
  * 
  * Coraza nginx connector
@@ -43,13 +43,13 @@ static void ngx_http_coraza_cleanup_rules(void *data);
  * ngx_string's are not null-terminated in common case, so we need to convert
  * them into null-terminated ones before passing to CORAZA
  */
-ngx_inline char *ngx_str_to_char(ngx_str_t a, ngx_pool_t *p)
+ngx_inline ngx_int_t ngx_str_to_char(ngx_str_t a, char* res, ngx_pool_t *p)
 {
-	char *str = NULL;
+	char *res = NULL;
 
 	if (a.len == 0)
 	{
-		return NULL;
+		return NGX_OK;
 	}
 
 	str = ngx_pnalloc(p, a.len + 1);
@@ -65,13 +65,14 @@ ngx_inline char *ngx_str_to_char(ngx_str_t a, ngx_pool_t *p)
 	return str;
 }
 
-ngx_inline int
-ngx_http_coraza_process_intervention(coraza_transaction_t transaction, ngx_http_request_t *r, ngx_int_t early_log)
+ngx_inline ngx_int_t
+ngx_http_coraza_process_intervention(coraza_transaction_t *transaction, ngx_http_request_t *r, ngx_int_t early_log)
 {
 	char *log = NULL;
 	coraza_intervention_t *intervention;
 	ngx_http_coraza_ctx_t *ctx = NULL;
-
+	ngx_table_elt_t *location = NULL;
+	
 	dd("processing intervention");
 
 	ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
@@ -84,7 +85,7 @@ ngx_http_coraza_process_intervention(coraza_transaction_t transaction, ngx_http_
 	if (intervention == NULL)
 	{
 		dd("nothing to do");
-		return 0;
+		return NGX_OK;
 	}
 
 	log = intervention->log;
@@ -107,7 +108,7 @@ ngx_http_coraza_process_intervention(coraza_transaction_t transaction, ngx_http_
 		if (r->header_sent)
 		{
 			dd("Headers are already sent. Cannot perform the redirection at this point.");
-			return -1;
+			return NGX_ERROR;
 		}
 
 		/**
@@ -122,12 +123,8 @@ ngx_http_coraza_process_intervention(coraza_transaction_t transaction, ngx_http_
 		 *
 		 */
 		ngx_http_clear_location(r);
-		ngx_str_t a = ngx_string("");
+		ngx_str_t a = ngx_string(intervention->url);
 
-		a.data = (unsigned char *)intervention->url;
-		a.len = strlen(intervention->url);
-
-		ngx_table_elt_t *location = NULL;
 		location = ngx_list_push(&r->headers_out.headers);
 		ngx_str_set(&location->key, "Location");
 		location->value = a;
@@ -157,12 +154,12 @@ ngx_http_coraza_process_intervention(coraza_transaction_t transaction, ngx_http_
 		if (r->header_sent)
 		{
 			dd("Headers are already sent. Cannot perform the redirection at this point.");
-			return -1;
+			return NGX_ERROR;
 		}
 		dd("intervention -- returning code: %d", intervention.status);
 		return intervention->status;
 	}
-	return 0;
+	return NGX_OK;
 }
 
 void ngx_http_coraza_cleanup(void *data)
@@ -230,24 +227,18 @@ ngx_conf_set_rules(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 	int res;
 	char *rules;
 	ngx_str_t *value;
-	const char *error;
+	char *error;
 	ngx_http_coraza_conf_t *mcf = conf;
 	ngx_http_coraza_main_conf_t *mmcf;
 
 	value = cf->args->elts;
-	rules = ngx_str_to_char(value[1], cf->pool);
 
-	if (rules == (char *)-1)
-	{
-		return NGX_CONF_ERROR;
-	}
-
-	res = coraza_rules_add(mcf->waf, rules, (char **)&error);
+	res = coraza_rules_add(mcf->waf, (char *)value[1].data, &error);
 
 	if (res < 0)
 	{
 		dd("Failed to load the rules: '%s' - reason: '%s'", rules, error);
-		return strdup(error);
+		return NGX_CONF_ERROR;
 	}
 
 	mmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_coraza_module);
@@ -262,24 +253,18 @@ ngx_conf_set_rules_file(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 	int res;
 	char *rules_set;
 	ngx_str_t *value;
-	const char *error;
+	char **error;
 	ngx_http_coraza_conf_t *mcf = conf;
 	ngx_http_coraza_main_conf_t *mmcf;
 
 	value = cf->args->elts;
-	rules_set = ngx_str_to_char(value[1], cf->pool);
 
-	if (rules_set == (char *)-1)
-	{
-		return NGX_CONF_ERROR;
-	}
-
-	res = coraza_rules_add(mcf->waf, rules_set, (char **)&error);
+	res = coraza_rules_add(mcf->waf, (char *)value[1].data, &error);
 
 	if (res < 0)
 	{
 		dd("Failed to load the rules from: '%s' - reason: '%s'", rules_set, error);
-		return strdup(error);
+		return NGX_CONF_ERROR;
 	}
 
 	mmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_coraza_module);
@@ -573,13 +558,12 @@ ngx_http_coraza_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 	ngx_http_coraza_conf_t *c = child;
 #if defined(CORAZA_DDEBUG) && (CORAZA_DDEBUG)
 	ngx_http_core_loc_conf_t *clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
+	dd("merging loc config [%s] - parent: '%p' child: '%p'",
+		ngx_str_to_char(clcf->name, cf->pool), parent,
+		child);
 #endif
 	int rules;
-	const char *error = NULL;
-
-	dd("merging loc config [%s] - parent: '%p' child: '%p'",
-	   ngx_str_to_char(clcf->name, cf->pool), parent,
-	   child);
+	char **error = NULL;
 
 	dd("                  state - parent: '%d' child: '%d'",
 	   (int)c->enable, (int)p->enable);
@@ -592,20 +576,20 @@ ngx_http_coraza_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 
 #if defined(CORAZA_DDEBUG) && (CORAZA_DDEBUG)
 	dd("PARENT RULES");
-	msc_rules_dump(p->rules_set);
+	coraza_rules_dump(p->rules_set);
 	dd("CHILD RULES");
-	msc_rules_dump(c->rules_set);
+	coraza_rules_dump(c->rules_set);
 #endif
-	rules = coraza_rules_merge(c->waf, p->waf, (char **)&error);
+	rules = coraza_rules_merge(c->waf, p->waf, &error);
 
 	if (rules < 0)
 	{
-		return strdup(error);
+		return error;
 	}
 
 #if defined(CORAZA_DDEBUG) && (CORAZA_DDEBUG)
 	dd("NEW CHILD RULES");
-	msc_rules_dump(c->rules_set);
+	coraza_rules_dump(c->rules_set);
 #endif
 	return NGX_CONF_OK;
 }

@@ -1,5 +1,5 @@
 /*
- * ModSecurity connector for nginx, http://www.modsecurity.org/
+ * Coraza connector for nginx, http://www.coraza.io/
  * Copyright (c) 2015 Trustwave Holdings, Inc. (http://www.trustwave.com/)
  *
  * You may not use this file except in compliance with
@@ -9,7 +9,7 @@
  *
  * If any of the files related to licensing are missing or if you have any
  * other questions related to licensing please contact Trustwave Holdings, Inc.
- * directly using the email address security@modsecurity.org.
+ * directly using the email address security@coraza.io.
  *
  */
 
@@ -149,7 +149,7 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
         }
 
         /**
-         * Since incoming request headers are already in place, lets send it to ModSecurity
+         * Since incoming request headers are already in place, lets send it to Coraza
          *
          */
         ngx_list_part_t *part = &r->headers_in.headers.part;
@@ -170,7 +170,7 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
              * By using u_char (utf8_t) I believe nginx is hoping to deal
              * with utf8 strings.
              * Casting those into to unsigned char * in order to pass
-             * it to ModSecurity, it will handle with those later.
+             * it to Coraza, it will handle with those later.
              *
              */
 
@@ -183,7 +183,7 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
         }
 
         /**
-         * Since ModSecurity already knew about all headers, i guess it is safe
+         * Since Coraza already knew about all headers, i guess it is safe
          * to process this information.
          */
 

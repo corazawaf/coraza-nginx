@@ -2,7 +2,7 @@
 
 # (C) Andrei Belov
 
-# Tests for ModSecurity module (HTTP/2).
+# Tests for Coraza module (HTTP/2).
 
 ###############################################################################
 
@@ -41,54 +41,54 @@ http {
         server_name  localhost;
 
         location / {
-            modsecurity on;
-            modsecurity_rules '
+            coraza on;
+            coraza_rules '
                 SecRuleEngine On
                 SecRule ARGS "@streq whee" "id:10,phase:2"
                 SecRule ARGS "@streq whee" "id:11,phase:2"
             ';
         }
         location /phase1 {
-            modsecurity on;
-            modsecurity_rules '
+            coraza on;
+            coraza_rules '
                 SecRuleEngine On
                 SecDefaultAction "phase:1,log,deny,status:403"
-                SecRule ARGS "@streq redirect301" "id:1,phase:1,status:301,redirect:http://www.modsecurity.org"
-                SecRule ARGS "@streq redirect302" "id:2,phase:1,status:302,redirect:http://www.modsecurity.org"
+                SecRule ARGS "@streq redirect301" "id:1,phase:1,status:301,redirect:http://www.coraza.io"
+                SecRule ARGS "@streq redirect302" "id:2,phase:1,status:302,redirect:http://www.coraza.io"
                 SecRule ARGS "@streq block401" "id:3,phase:1,status:401,block"
                 SecRule ARGS "@streq block403" "id:4,phase:1,status:403,block"
             ';
         }
         location /phase2 {
-            modsecurity on;
-            modsecurity_rules '
+            coraza on;
+            coraza_rules '
                 SecRuleEngine On
                 SecDefaultAction "phase:2,log,deny,status:403"
-                SecRule ARGS "@streq redirect301" "id:1,phase:2,status:301,redirect:http://www.modsecurity.org"
-                SecRule ARGS "@streq redirect302" "id:2,phase:2,status:302,redirect:http://www.modsecurity.org"
+                SecRule ARGS "@streq redirect301" "id:1,phase:2,status:301,redirect:http://www.coraza.io"
+                SecRule ARGS "@streq redirect302" "id:2,phase:2,status:302,redirect:http://www.coraza.io"
                 SecRule ARGS "@streq block401" "id:3,phase:2,status:401,block"
                 SecRule ARGS "@streq block403" "id:4,phase:2,status:403,block"
             ';
         }
         location /phase3 {
-            modsecurity on;
-            modsecurity_rules '
+            coraza on;
+            coraza_rules '
                 SecRuleEngine On
                 SecDefaultAction "phase:3,log,deny,status:403"
-                SecRule ARGS "@streq redirect301" "id:1,phase:3,status:301,redirect:http://www.modsecurity.org"
-                SecRule ARGS "@streq redirect302" "id:2,phase:3,status:302,redirect:http://www.modsecurity.org"
+                SecRule ARGS "@streq redirect301" "id:1,phase:3,status:301,redirect:http://www.coraza.io"
+                SecRule ARGS "@streq redirect302" "id:2,phase:3,status:302,redirect:http://www.coraza.io"
                 SecRule ARGS "@streq block401" "id:3,phase:3,status:401,block"
                 SecRule ARGS "@streq block403" "id:4,phase:3,status:403,block"
             ';
         }
         location /phase4 {
-            modsecurity on;
-            modsecurity_rules '
+            coraza on;
+            coraza_rules '
                 SecRuleEngine On
                 SecResponseBodyAccess On
                 SecDefaultAction "phase:4,log,deny,status:403"
-                SecRule ARGS "@streq redirect301" "id:1,phase:4,status:301,redirect:http://www.modsecurity.org"
-                SecRule ARGS "@streq redirect302" "id:2,phase:4,status:302,redirect:http://www.modsecurity.org"
+                SecRule ARGS "@streq redirect301" "id:1,phase:4,status:301,redirect:http://www.coraza.io"
+                SecRule ARGS "@streq redirect302" "id:2,phase:4,status:302,redirect:http://www.coraza.io"
                 SecRule ARGS "@streq block401" "id:3,phase:4,status:401,block"
                 SecRule ARGS "@streq block403" "id:4,phase:4,status:403,block"
             ';

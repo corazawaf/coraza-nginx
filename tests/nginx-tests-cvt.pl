@@ -1,8 +1,8 @@
 #!/usr/bin/perl
 
 #
-# Script to adjust nginx tests to include ModSecurity directives.  It enables
-# us to passively test nginx functionality with ModSecurity module enabled.
+# Script to adjust nginx tests to include Coraza directives.  It enables
+# us to passively test nginx functionality with Coraza module enabled.
 #
 
 # sh command line variations:
@@ -26,8 +26,8 @@ while (<STDIN>) {
 		next if (/^ *server_name *many4.example.com;/);		# skip duplication on http_server_name.t
 
 		print "
-        modsecurity on;
-        modsecurity_rules '
+        coraza on;
+        coraza_rules '
         SecRuleEngine On
         SecDebugLogLevel 9
         SecRule ARGS \"\@streq whee\" \"id:10,phase:2\"

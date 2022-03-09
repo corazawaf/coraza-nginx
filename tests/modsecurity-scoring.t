@@ -2,7 +2,7 @@
 
 # (C) Andrei Belov
 
-# Tests for ModSecurity-nginx connector (scoring).
+# Tests for Coraza-nginx connector (scoring).
 
 ###############################################################################
 
@@ -39,10 +39,10 @@ http {
         listen       127.0.0.1:8080;
         server_name  localhost;
 
-        modsecurity on;
+        coraza on;
 
         location /absolute {
-            modsecurity_rules '
+            coraza_rules '
                 SecRuleEngine On
                 SecRule ARGS "@streq badarg1" "id:11,phase:2,setvar:tx.score=1"
                 SecRule ARGS "@streq badarg2" "id:12,phase:2,setvar:tx.score=2"
@@ -51,7 +51,7 @@ http {
         }
 
         location /iterative {
-            modsecurity_rules '
+            coraza_rules '
                 SecRuleEngine On
                 SecRule ARGS "@streq badarg1" "id:21,phase:2,setvar:tx.score=+1"
                 SecRule ARGS "@streq badarg2" "id:22,phase:2,setvar:tx.score=+1"

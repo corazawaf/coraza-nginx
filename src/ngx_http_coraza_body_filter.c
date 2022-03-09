@@ -1,5 +1,5 @@
 /*
- * ModSecurity connector for nginx, http://www.modsecurity.org/
+ * Coraza connector for nginx, http://www.coraza.io/
  * Copyright (c) 2015 Trustwave Holdings, Inc. (http://www.trustwave.com/)
  *
  * You may not use this file except in compliance with
@@ -9,7 +9,7 @@
  *
  * If any of the files related to licensing are missing or if you have any
  * other questions related to licensing please contact Trustwave Holdings, Inc.
- * directly using the email address security@modsecurity.org.
+ * directly using the email address security@coraza.io.
  *
  */
 

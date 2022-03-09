@@ -2,7 +2,7 @@
 
 # (C) Andrei Belov
 
-# Tests for ModSecurity-nginx connector (request body operations, HTTP/2).
+# Tests for Coraza-nginx connector (request body operations, HTTP/2).
 
 ###############################################################################
 
@@ -48,11 +48,11 @@ http {
         listen       127.0.0.1:8080 http2;
         server_name  localhost;
 
-        modsecurity on;
+        coraza on;
         client_header_buffer_size 1024;
 
         location /bodyaccess {
-            modsecurity_rules '
+            coraza_rules '
                 SecRuleEngine On
                 SecRequestBodyAccess On
                 SecRule REQUEST_BODY "@rx BAD BODY" "id:11,phase:request,deny,log,status:403"
@@ -61,7 +61,7 @@ http {
         }
 
         location /nobodyaccess {
-            modsecurity_rules '
+            coraza_rules '
                 SecRuleEngine On
                 SecRequestBodyAccess Off
                 SecRule REQUEST_BODY "@rx BAD BODY" "id:21,phase:request,deny,log,status:403"
@@ -71,7 +71,7 @@ http {
         }
 
         location /bodylimitreject {
-            modsecurity_rules '
+            coraza_rules '
                 SecRuleEngine On
                 SecRequestBodyAccess On
                 SecRequestBodyLimit 128
@@ -82,7 +82,7 @@ http {
         }
 
         location /bodylimitprocesspartial {
-            modsecurity_rules '
+            coraza_rules '
                 SecRuleEngine On
                 SecRequestBodyAccess On
                 SecRequestBodyLimit 128
@@ -97,8 +97,8 @@ http {
         }
 
         location = /useauth {
-            modsecurity on;
-            modsecurity_rules '
+            coraza on;
+            coraza_rules '
                 SecRuleEngine On
                 SecRequestBodyAccess On
             ';
@@ -185,7 +185,7 @@ is($frame->{headers}->{':status'}, 403, "${method} request body limit process pa
 }
 
 TODO: {
-# https://github.com/SpiderLabs/ModSecurity-nginx/issues/163
+# https://github.com/SpiderLabs/Coraza-nginx/issues/163
 # https://github.com/nginx/nginx/commit/6c89d752c8ab3a3cc0832927484808b68153f8c4
 local $TODO = 'not yet' unless $t->has_version('1.19.3');
 

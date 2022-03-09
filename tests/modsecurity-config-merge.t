@@ -2,7 +2,7 @@
 
 # (C) Andrei Belov
 
-# Tests for ModSecurity-nginx connector (configuration merge).
+# Tests for Coraza-nginx connector (configuration merge).
 
 ###############################################################################
 
@@ -36,8 +36,8 @@ events {
 http {
     %%TEST_GLOBALS_HTTP%%
 
-    modsecurity on;
-    modsecurity_rules '
+    coraza on;
+    coraza_rules '
         SecRuleEngine On
         SecRequestBodyAccess On
         SecRequestBodyLimit 128
@@ -54,35 +54,35 @@ http {
         }
 
         location /modsec-disabled {
-            modsecurity_rules '
+            coraza_rules '
                 SecRuleEngine Off
             ';
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
         }
 
         location /nobodyaccess {
-            modsecurity_rules '
+            coraza_rules '
                 SecRequestBodyAccess Off
             ';
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
         }
 
         location /bodylimitprocesspartial {
-            modsecurity_rules '
+            coraza_rules '
                 SecRequestBodyLimitAction ProcessPartial
             ';
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
         }
 
         location /bodylimitincreased {
-            modsecurity_rules '
+            coraza_rules '
                 SecRequestBodyLimit 512
             ';
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
         }
 
         location /server {
-            modsecurity off;
+            coraza off;
 
             location /server/modsec-disabled {
                 proxy_pass http://127.0.0.1:%%PORT_8082%%;
@@ -105,7 +105,7 @@ http {
     server {
         listen 127.0.0.1:%%PORT_8082%%;
 
-        modsecurity_rules '
+        coraza_rules '
                 SecRuleEngine Off
         ';
 
@@ -117,7 +117,7 @@ http {
     server {
         listen 127.0.0.1:%%PORT_8083%%;
 
-        modsecurity_rules '
+        coraza_rules '
                 SecRequestBodyAccess Off
         ';
 
@@ -129,7 +129,7 @@ http {
     server {
         listen 127.0.0.1:%%PORT_8084%%;
 
-        modsecurity_rules '
+        coraza_rules '
                 SecRequestBodyLimitAction ProcessPartial
         ';
 
@@ -141,7 +141,7 @@ http {
     server {
         listen 127.0.0.1:%%PORT_8085%%;
 
-        modsecurity_rules '
+        coraza_rules '
                 SecRequestBodyLimit 512
         ';
 

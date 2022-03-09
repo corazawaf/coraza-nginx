@@ -234,7 +234,7 @@ version of your libcoraza and the version of the nginx connector you are running
 ### Security issue
 
 Please do not publicly report any security issue. Instead, contact us at:
-security@coraza.org to report the issue. Once the problem is fixed we will provide you with credit for the discovery.
+security@coraza.io to report the issue. Once the problem is fixed we will provide you with credit for the discovery.
 
 
 ## Feature Request
