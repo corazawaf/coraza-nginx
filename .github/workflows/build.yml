@@ -1,0 +1,141 @@
+# This is a basic workflow to help you get started with Actions
+name: Compile module
+
+# Controls when the action will run. Triggers the workflow on push or pull request
+# events but only for the master branch
+on: [push, pull_request]
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "compile"
+  compile:
+    name: Compile on ${{ matrix.os }} for nginx ${{ matrix.nginx_version }}
+    runs-on: ${{ matrix.os }}
+    env:
+      module_version: 1.26
+      libcoraza_version: master
+    strategy:
+      matrix:
+        nginx_version: ['1.21.2']
+        # The type of runner that the job will run on
+        os: [ubuntu-20.04]
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - name: "Checkout repo"
+        uses: actions/checkout@v3
+
+      # Grab nginx source, from cache if possible, or from web
+      - name: Grab nginx-${{ matrix.nginx_version }} cache
+        uses: actions/cache@v2
+        id: cache-nginx
+        with:
+          path: nginx-${{ matrix.nginx_version }}
+          key: nginx-${{ matrix.nginx_version }}
+      - name: Download nginx
+        if: steps.cache-nginx.outputs.cache-hit != 'true'
+        run: |
+          cd ${{ github.workspace }}
+          wget https://nginx.org/download/nginx-${{ matrix.nginx_version }}.tar.gz
+          tar -xzvf nginx-${{ matrix.nginx_version }}.tar.gz
+
+      # Grab libcoraza
+      - name: Grab libcoraza-${{ env.libcoraza_version }} cache
+        uses: actions/cache@v2
+        id: cache-pcre
+        with:
+          path: libcoraza-${{ env.libcoraza_version }}
+          key: libcoraza-${{ env.libcoraza_version }}
+      - name: Download libcoraza
+        if: steps.cache-libcoraza.outputs.cache-hit != 'true'
+        run: |
+          cd ${{ github.workspace }}
+          wget https://github.com/corazawaf/libcoraza/archive/refs/heads/${{ env.libcoraza_version }}.zip
+          unzip -o ${{ env.libcoraza_version }}.zip
+
+      # Grab prebuilts from apt
+      - name: Install dependencies with apt
+        run: |
+          sudo add-apt-repository universe
+          sudo apt-get update
+          sudo apt-get -y \
+          --fix-missing install \
+          gcc make \
+          libxml2-dev \
+          libxslt-dev \
+          libgd-dev \
+          libgeoip-dev
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: ^1.17.7
+
+      - name: Configure environment
+        run: |
+          export LD_LIBRARY_PATH=/usr/local/lib
+          export LIBRARY_PATH=/usr/local/lib
+          export C_INCLUDE_PATH=/usr/local/include
+
+      # Build libcoraza
+      - name: Build libcoraza
+        run: |
+          cd libcoraza-${{ env.libcoraza_version }}
+          ./build.sh
+          ./configure
+          make
+          sudo make install
+
+
+      - name: Configure compilation of dynamic module
+        run: |
+          ls -l
+          cd ${{ github.workspace }}/nginx-${{ matrix.nginx_version }}
+          ./configure \
+          --with-compat \
+          --add-dynamic-module=${{ github.workspace }}/ \
+          --with-cc-opt='-g -O2 -fstack-protector-strong -Wformat -Werror=format-security -fPIC -Wdate-time -D_FORTIFY_SOURCE=2' \
+          --with-ld-opt='-Wl,-Bsymbolic-functions -Wl,-z,relro -Wl,-z,now -fPIC' \
+          --prefix=/usr/share/nginx \
+          --conf-path=/etc/nginx/nginx.conf \
+          --http-log-path=/var/log/nginx/access.log \
+          --error-log-path=/var/log/nginx/error.log \
+          --lock-path=/var/lock/nginx.lock \
+          --pid-path=/run/nginx.pid \
+          --modules-path=/usr/lib/nginx/modules \
+          --http-client-body-temp-path=/var/lib/nginx/body \
+          --http-fastcgi-temp-path=/var/lib/nginx/fastcgi \
+          --http-proxy-temp-path=/var/lib/nginx/proxy \
+          --http-scgi-temp-path=/var/lib/nginx/scgi \
+          --http-uwsgi-temp-path=/var/lib/nginx/uwsgi \
+          --with-debug \
+          --with-http_ssl_module \
+          --with-http_stub_status_module \
+          --with-http_realip_module \
+          --with-http_auth_request_module \
+          --with-http_v2_module \
+          --with-http_dav_module \
+          --with-http_slice_module \
+          --with-threads \
+          --with-http_addition_module \
+          --with-http_geoip_module=dynamic \
+          --with-http_gunzip_module \
+          --with-http_gzip_static_module \
+          --with-http_image_filter_module=dynamic \
+          --with-http_sub_module \
+          --with-http_xslt_module=dynamic \
+          --with-stream=dynamic
+
+      - name: Compile dynamic module  
+        run: |  
+          cd ${{ github.workspace }}/nginx-${{ matrix.nginx_version }}
+          make modules
+
+      - name: Upload a Build Artifact
+        uses: actions/upload-artifact@v2
+        with:
+          # Artifact name
+          name: nginx-coraza-module-nginx-${{ matrix.nginx_version }}-${{ matrix.os }}
+          # A file, directory or wildcard pattern that describes what to upload
+          path: |
+            ${{ github.workspace }}/nginx-${{ matrix.nginx_version }}/objs/ngx_http_coraza_module.so

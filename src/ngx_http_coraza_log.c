@@ -36,38 +36,22 @@ ngx_http_coraza_log_handler(ngx_http_request_t *r)
     ngx_http_coraza_ctx_t   *ctx;
     ngx_http_coraza_conf_t  *mcf;
 
-    //dd("catching a new _log_ phase handler");
-
     mcf = ngx_http_get_module_loc_conf(r, ngx_http_coraza_module);
     if (mcf == NULL || mcf->enable != 1)
     {
-        //dd("ModSecurity not enabled... returning");
         return NGX_OK;
     }
 
-    /*
-    if (r->method != NGX_HTTP_GET &&
-        r->method != NGX_HTTP_POST && r->method != NGX_HTTP_HEAD) {
-        dd("ModSecurity is not ready to deal with anything different from " \
-            "POST, GET or HEAD");
-        return NGX_OK;
-    }
-    */
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
-    //dd("recovering ctx: %p", ctx);
-
     if (ctx == NULL) {
-        //dd("something really bad happened here. returning NGX_ERROR");
         return NGX_ERROR;
     }
 
     if (ctx->logged) {
-        //dd("already logged earlier");
         return NGX_OK;
     }
 
-    //dd("calling coraza_process_logging for %p", ctx);
     coraza_process_logging(ctx->coraza_transaction);
 
     return NGX_OK;

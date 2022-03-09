@@ -1,39 +1,24 @@
+[![Compile module](https://github.com/corazawaf/coraza-nginx/actions/workflows/build.yml/badge.svg)](https://github.com/corazawaf/coraza-nginx/actions/workflows/build.yml)
 
-<img src="https://github.com/SpiderLabs/ModSecurity/raw/v3/master/others/modsec.png" width="50%">
+# Coraza NGINX Connector
 
-[![Build Status](https://travis-ci.org/SpiderLabs/ModSecurity-nginx.svg?branch=master)](https://travis-ci.org/SpiderLabs/ModSecurity-nginx)
-[![](https://raw.githubusercontent.com/ZenHubIO/support/master/zenhub-badge.png)](https://zenhub.com)
-
-
-The ModSecurity-nginx connector is the connection point between nginx and libmodsecurity (ModSecurity v3). Said another way, this project provides a communication channel between nginx and libmodsecurity. This connector is required to use LibModSecurity with nginx. 
-
-The ModSecurity-nginx connector takes the form of an nginx module. The module simply serves as a layer of communication between nginx and ModSecurity.
-
-Notice that this project depends on libmodsecurity rather than ModSecurity (version 2.9 or less).
-
-### What is the difference between this project and the old ModSecurity add-on for nginx?
-
-The old version uses ModSecurity standalone, which is a wrapper for
-Apache internals to link ModSecurity to nginx. This current version is closer
-to nginx, consuming the new libmodsecurity which is no longer dependent on
-Apache. As a result, this current version has less dependencies, fewer bugs, and is faster. In addition, some new functionality is also provided - such as the possibility of use of global rules configuration with per directory/location customizations (e.g. SecRuleRemoveById).
-
+The coraza-nginx connector is the connection point between nginx and libcoraza. The module simply serves as a layer of communication between nginx and Coraza.
 
 # Compilation
 
-Before compile this software make sure that you have libmodsecurity installed.
-You can download it from the [ModSecurity git repository](https://github.com/SpiderLabs/ModSecurity). For information pertaining to the compilation and installation of libmodsecurity please consult the documentation provided along with it.
+Before compile this software make sure that you have libcoraza installed.
+You can download it from the [libcoraza git repository](https://github.com/corazawaf/libcoraza). For information pertaining to the compilation and installation of libcoraza please consult the documentation provided along with it.
 
-With libmodsecurity installed, you can proceed with the installation of the ModSecurity-nginx connector, which follows the nginx third-party module installation procedure. From the nginx source directory:
+With libcoraza installed, you can proceed with the installation of the coraza-nginx connector, which follows the nginx third-party module installation procedure. From the nginx source directory:
 
 ```
-./configure --add-module=/path/to/ModSecurity-nginx
+./configure --add-module=/path/to/coraza-nginx
 ```
 
 Or, to build a dynamic module:
 
 ```
-./configure --add-dynamic-module=/path/to/ModSecurity-nginx --with-compat
+./configure --add-dynamic-module=/path/to/coraza-nginx --with-compat
 ```
 
 Note that when building a dynamic module, your nginx source version
@@ -45,83 +30,83 @@ http://wiki.nginx.org/3rdPartyModules
 
 # Usage
 
-ModSecurity for nginx extends your nginx configuration directives.
+coraza for nginx extends your nginx configuration directives.
 It adds four new directives and they are:
 
-modsecurity
------------
-**syntax:** *modsecurity on | off*
+coraza
+------
+**syntax:** *coraza on | off*
 
 **context:** *http, server, location*
 
 **default:** *off*
 
-Turns on or off ModSecurity functionality.
+Turns on or off Coraza functionality.
 Note that this configuration directive is no longer related to the SecRule state.
 Instead, it now serves solely as an nginx flag to enable or disable the module.
 
-modsecurity_rules_file
+coraza_rules_file
 ----------------------
-**syntax:** *modsecurity_rules_file &lt;path to rules file&gt;*
+**syntax:** *coraza_rules_file &lt;path to rules file&gt;*
 
 **context:** *http, server, location*
 
 **default:** *no*
 
-Specifies the location of the modsecurity configuration file, e.g.:
+Specifies the location of the coraza configuration file, e.g.:
 
 ```nginx
 server {
-    modsecurity on;
+    coraza on;
     location / {
         root /var/www/html;
-        modsecurity_rules_file /etc/my_modsecurity_rules.conf;
+        coraza_rules_file /etc/my_coraza_rules.conf;
     }
 }
 ```
 
-modsecurity_rules_remote
+coraza_rules_remote
 ------------------------
-**syntax:** *modsecurity_rules_remote &lt;key&gt; &lt;URL to rules&gt;*
+**syntax:** *coraza_rules_remote &lt;key&gt; &lt;URL to rules&gt;*
 
 **context:** *http, server, location*
 
 **default:** *no*
 
-Specifies from where (on the internet) a modsecurity configuration file will be downloaded.
+Specifies from where (on the internet) a coraza configuration file will be downloaded.
 It also specifies the key that will be used to authenticate to that server:
 
 ```nginx
 server {
-    modsecurity on;
+    coraza on;
     location / {
         root /var/www/html;
-        modsecurity_rules_remote my-server-key https://my-own-server/rules/download;
+        coraza_rules_remote my-server-key https://my-own-server/rules/download;
     }
 }
 ```
 
-modsecurity_rules
+coraza_rules
 -----------------
-**syntax:** *modsecurity_rules &lt;modsecurity rule&gt;*
+**syntax:** *coraza_rules &lt;coraza rule&gt;*
 
 **context:** *http, server, location*
 
 **default:** *no*
 
-Allows for the direct inclusion of a ModSecurity rule into the nginx configuration.
+Allows for the direct inclusion of a coraza rule into the nginx configuration.
 The following example is loading rules from a file and injecting specific configurations per directory/alias:
 
 ```nginx
 server {
-    modsecurity on;
+    coraza on;
     location / {
         root /var/www/html;
-        modsecurity_rules_file /etc/my_modsecurity_rules.conf;
+        coraza_rules_file /etc/my_coraza_rules.conf;
     }
     location /ops {
         root /var/www/html/opts;
-        modsecurity_rules '
+        coraza_rules '
           SecRuleEngine On
           SecDebugLog /tmp/modsec_debug.log
           SecDebugLogLevel 9
@@ -131,9 +116,9 @@ server {
 }
 ```
 
-modsecurity_transaction_id
+coraza_transaction_id
 --------------------------
-**syntax:** *modsecurity_transaction_id string*
+**syntax:** *coraza_transaction_id string*
 
 **context:** *http, server, location*
 
@@ -149,8 +134,8 @@ log_format extended '$remote_addr - $remote_user [$time_local] '
 
 server {
     server_name host1;
-    modsecurity on;
-    modsecurity_transaction_id "host1-$request_id";
+    coraza on;
+    coraza_transaction_id "host1-$request_id";
     access_log logs/host1-access.log extended;
     error_log logs/host1-error.log;
     location / {
@@ -160,8 +145,8 @@ server {
 
 server {
     server_name host2;
-    modsecurity on;
-    modsecurity_transaction_id "host2-$request_id";
+    coraza on;
+    coraza_transaction_id "host2-$request_id";
     access_log logs/host2-access.log extended;
     error_log logs/host2-error.log;
     location / {
@@ -170,7 +155,7 @@ server {
 }
 ```
 
-Using a combination of log_format and modsecurity_transaction_id you will
+Using a combination of log_format and coraza_transaction_id you will
 be able to find correlations between access log and error log entries
 using the same unique identificator.
 
@@ -202,7 +187,7 @@ Within our code there are various items marked as TODO or FIXME that may need
 your attention. Check the list of items by performing a grep:
 
 ```
-$ cd /path/to/modsecurity-nginx
+$ cd /path/to/coraza-nginx
 $ egrep -Rin "TODO|FIXME" -R *
 ```
 
@@ -219,7 +204,7 @@ To use those tests, make sure you have the Perl utility prove (part of Perl 5)
 and proceed with the following commands:
 
 ```
-$ cp /path/to/ModSecurity-nginx/tests/* /path/to/nginx/test/repository
+$ cp /path/to/coraza-nginx/tests/* /path/to/nginx/test/repository
 $ cd /path/to/nginx/test/repository
 $ TEST_NGINX_BINARY=/path/to/your/nginx prove .
 ```
@@ -238,18 +223,18 @@ please check the nginx debugging information: http://wiki.nginx.org/Debugging
 ## Reporting Issues
 
 If you are facing a configuration issue or if something is not working as you
-expect it to be, please use ModSecurity user’s mailing list. Issues on GitHub
+expect it to be, please use coraza user’s mailing list. Issues on GitHub
 are also welcome, but we prefer to have users question on the mailing list first,
 where you can reach an entire community. Also don’t forget to look for an
 existing issue before opening a new one.
 
 Lastly, If you are planning to open an issue on GitHub, please don’t forget to tell us the
-version of your libmodsecurity and the version of the nginx connector you are running.
+version of your libcoraza and the version of the nginx connector you are running.
 
 ### Security issue
 
 Please do not publicly report any security issue. Instead, contact us at:
-security@modsecurity.org to report the issue. Once the problem is fixed we will provide you with credit for the discovery.
+security@coraza.org to report the issue. Once the problem is fixed we will provide you with credit for the discovery.
 
 
 ## Feature Request

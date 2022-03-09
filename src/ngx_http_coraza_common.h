@@ -21,9 +21,7 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
-
-#include <coraza_core.h>
-
+#include <coraza/core.h>
 
 
 /**
@@ -53,7 +51,7 @@
     CORAZA_NGINX_MINOR CORAZA_NGINX_PATCHLEVEL \
     CORAZA_NGINX_TAG_NUM
 
-#define CORAZA_NGINX_WHOAMI "ModSecurity-nginx v" \
+#define CORAZA_NGINX_WHOAMI "coraza-nginx v" \
     CORAZA_NGINX_VERSION
 
 typedef struct {
