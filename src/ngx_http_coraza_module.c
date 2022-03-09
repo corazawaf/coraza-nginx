@@ -39,32 +39,6 @@ static char *ngx_http_coraza_merge_conf(ngx_conf_t *cf, void *parent, void *chil
 static void ngx_http_coraza_cleanup_instance(void *data);
 static void ngx_http_coraza_cleanup_rules(void *data);
 
-/*
- * ngx_string's are not null-terminated in common case, so we need to convert
- * them into null-terminated ones before passing to CORAZA
- */
-ngx_inline ngx_int_t ngx_str_to_char(ngx_str_t a, char* res, ngx_pool_t *p)
-{
-	char *res = NULL;
-
-	if (a.len == 0)
-	{
-		return NGX_OK;
-	}
-
-	str = ngx_pnalloc(p, a.len + 1);
-	if (str == NULL)
-	{
-		dd("failed to allocate memory to convert space ngx_string to C string");
-		/* We already returned NULL for an empty string, so return -1 here to indicate allocation error */
-		return (char *)-1;
-	}
-	ngx_memcpy(str, a.data, a.len);
-	str[a.len] = '\0';
-
-	return str;
-}
-
 ngx_inline ngx_int_t
 ngx_http_coraza_process_intervention(coraza_transaction_t *transaction, ngx_http_request_t *r, ngx_int_t early_log)
 {
@@ -559,7 +533,7 @@ ngx_http_coraza_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 #if defined(CORAZA_DDEBUG) && (CORAZA_DDEBUG)
 	ngx_http_core_loc_conf_t *clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
 	dd("merging loc config [%s] - parent: '%p' child: '%p'",
-		ngx_str_to_char(clcf->name, cf->pool), parent,
+		clcf->name.data, parent,
 		child);
 #endif
 	int rules;

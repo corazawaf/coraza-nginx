@@ -107,7 +107,6 @@ extern ngx_module_t ngx_http_coraza_module;
 /* ngx_http_coraza_module.c */
 ngx_int_t ngx_http_coraza_process_intervention (coraza_transaction_t *transaction, ngx_http_request_t *r, ngx_int_t early_log);
 ngx_http_coraza_ctx_t *ngx_http_coraza_create_ctx(ngx_http_request_t *r);
-char *ngx_str_to_char(ngx_str_t a, ngx_pool_t *p);
 
 /* ngx_http_coraza_body_filter.c */
 ngx_int_t ngx_http_coraza_body_filter_init(void);
