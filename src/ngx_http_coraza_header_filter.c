@@ -61,36 +61,6 @@ ngx_http_coraza_header_out_t ngx_http_coraza_headers_out[] = {
             0,
             ngx_http_coraza_resolv_header_vary },
 
-#if 0
-    { ngx_string("Content-Encoding"),
-            offsetof(ngx_http_headers_out_t, content_encoding),
-            NGX_TABLE },
-
-    { ngx_string("Cache-Control"),
-            offsetof(ngx_http_headers_out_t, cache_control),
-            NGX_ARRAY },
-
-    { ngx_string("Location"),
-            offsetof(ngx_http_headers_out_t, location),
-            NGX_TABLE },
-
-    { ngx_string("Content-Range"),
-            offsetof(ngx_http_headers_out_t, content_range),
-            NGX_TABLE },
-
-    { ngx_string("Accept-Ranges"),
-            offsetof(ngx_http_headers_out_t, accept_ranges),
-            NGX_TABLE },
-
-    returiders_out[i].name 1;
-    { ngx_string("WWW-Authenticate"),
-            offsetof(ngx_http_headers_out_t, www_authenticate),
-            NGX_TABLE },
-
-    { ngx_string("Expires"),
-            offsetof(ngx_http_headers_out_t, expires),
-            NGX_TABLE },
-#endif
     { ngx_null_string, 0, 0 }
 };
 
@@ -148,7 +118,7 @@ ngx_http_coraza_resolv_header_date(ngx_http_request_t *r, ngx_str_t name, off_t 
         date.len = h->value.len;
     }
 
-#if defined(MODSECURITY_SANITY_CHECKS) && (MODSECURITY_SANITY_CHECKS)
+#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
     ngx_http_coraza_store_ctx_header(r, &name, &date);
 #endif
 
@@ -175,7 +145,7 @@ ngx_http_coraza_resolv_header_content_length(ngx_http_request_t *r, ngx_str_t na
         value.data = (unsigned char *)buf;
         value.len = strlen(buf);
 
-#if defined(MODSECURITY_SANITY_CHECKS) && (MODSECURITY_SANITY_CHECKS)
+#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
         ngx_http_coraza_store_ctx_header(r, &name, &value);
 #endif
         return coraza_add_response_header(ctx->coraza_transaction,
@@ -199,7 +169,7 @@ ngx_http_coraza_resolv_header_content_type(ngx_http_request_t *r, ngx_str_t name
     if (r->headers_out.content_type.len > 0)
     {
 
-#if defined(MODSECURITY_SANITY_CHECKS) && (MODSECURITY_SANITY_CHECKS)
+#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
         ngx_http_coraza_store_ctx_header(r, &name, &r->headers_out.content_type);
 #endif
 
@@ -232,7 +202,7 @@ ngx_http_coraza_resolv_header_last_modified(ngx_http_request_t *r, ngx_str_t nam
     value.data = buf;
     value.len = (int)(p-buf);
 
-#if defined(MODSECURITY_SANITY_CHECKS) && (MODSECURITY_SANITY_CHECKS)
+#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
     ngx_http_coraza_store_ctx_header(r, &name, &value);
 #endif
 
@@ -268,7 +238,7 @@ ngx_http_coraza_resolv_header_connection(ngx_http_request_t *r, ngx_str_t name, 
             value.data = buf;
             value.len = strlen((char *)buf);
 
-#if defined(MODSECURITY_SANITY_CHECKS) && (MODSECURITY_SANITY_CHECKS)
+#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
             ngx_http_coraza_store_ctx_header(r, &name2, &value);
 #endif
 
@@ -285,7 +255,7 @@ ngx_http_coraza_resolv_header_connection(ngx_http_request_t *r, ngx_str_t name, 
     value.data = (u_char *) connection;
     value.len = strlen(connection);
 
-#if defined(MODSECURITY_SANITY_CHECKS) && (MODSECURITY_SANITY_CHECKS)
+#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
     ngx_http_coraza_store_ctx_header(r, &name, &value);
 #endif
 
@@ -306,7 +276,7 @@ ngx_http_coraza_resolv_header_transfer_encoding(ngx_http_request_t *r, ngx_str_t
 
         ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
-#if defined(MODSECURITY_SANITY_CHECKS) && (MODSECURITY_SANITY_CHECKS)
+#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
         ngx_http_coraza_store_ctx_header(r, &name, &value);
 #endif
 
@@ -333,7 +303,7 @@ ngx_http_coraza_resolv_header_vary(ngx_http_request_t *r, ngx_str_t name, off_t 
 
         ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
-#if defined(MODSECURITY_SANITY_CHECKS) && (MODSECURITY_SANITY_CHECKS)
+#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
         ngx_http_coraza_store_ctx_header(r, &name, &value);
 #endif
 
@@ -437,7 +407,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
             i = 0;
         }
 
-#if defined(MODSECURITY_SANITY_CHECKS) && (MODSECURITY_SANITY_CHECKS)
+#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
         ngx_http_coraza_store_ctx_header(r, &data[i].key, &data[i].value);
 #endif
 

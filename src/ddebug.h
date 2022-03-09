@@ -13,24 +13,24 @@
 #include <ngx_core.h>
 
 /*
- * #undef MODSECURITY_DDEBUG
- * #define MODSECURITY_DDEBUG 1
+ * #undef CORAZA_DDEBUG
+ * #define CORAZA_DDEBUG 1
  */
 
 /*
- * Setting MODSECURITY_SANITY_CHECKS will help you in the debug process. By
- * defining MODSECURITY_SANITY_CHECKS a set of functions will be executed in
- * order to make sure the well behavior of ModSecurity, letting you know (via
+ * Setting CORAZA_SANITY_CHECKS will help you in the debug process. By
+ * defining CORAZA_SANITY_CHECKS a set of functions will be executed in
+ * order to make sure the well behavior of CORAZA, letting you know (via
  * debug_logs) if something unexpected happens.
  *
  * If performance is not a concern, it is safe to keep it set.
  *
  */
-#ifndef MODSECURITY_SANITY_CHECKS
-#define MODSECURITY_SANITY_CHECKS 0
+#ifndef CORAZA_SANITY_CHECKS
+#define CORAZA_SANITY_CHECKS 0
 #endif
 
-#if defined(MODSECURITY_DDEBUG) && (MODSECURITY_DDEBUG)
+#if defined(CORAZA_DDEBUG) && (CORAZA_DDEBUG)
 
 #   if (NGX_HAVE_VARIADIC_MACROS)
 
@@ -67,7 +67,7 @@ static void dd(const char *fmt, ...) {
 
 #endif
 
-#if defined(MODSECURITY_DDEBUG) && (MODSECURITY_DDEBUG)
+#if defined(CORAZA_DDEBUG) && (CORAZA_DDEBUG)
 
 #define dd_check_read_event_handler(r)   \
     dd("r->read_event_handler = %s", \

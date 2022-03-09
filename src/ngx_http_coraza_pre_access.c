@@ -1,5 +1,5 @@
 /*
- * ModSecurity connector for nginx, http://www.modsecurity.org/
+ * CORAZA connector for nginx, http://www.CORAZA.org/
  * Copyright (c) 2015 Trustwave Holdings, Inc. (http://www.trustwave.com/)
  *
  * You may not use this file except in compliance with
@@ -9,12 +9,12 @@
  *
  * If any of the files related to licensing are missing or if you have any
  * other questions related to licensing please contact Trustwave Holdings, Inc.
- * directly using the email address security@modsecurity.org.
+ * directly using the email address security@CORAZA.org.
  *
  */
 
-#ifndef MODSECURITY_DDEBUG
-#define MODSECURITY_DDEBUG 0
+#ifndef CORAZA_DDEBUG
+#define CORAZA_DDEBUG 0
 #endif
 #include "ddebug.h"
 
@@ -52,7 +52,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
     mcf = ngx_http_get_module_loc_conf(r, ngx_http_coraza_module);
     if (mcf == NULL || mcf->enable != 1)
     {
-        dd("ModSecurity not enabled... returning");
+        dd("CORAZA not enabled... returning");
         return NGX_DECLINED;
     }
     /*
@@ -61,7 +61,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
      *
     if (r->method != NGX_HTTP_GET &&
         r->method != NGX_HTTP_POST && r->method != NGX_HTTP_HEAD) {
-        dd("ModSecurity is not ready to deal with anything different from " \
+        dd("CORAZA is not ready to deal with anything different from " \
             "POST, GET or HEAD");
         return NGX_DECLINED;
     }
@@ -150,7 +150,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
          *
          * Notice that we are waiting for the full request body to
          * start to process it, it may not be necessary. We may send
-         * the chunks to ModSecurity while nginx keep calling this
+         * the chunks to CORAZA while nginx keep calling this
          * function.
          */
 
@@ -188,7 +188,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
 /* XXX: chains are processed one-by-one, maybe worth to pass all chains and then call intervention() ? */
 
             /**
-             * ModSecurity may perform stream inspection on this buffer,
+             * CORAZA may perform stream inspection on this buffer,
              * it may ask for a intervention in consequence of that.
              *
              */
@@ -199,9 +199,9 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
         }
 
         /**
-         * At this point, all the request body was sent to ModSecurity
+         * At this point, all the request body was sent to CORAZA
          * and we want to make sure that all the request body inspection
-         * happened; consequently we have to check if ModSecurity have
+         * happened; consequently we have to check if CORAZA have
          * returned any kind of intervention.
          */
 

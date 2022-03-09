@@ -13,8 +13,8 @@
  *
  */
 
-#ifndef MODSECURITY_DDEBUG
-#define MODSECURITY_DDEBUG 0
+#ifndef CORAZA_DDEBUG
+#define CORAZA_DDEBUG 0
 #endif
 #include "ddebug.h"
 
@@ -28,18 +28,9 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
 
     mcf = ngx_http_get_module_loc_conf(r, ngx_http_coraza_module);
     if (mcf == NULL || mcf->enable != 1) {
-        dd("ModSecurity not enabled... returning");
+        dd("coraza not enabled... returning");
         return NGX_DECLINED;
     }
-
-    /*
-    if (r->method != NGX_HTTP_GET &&
-        r->method != NGX_HTTP_POST && r->method != NGX_HTTP_HEAD) {
-        dd("ModSecurity is not ready to deal with anything different from " \
-            "POST, GET or HEAD");
-        return NGX_DECLINED;
-    }
-    */
 
     dd("catching a new _rewrite_ phase handler");
 
