@@ -66,7 +66,7 @@ ngx_inline char *ngx_str_to_char(ngx_str_t a, ngx_pool_t *p)
 }
 
 ngx_inline int
-ngx_http_coraza_process_intervention(coraza_transaction_t *transaction, ngx_http_request_t *r, ngx_int_t early_log)
+ngx_http_coraza_process_intervention(coraza_transaction_t transaction, ngx_http_request_t *r, ngx_int_t early_log)
 {
 	char *log = NULL;
 	coraza_intervention_t *intervention;
@@ -171,7 +171,7 @@ void ngx_http_coraza_cleanup(void *data)
 
 	ctx = (ngx_http_coraza_ctx_t *)data;
 
-	coraza_transaction_free(ctx->coraza_transaction);
+	coraza_free_transaction(ctx->coraza_transaction);
 }
 
 ngx_inline ngx_http_coraza_ctx_t *
@@ -201,11 +201,11 @@ ngx_http_coraza_create_ctx(ngx_http_request_t *r)
 		{
 			return NGX_CONF_ERROR;
 		}
-		ctx->coraza_transaction = coraza_new_transaction_with_id(mmcf->waf, (char *)s.data, r->connection->log);
+		ctx->coraza_transaction = coraza_new_transaction_with_id(mmcf->waf, (char *)s.data);
 	}
 	else
 	{
-		ctx->coraza_transaction = coraza_new_transaction(mmcf->waf, r->connection->log);
+		ctx->coraza_transaction = coraza_new_transaction(mmcf->waf);
 	}
 
 	dd("transaction created");
@@ -321,25 +321,25 @@ char *ngx_conf_set_transaction_id(ngx_conf_t *cf, ngx_command_t *cmd, void *conf
 }
 
 static ngx_command_t ngx_http_coraza_commands[] = {
-	{ngx_string("CORAZA"),
+	{ngx_string("coraza"),
 	 NGX_HTTP_LOC_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_MAIN_CONF | NGX_CONF_FLAG,
 	 ngx_conf_set_flag_slot,
 	 NGX_HTTP_LOC_CONF_OFFSET,
 	 offsetof(ngx_http_coraza_conf_t, enable),
 	 NULL},
-	{ngx_string("CORAZA_rules"),
+	{ngx_string("coraza_rules"),
 	 NGX_HTTP_LOC_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_MAIN_CONF | NGX_CONF_TAKE1,
 	 ngx_conf_set_rules,
 	 NGX_HTTP_LOC_CONF_OFFSET,
 	 offsetof(ngx_http_coraza_conf_t, enable),
 	 NULL},
-	{ngx_string("CORAZA_rules_file"),
+	{ngx_string("coraza_rules_file"),
 	 NGX_HTTP_LOC_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_MAIN_CONF | NGX_CONF_TAKE1,
 	 ngx_conf_set_rules_file,
 	 NGX_HTTP_LOC_CONF_OFFSET,
 	 offsetof(ngx_http_coraza_conf_t, enable),
 	 NULL},
-	{ngx_string("CORAZA_transaction_id"),
+	{ngx_string("coraza_transaction_id"),
 	 NGX_HTTP_LOC_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_MAIN_CONF | NGX_CONF_1MORE,
 	 ngx_conf_set_transaction_id,
 	 NGX_HTTP_LOC_CONF_OFFSET,
@@ -489,16 +489,15 @@ ngx_http_coraza_create_main_conf(ngx_conf_t *cf)
 
 	/* Create our CORAZA instance */
 	conf->waf = coraza_new_waf();
-	if (conf->waf == NULL)
+	if (conf->waf == 0)
 	{
 		dd("failed to create the CORAZA instance");
 		return NGX_CONF_ERROR;
 	}
 
 	/* Provide our connector information to LibCORAZA */
-	// TODO TODO TODO TODO
-	// msc_set_connector_info(conf->waf, CORAZA_NGINX_WHOAMI);
-	// msc_set_log_cb(conf->waf, ngx_http_coraza_log);
+	// coraza_set_connector_info(conf->waf, CORAZA_NGINX_WHOAMI);
+	coraza_set_log_cb(conf->waf, (coraza_log_cb) ngx_http_coraza_log);
 
 	dd("main conf created at: '%p', instance is: '%p'", conf, conf->waf);
 

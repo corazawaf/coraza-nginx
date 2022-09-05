@@ -12,8 +12,6 @@ ngx_addon_name="ngx_http_coraza_module"
 coraza_dependency="ngx_http_postpone_filter_module \
                         ngx_http_ssi_filter_module \
                         ngx_http_charset_filter_module \
-                        ngx_http_xslt_filter_module \
-                        ngx_http_image_filter_module \
                         ngx_http_sub_filter_module \
                         ngx_http_addition_filter_module \
                         ngx_http_gunzip_filter_module \
@@ -35,8 +33,8 @@ if test -n "$ngx_module_link"; then
 	ngx_module_deps="$ngx_addon_dir/src/ddebug.h \
             $ngx_addon_dir/src/ngx_http_coraza_common.h \
             "
-        ngx_module_libs="-lcorazacore"
-        ngx_module_incs="-I /usr/local/coraza/include"
+        ngx_module_libs="-lcoraza"
+        ngx_module_incs="-L/usr/local/lib"
 
         ngx_module_order="ngx_http_chunked_filter_module \
                           ngx_http_v2_filter_module \
@@ -47,8 +45,8 @@ if test -n "$ngx_module_link"; then
 
 	. auto/module
 else
-	CFLAGS="-I /usr/local/coraza/include $CFLAGS"
-	NGX_LD_OPT="-lcorazacore $NGX_LD_OPT"
+	CFLAGS="-I /usr/local/include $CFLAGS"
+	NGX_LD_OPT="-lcoraza $NGX_LD_OPT"
 
 	CORE_INCS="$CORE_INCS $ngx_feature_path"
 	CORE_LIBS="$CORE_LIBS $ngx_feature_libs"

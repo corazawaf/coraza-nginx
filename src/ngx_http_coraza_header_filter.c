@@ -1,6 +1,7 @@
 /*
- * ModSecurity connector for nginx, http://www.modsecurity.org/
- * Copyright (c) 2015 Trustwave Holdings, Inc. (http://www.trustwave.com/)
+ * Coraza connector for nginx, http://www.modsecurity.org/
+ * Copyright (c) 2022 Coraza author and contributors (https://www.coraza.io/)
+ * Based on ModSecurity connector for nginx, http://www.modsecurity.org/
  *
  * You may not use this file except in compliance with
  * the License.  You may obtain a copy of the License at

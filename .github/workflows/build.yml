@@ -16,7 +16,7 @@ jobs:
       libcoraza_version: master
     strategy:
       matrix:
-        nginx_version: ['1.21.2']
+        nginx_version: ['1.22.0']
         # The type of runner that the job will run on
         os: [ubuntu-20.04]
 

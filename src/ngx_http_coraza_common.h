@@ -21,7 +21,7 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
-#include <coraza/core.h>
+#include <coraza/coraza.h>
 
 
 /**
@@ -62,7 +62,7 @@ typedef struct {
 
 typedef struct {
     ngx_http_request_t *r;
-    coraza_transaction_t *coraza_transaction;
+    coraza_transaction_t coraza_transaction;
     coraza_intervention_t *delayed_intervention;
 
     unsigned waiting_more_body:1;
@@ -75,7 +75,7 @@ typedef struct {
 
 typedef struct {
     void                      *pool;
-    coraza_waf_t               *waf;
+    coraza_waf_t               waf;
     ngx_uint_t                 rules_inline;
     ngx_uint_t                 rules_file;
     ngx_uint_t                 rules_remote;
@@ -85,7 +85,7 @@ typedef struct {
 typedef struct {
     void                      *pool;
     /* RulesSet or Rules */
-    coraza_waf_t *waf;
+    coraza_waf_t waf;
 
     ngx_flag_t                 enable;
 
@@ -105,7 +105,7 @@ typedef struct {
 extern ngx_module_t ngx_http_coraza_module;
 
 /* ngx_http_coraza_module.c */
-int ngx_http_coraza_process_intervention (coraza_transaction_t *transaction, ngx_http_request_t *r, ngx_int_t early_log);
+int ngx_http_coraza_process_intervention (coraza_transaction_t transaction, ngx_http_request_t *r, ngx_int_t early_log);
 ngx_http_coraza_ctx_t *ngx_http_coraza_create_ctx(ngx_http_request_t *r);
 char *ngx_str_to_char(ngx_str_t a, ngx_pool_t *p);
 
