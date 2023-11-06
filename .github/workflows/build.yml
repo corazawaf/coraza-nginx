@@ -16,7 +16,7 @@ jobs:
       libcoraza_version: master
     strategy:
       matrix:
-        nginx_version: ['1.22.0']
+        nginx_version: ['1.24.0']
         # The type of runner that the job will run on
         os: [ubuntu-20.04]
 
@@ -67,9 +67,9 @@ jobs:
           libgeoip-dev
 
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v4
         with:
-          go-version: ^1.17.7
+          go-version: ^1.19.x
 
       - name: Configure environment
         run: |

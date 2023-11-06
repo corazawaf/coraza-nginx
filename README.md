@@ -108,7 +108,7 @@ server {
         root /var/www/html/opts;
         coraza_rules '
           SecRuleEngine On
-          SecDebugLog /tmp/modsec_debug.log
+          SecDebugLog /tmp/coraza_debug.log
           SecDebugLogLevel 9
           SecRuleRemoveById 10
         ';

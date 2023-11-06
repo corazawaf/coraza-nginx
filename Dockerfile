@@ -13,13 +13,10 @@ RUN set -eux; \
     bash \
     make
 
-COPY ./libcoraza /tmp/master
-
 RUN set -eux; \
-    #wget https://github.com/corazawaf/libcoraza/tarball/master -O /tmp/master; \
-    #tar -xvf /tmp/master; \
-    #cd corazawaf-libcoraza-*; \
-    cd /tmp/master; \
+    wget https://github.com/corazawaf/libcoraza/tarball/master -O /tmp/master; \
+    tar -xvf /tmp/master; \
+    cd corazawaf-libcoraza-*; \
     ./build.sh; \
     ./configure; \
     make; \
@@ -28,10 +25,8 @@ RUN set -eux; \
 FROM nginx:stable as ngx-coraza
 
 COPY --from=go-builder /usr/local/include/coraza /usr/local/include/coraza
-COPY --from=go-builder /usr/local/lib/libcorazacore.a /usr/local/lib
-COPY --from=go-builder /usr/local/lib/libcorazautils.a /usr/local/lib
-COPY --from=go-builder /usr/local/lib/libcorazacore.so /usr/local/lib
-COPY --from=go-builder /usr/local/lib/libcorazautils.so /usr/local/lib
+COPY --from=go-builder /usr/local/lib/libcoraza.a /usr/local/lib
+COPY --from=go-builder /usr/local/lib/libcoraza.so /usr/local/lib
 
 # For latest build deps, see https://github.com/nginxinc/docker-nginx/blob/master/mainline/alpine/Dockerfile
 RUN set -eux; \
@@ -70,8 +65,7 @@ RUN sed -i -e "s|events {|load_module \"/usr/lib/nginx/modules/ngx_http_coraza_m
 
 COPY ./coraza.conf /etc/nginx/conf.d/coraza.conf
 COPY --from=ngx-coraza /usr/lib/nginx/modules/ /usr/lib/nginx/modules/
-COPY --from=go-builder /usr/local/lib/libcorazacore.so /usr/local/lib
-COPY --from=go-builder /usr/local/lib/libcorazautils.so /usr/local/lib
+COPY --from=go-builder /usr/local/lib/libcoraza.so /usr/local/lib
 
 RUN ldconfig -v
 
@@ -88,4 +82,3 @@ RUN set -eux; \
     export TEST_NGINX_GLOBALS="load_module \"/usr/lib/nginx/modules/ngx_http_coraza_module.so\";"; \
     prove . -t coraza*.t
 
->>>>>>> db83d99 (fix error)
