@@ -19,7 +19,7 @@ coraza_dependency="ngx_http_postpone_filter_module \
                    ngx_http_gunzip_filter_module \
                    ngx_http_userid_filter_module \
                    ngx_http_headers_filter_module \
-                   ngx_http_copy_filter_module"
+                   ngx_http_copy_filter_module";
 
 
 if test -n "$ngx_module_link"; then
@@ -31,11 +31,11 @@ if test -n "$ngx_module_link"; then
                      $ngx_addon_dir/src/ngx_http_coraza_body_filter.c \
                      $ngx_addon_dir/src/ngx_http_coraza_log.c \
                      $ngx_addon_dir/src/ngx_http_coraza_rewrite.c \
-                     $ngx_addon_dir/src/ngx_http_coraza_utils.c \
-                     "
-	ngx_module_deps="$ngx_addon_dir/src/ddebug.h \
-        ngx_module_libs="-lcoraza"
-        ngx_module_incs="-L/usr/local/lib"
+                     $ngx_addon_dir/src/ngx_http_coraza_utils.c";
+
+	ngx_module_deps="$ngx_addon_dir/src/ddebug.h";
+    ngx_module_libs="-lcoraza"
+    ngx_module_incs="-L/usr/local/lib"
 
     ngx_module_order="ngx_http_chunked_filter_module \
                       ngx_http_v2_filter_module \
@@ -60,11 +60,9 @@ else
                     $ngx_addon_dir/src/ngx_http_coraza_body_filter.c \
                     $ngx_addon_dir/src/ngx_http_coraza_log.c \
                     $ngx_addon_dir/src/ngx_http_coraza_rewrite.c \
-                    $ngx_addon_dir/src/ngx_http_coraza_utils.c \
-                    "
+                    $ngx_addon_dir/src/ngx_http_coraza_utils.c";
 
 	NGX_ADDON_DEPS="$NGX_ADDON_DEPS \
                     $ngx_addon_dir/src/ddebug.h \
-                    $ngx_addon_dir/src/ngx_http_coraza_common.h \
-                    "
+                    $ngx_addon_dir/src/ngx_http_coraza_common.h";
 fi
