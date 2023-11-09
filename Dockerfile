@@ -1,4 +1,4 @@
-FROM golang as go-builder
+FROM --platform=$BUILDPLATFORM golang as go-builder
 
 ARG libcoraza_version=master
 
@@ -51,12 +51,13 @@ RUN set -eux; \
     curl "http://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o - | tar zxC /usr/src -f -;
     # Reuse same cli arguments as the nginx:alpine image used to build
 
-RUN CONFARGS=$(nginx -V 2>&1 | sed -n -e 's/^.*arguments: //p');\
+RUN set -eux; \
+    CONFARGS=$(nginx -V 2>&1 | sed -n -e 's/^.*arguments: //p');\
     cd /usr/src/nginx-$NGINX_VERSION; \
     ./configure --with-compat "$CONFARGS" --add-dynamic-module=/usr/src/coraza-nginx; \
     make modules; \
     mkdir -p /usr/lib/nginx/modules; \
-    find objs/*.so -print; \    
+    find objs/*.so -print; \
     cp objs/ngx_*.so /usr/lib/nginx/modules
     
 FROM nginx:stable
