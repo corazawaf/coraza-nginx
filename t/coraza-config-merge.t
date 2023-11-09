@@ -2,7 +2,7 @@
 
 # (C) Andrei Belov
 
-# Tests for ModSecurity-nginx connector (configuration merge).
+# Tests for Coraza-nginx connector (configuration merge).
 
 ###############################################################################
 
@@ -36,8 +36,8 @@ events {
 http {
     %%TEST_GLOBALS_HTTP%%
 
-    modsecurity on;
-    modsecurity_rules '
+    coraza on;
+    coraza_rules '
         SecRuleEngine On
         SecRequestBodyAccess On
         SecRequestBodyLimit 128
@@ -53,38 +53,38 @@ http {
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
         }
 
-        location /modsec-disabled {
-            modsecurity_rules '
+        location /coraza-disabled {
+            coraza_rules '
                 SecRuleEngine Off
             ';
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
         }
 
         location /nobodyaccess {
-            modsecurity_rules '
+            coraza_rules '
                 SecRequestBodyAccess Off
             ';
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
         }
 
         location /bodylimitprocesspartial {
-            modsecurity_rules '
+            coraza_rules '
                 SecRequestBodyLimitAction ProcessPartial
             ';
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
         }
 
         location /bodylimitincreased {
-            modsecurity_rules '
+            coraza_rules '
                 SecRequestBodyLimit 512
             ';
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
         }
 
         location /server {
-            modsecurity off;
+            coraza off;
 
-            location /server/modsec-disabled {
+            location /server/coraza-disabled {
                 proxy_pass http://127.0.0.1:%%PORT_8082%%;
             }
 
@@ -105,7 +105,7 @@ http {
     server {
         listen 127.0.0.1:%%PORT_8082%%;
 
-        modsecurity_rules '
+        coraza_rules '
                 SecRuleEngine Off
         ';
 
@@ -117,7 +117,7 @@ http {
     server {
         listen 127.0.0.1:%%PORT_8083%%;
 
-        modsecurity_rules '
+        coraza_rules '
                 SecRequestBodyAccess Off
         ';
 
@@ -129,7 +129,7 @@ http {
     server {
         listen 127.0.0.1:%%PORT_8084%%;
 
-        modsecurity_rules '
+        coraza_rules '
                 SecRequestBodyLimitAction ProcessPartial
         ';
 
@@ -141,7 +141,7 @@ http {
     server {
         listen 127.0.0.1:%%PORT_8085%%;
 
-        modsecurity_rules '
+        coraza_rules '
                 SecRequestBodyLimit 512
         ';
 
@@ -162,12 +162,12 @@ $t->plan(10);
 like(http_get_body('/', 'GOOD BODY'), qr/TEST-OK-IF-YOU-SEE-THIS/, "http level defaults, pass");
 like(http_get_body('/', 'VERY BAD BODY'), qr/^HTTP.*403/, "http level defaults, block");
 
-like(http_get_body('/modsec-disabled', 'VERY BAD BODY'), qr/TEST-OK-IF-YOU-SEE-THIS/, "location override for SecRuleEngine, pass");
+like(http_get_body('/coraza-disabled', 'VERY BAD BODY'), qr/TEST-OK-IF-YOU-SEE-THIS/, "location override for SecRuleEngine, pass");
 like(http_get_body('/nobodyaccess', 'VERY BAD BODY'), qr/TEST-OK-IF-YOU-SEE-THIS/, "location override for SecRequestBodyAccess, pass");
 like(http_get_body('/bodylimitprocesspartial', 'BODY' x 33), qr/TEST-OK-IF-YOU-SEE-THIS/, "location override for SecRequestBodyLimitAction, pass");
 like(http_get_body('/bodylimitincreased', 'BODY' x 64), qr/TEST-OK-IF-YOU-SEE-THIS/, "location override for SecRequestBodyLimit, pass");
 
-like(http_get_body('/server/modsec-disabled', 'VERY BAD BODY'), qr/TEST-OK-IF-YOU-SEE-THIS/, "server override for SecRuleEngine, pass");
+like(http_get_body('/server/coraza-disabled', 'VERY BAD BODY'), qr/TEST-OK-IF-YOU-SEE-THIS/, "server override for SecRuleEngine, pass");
 like(http_get_body('/server/nobodyaccess', 'VERY BAD BODY'), qr/TEST-OK-IF-YOU-SEE-THIS/, "server override for SecRequestBodyAccess, pass");
 like(http_get_body('/server/bodylimitprocesspartial', 'BODY' x 33), qr/TEST-OK-IF-YOU-SEE-THIS/, "server override for SecRequestBodyLimitAction, pass");
 like(http_get_body('/server/bodylimitincreased', 'BODY' x 64), qr/TEST-OK-IF-YOU-SEE-THIS/, "server override for SecRequestBodyLimit, pass");

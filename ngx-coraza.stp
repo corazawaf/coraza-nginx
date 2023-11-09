@@ -6,12 +6,12 @@ global rules_phase
 
 
 # Rules
-probe process("/usr/local/lib/libmodsecurity.so.3").function("evaluate@rule.cc*")
+probe process("/usr/local/lib/libcoraza.so").function("evaluate@rule.cc*")
 {
     begin_rule = gettimeofday_us();
 }
 
-probe process("/usr/local/lib/libmodsecurity.so.3").function("evaluate@rule.cc*").return
+probe process("/usr/local/lib/libcoraza.so").function("evaluate@rule.cc*").return
 {
     elapsed_rule = gettimeofday_us() - begin_rule
     rules[$this->m_ruleId] <<< elapsed_rule

@@ -1,15 +1,10 @@
 /*
- * ModSecurity connector for nginx, http://www.modsecurity.org/
- * Copyright (c) 2015 Trustwave Holdings, Inc. (http://www.trustwave.com/)
+ * Coraza connector for nginx
  *
  * You may not use this file except in compliance with
  * the License.  You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * If any of the files related to licensing are missing or if you have any
- * other questions related to licensing please contact Trustwave Holdings, Inc.
- * directly using the email address security@modsecurity.org.
  *
  */
 
@@ -25,6 +20,12 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
 {
     ngx_http_coraza_ctx_t   *ctx;
     ngx_http_coraza_conf_t  *mcf;
+    ngx_str_t ngx_server_addr;
+    char *client_addr = NULL;
+    char *server_addr = NULL;
+    char *uri = NULL;
+    char *method = NULL;
+    char *http_version = NULL;
 
     mcf = ngx_http_get_module_loc_conf(r, ngx_http_coraza_module);
     if (mcf == NULL || mcf->enable != 1) {
@@ -43,12 +44,9 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
         int ret = 0;
 
         ngx_connection_t *connection = r->connection;
-        /**
-         * FIXME: We may want to use struct sockaddr instead of addr_text.
-         *
-         */
-        ngx_str_t addr_text = connection->addr_text;
 
+        ngx_str_t addr_text = connection->addr_text;
+        
         ctx = ngx_http_coraza_create_ctx(r);
 
         dd("ctx was NULL, creating new context: %p", ctx);
@@ -68,28 +66,31 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
          */
         int client_port = ngx_inet_get_port(connection->sockaddr);
         int server_port = ngx_inet_get_port(connection->local_sockaddr);
-
-        const char *client_addr = ngx_str_to_char(addr_text, r->pool);
-        if (client_addr == (char*)-1) {
-            return NGX_HTTP_INTERNAL_SERVER_ERROR;
-        }
-
-        ngx_str_t s;
+        
         u_char addr[NGX_SOCKADDR_STRLEN];
-        s.len = NGX_SOCKADDR_STRLEN;
-        s.data = addr;
-        if (ngx_connection_local_sockaddr(r->connection, &s, 0) != NGX_OK) {
+        ngx_server_addr.len = NGX_SOCKADDR_STRLEN;
+        ngx_server_addr.data = addr;
+        if (ngx_connection_local_sockaddr(r->connection, &ngx_server_addr, 0) != NGX_OK) {
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
         }
 
-        const char *server_addr = ngx_str_to_char(s, r->pool);
-        if (server_addr == (char*)-1) {
+        if (ngx_str_to_char(addr_text, client_addr, r->pool) != NGX_OK) {
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
         }
 
+        if (ngx_str_to_char(ngx_server_addr, server_addr, r->pool) != NGX_OK) {
+            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        } 
+
+        /* FIXME: addr_text here is an nginx str that might be a path if
+         * this is a unix socket. Because of this, using the socket 
+         * structure might be better
+         */
         ret = coraza_process_connection(ctx->coraza_transaction,
-                                        (char *)client_addr, client_port,
-                                        (char *)server_addr, server_port);
+                                        client_addr,
+                                        client_port,
+                                        server_addr,
+                                        server_port);
         if (ret != 1){
             dd("Was not able to extract connection information.");
         }
@@ -109,7 +110,6 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
             return ret;
         }
 
-        const char *http_version;
         switch (r->http_version) {
             case NGX_HTTP_VERSION_9 :
                 http_version = "0.9";
@@ -130,16 +130,15 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
                 break;
         }
 
-        const char *n_uri = ngx_str_to_char(r->unparsed_uri, r->pool);
-        const char *n_method = ngx_str_to_char(r->method_name, r->pool);
-        if (n_uri == (char*)-1 || n_method == (char*)-1) {
-            return NGX_HTTP_INTERNAL_SERVER_ERROR;
-        }
-        if (n_uri == NULL) {
+        if (ngx_str_to_char(r->unparsed_uri, uri, r->pool) != NGX_OK) {
             dd("uri is of length zero");
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
         }
-        coraza_process_uri(ctx->coraza_transaction, (char *)n_uri, (char *)n_method, (char *)http_version);
+        if (ngx_str_to_char(r->method_name, method, r->pool) != NGX_OK) {
+            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        }
+        
+        coraza_process_uri(ctx->coraza_transaction, uri, method, http_version);
 
         dd("Processing intervention with the transaction information filled in (uri, method and version)");
         ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 1);
@@ -149,7 +148,7 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
         }
 
         /**
-         * Since incoming request headers are already in place, lets send it to ModSecurity
+         * Since incoming request headers are already in place, lets send it to Coraza
          *
          */
         ngx_list_part_t *part = &r->headers_in.headers.part;
@@ -170,7 +169,7 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
              * By using u_char (utf8_t) I believe nginx is hoping to deal
              * with utf8 strings.
              * Casting those into to unsigned char * in order to pass
-             * it to ModSecurity, it will handle with those later.
+             * it to Coraza, it will handle with those later.
              *
              */
 
@@ -183,7 +182,7 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
         }
 
         /**
-         * Since ModSecurity already knew about all headers, i guess it is safe
+         * Since Coraza already knew about all headers, i guess it is safe
          * to process this information.
          */
 

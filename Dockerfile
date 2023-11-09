@@ -1,56 +1,85 @@
-FROM ubuntu:latest
+FROM --platform=$BUILDPLATFORM golang as go-builder
 
-RUN apt-get update \
-    && apt install -y wget build-essential libpcre++-dev git-core libtool openssl libssl-dev zlib1g-dev\
-    && wget http://nginx.org/download/nginx-1.22.0.tar.gz \
-    && tar -xvzf nginx-1.22.0.tar.gz
-WORKDIR /nginx-1.22.0
+ARG libcoraza_version=master
 
-RUN wget https://go.dev/dl/go1.19.linux-amd64.tar.gz && \
-    tar -C /usr/local -xzf go1.19.linux-amd64.tar.gz
+# For latest build deps, see https://github.com/nginxinc/docker-nginx/blob/master/mainline/alpine/Dockerfile
+RUN set -eux; \
+  apt-get update -qq; \
+  apt-get install -qq --no-install-recommends \
+    autoconf \
+    automake \
+    libtool \
+    gcc \
+    bash \
+    make
 
-ENV PATH="$PATH:/usr/local/go/bin"
-ENV CPPFLAGS="-DPNG_ARM_NEON_OPT=0"
-COPY . coraza
+RUN set -eux; \
+    wget https://github.com/corazawaf/libcoraza/tarball/master -O /tmp/master; \
+    tar -xvf /tmp/master; \
+    cd corazawaf-libcoraza-*; \
+    ./build.sh; \
+    ./configure; \
+    make; \
+    make V=1 install
 
-RUN git clone https://github.com/corazawaf/libcoraza && \
-    cd libcoraza && \
-    ./build.sh && \
-    ./configure && \
-    make && \
-    make install
+FROM nginx:stable as ngx-coraza
 
-RUN  ./configure \
-    --with-compat \
-    --add-module=/nginx-1.22.0/coraza/ \
-    --with-cc-opt='-g -O2 -fstack-protector-strong -Wformat -Werror=format-security -fPIC -Wdate-time -D_FORTIFY_SOURCE=2' \
-    --with-ld-opt='-Wl,-Bsymbolic-functions -Wl,-z,relro -Wl,-z,now -fPIC' \
-    --prefix=/usr/share/nginx \
-    --conf-path=/etc/nginx/nginx.conf \
-    --http-log-path=/var/log/nginx/access.log \
-    --error-log-path=/var/log/nginx/error.log \
-    --lock-path=/var/lock/nginx.lock \
-    --pid-path=/run/nginx.pid \
-    --modules-path=/usr/lib/nginx/modules \
-    --http-client-body-temp-path=/var/lib/nginx/body \
-    --http-fastcgi-temp-path=/var/lib/nginx/fastcgi \
-    --http-proxy-temp-path=/var/lib/nginx/proxy \
-    --http-scgi-temp-path=/var/lib/nginx/scgi \
-    --http-uwsgi-temp-path=/var/lib/nginx/uwsgi \
-    --with-debug \
-    --with-http_ssl_module \
-    --with-http_stub_status_module \
-    #--with-http_realip_module \
-    --with-http_auth_request_module \
-    --with-http_v2_module \
-    #--with-http_dav_module \
-    --with-http_slice_module \
-    --with-threads \
-    --with-http_addition_module \
-    #--with-http_geoip_module=dynamic \
-    --with-http_gunzip_module \
-    #--with-http_gzip_static_module \
-    #--with-http_image_filter_module=dynamic \
-    --with-http_sub_module \
-    #--with-http_xslt_module=dynamic \
-    --with-stream=dynamic
+COPY --from=go-builder /usr/local/include/coraza /usr/local/include/coraza
+COPY --from=go-builder /usr/local/lib/libcoraza.a /usr/local/lib
+COPY --from=go-builder /usr/local/lib/libcoraza.so /usr/local/lib
+
+# For latest build deps, see https://github.com/nginxinc/docker-nginx/blob/master/mainline/alpine/Dockerfile
+RUN set -eux; \
+  apt-get update -qq; \
+  apt-get install -qq --no-install-recommends \
+  gcc \
+  gnupg1 \
+  ca-certificates  \
+  libc-dev \
+  make \
+  openssl \
+  curl \
+  gnupg \
+  wget \
+  libpcre3 libpcre3-dev \
+  zlib1g-dev
+
+COPY . /usr/src/coraza-nginx
+
+# Download sources
+RUN set -eux; \
+    curl "http://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -o - | tar zxC /usr/src -f -;
+    # Reuse same cli arguments as the nginx:alpine image used to build
+
+RUN set -eux; \
+    CONFARGS=$(nginx -V 2>&1 | sed -n -e 's/^.*arguments: //p');\
+    cd /usr/src/nginx-$NGINX_VERSION; \
+    ./configure --with-compat "$CONFARGS" --add-dynamic-module=/usr/src/coraza-nginx; \
+    make modules; \
+    mkdir -p /usr/lib/nginx/modules; \
+    find objs/*.so -print; \
+    cp objs/ngx_*.so /usr/lib/nginx/modules
+    
+FROM nginx:stable
+
+RUN sed -i -e "s|events {|load_module \"/usr/lib/nginx/modules/ngx_http_coraza_module.so\";\n\nevents {|" /etc/nginx/nginx.conf;
+
+COPY ./coraza.conf /etc/nginx/conf.d/coraza.conf
+COPY --from=ngx-coraza /usr/lib/nginx/modules/ /usr/lib/nginx/modules/
+COPY --from=go-builder /usr/local/lib/libcoraza.so /usr/local/lib
+
+RUN ldconfig -v
+
+COPY ./t /tmp/t
+
+RUN set -eux; \
+    apt-get update -qq; \
+    apt-get install -qq --no-install-recommends curl perl; \
+    curl http://hg.nginx.org/nginx-tests/archive/tip.tar.gz -o tip.tar.gz; \
+    tar xzf tip.tar.gz; \
+    cd nginx-tests-*; \
+    cp /tmp/t/* . ;\
+    export TEST_NGINX_BINARY=/usr/sbin/nginx; \
+    export TEST_NGINX_GLOBALS="load_module \"/usr/lib/nginx/modules/ngx_http_coraza_module.so\";"; \
+    prove . -t coraza*.t
+

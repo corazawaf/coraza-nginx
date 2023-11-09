@@ -1,18 +1,12 @@
 /*
- * ModSecurity connector for nginx, http://www.modsecurity.org/
- * Copyright (c) 2015 Trustwave Holdings, Inc. (http://www.trustwave.com/)
+ * Coraza connector for nginx
  *
  * You may not use this file except in compliance with
  * the License.  You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * If any of the files related to licensing are missing or if you have any
- * other questions related to licensing please contact Trustwave Holdings, Inc.
- * directly using the email address security@modsecurity.org.
- *
  */
-
 
 #ifndef _ngx_http_coraza_COMMON_H_INCLUDED_
 #define _ngx_http_coraza_COMMON_H_INCLUDED_
@@ -37,8 +31,8 @@
  *
  */
 
-#define CORAZA_NGINX_MAJOR "1"
-#define CORAZA_NGINX_MINOR "0"
+#define CORAZA_NGINX_MAJOR "0"
+#define CORAZA_NGINX_MINOR "1"
 #define CORAZA_NGINX_PATCHLEVEL "0"
 #define CORAZA_NGINX_TAG ""
 #define CORAZA_NGINX_TAG_NUM "100"
@@ -105,9 +99,8 @@ typedef struct {
 extern ngx_module_t ngx_http_coraza_module;
 
 /* ngx_http_coraza_module.c */
-int ngx_http_coraza_process_intervention (coraza_transaction_t transaction, ngx_http_request_t *r, ngx_int_t early_log);
+ngx_int_t ngx_http_coraza_process_intervention (coraza_transaction_t *transaction, ngx_http_request_t *r, ngx_int_t early_log);
 ngx_http_coraza_ctx_t *ngx_http_coraza_create_ctx(ngx_http_request_t *r);
-char *ngx_str_to_char(ngx_str_t a, ngx_pool_t *p);
 
 /* ngx_http_coraza_body_filter.c */
 ngx_int_t ngx_http_coraza_body_filter_init(void);
@@ -127,5 +120,7 @@ ngx_int_t ngx_http_coraza_pre_access_handler(ngx_http_request_t *r);
 /* ngx_http_coraza_rewrite.c */
 ngx_int_t ngx_http_coraza_rewrite_handler(ngx_http_request_t *r);
 
+/* ngx_http_coraza_utils.c */
+ngx_int_t ngx_str_to_char(ngx_str_t a, char *str, ngx_pool_t *p);
 
 #endif /* _ngx_http_coraza_COMMON_H_INCLUDED_ */

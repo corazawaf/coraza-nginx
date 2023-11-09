@@ -1,15 +1,10 @@
 /*
- * CORAZA connector for nginx, http://www.CORAZA.org/
- * Copyright (c) 2015 Trustwave Holdings, Inc. (http://www.trustwave.com/)
+ * Coraza connector for nginx
  *
  * You may not use this file except in compliance with
  * the License.  You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * If any of the files related to licensing are missing or if you have any
- * other questions related to licensing please contact Trustwave Holdings, Inc.
- * directly using the email address security@CORAZA.org.
  *
  */
 
@@ -138,6 +133,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
     {
         int ret = 0;
         int already_inspected = 0;
+        char *file_name = NULL;
 
         dd("request body is ready to be processed");
 
@@ -156,8 +152,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
 
         if (r->request_body->temp_file != NULL) {
             ngx_str_t file_path = r->request_body->temp_file->file.name;
-            const char *file_name = ngx_str_to_char(file_path, r->pool);
-            if (file_name == (char*)-1) {
+            if (ngx_str_to_char(file_path, file_name, r->pool) != NGX_OK) {
                 return NGX_HTTP_INTERNAL_SERVER_ERROR;
             }
             /*
@@ -166,7 +161,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
              */
             dd("request body inspection: file -- %s", file_name);
 
-            coraza_request_body_from_file(ctx->coraza_transaction, (char*)file_name);
+            coraza_request_body_from_file(ctx->coraza_transaction, file_name);
 
             already_inspected = 1;
         } else {

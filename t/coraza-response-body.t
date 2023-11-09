@@ -2,7 +2,7 @@
 
 # (C) Andrei Belov
 
-# Tests for ModSecurity-nginx connector (response body operations).
+# Tests for Coraza-nginx connector (response body operations).
 
 ###############################################################################
 
@@ -39,11 +39,11 @@ http {
         listen       127.0.0.1:8080;
         server_name  localhost;
 
-        modsecurity on;
+        coraza on;
 
         location /body1 {
             default_type text/plain;
-            modsecurity_rules '
+            coraza_rules '
                 SecRuleEngine On
                 SecResponseBodyAccess On
                 SecResponseBodyLimit 128

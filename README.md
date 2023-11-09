@@ -1,3 +1,13 @@
+⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️
+THIS MODULE IS NOT PRODUCTION READY
+⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️
+
+👉 YOU CANNOT CREATE ISSUES HERE, BUT YOU CAN CREATE PULL REQUESTS FIXING PROBLEMS 👈
+
+🙏 DO NOT CREATE PULL REQUESTS TO COMPLAIN ABOUT THINGS NOT WORKING. THIS IS EXPERIMENTAL AND NO WORK IS BEING DONE HERE. 
+
+👉YOU ARE WELCOME TO WORK ON IT AND SEND PULL REQUESTS! 👈
+
 [![Compile module](https://github.com/corazawaf/coraza-nginx/actions/workflows/build.yml/badge.svg)](https://github.com/corazawaf/coraza-nginx/actions/workflows/build.yml)
 
 # Coraza NGINX Connector
@@ -5,6 +15,8 @@
 The coraza-nginx connector is the connection point between nginx and libcoraza. The module simply serves as a layer of communication between nginx and Coraza.
 
 # Compilation
+
+If you have any doubts, please read the [GitHub build Action](https://github.com/corazawaf/coraza-nginx/blob/master/.github/workflows/build.yml) for additional information.
 
 Before compile this software make sure that you have libcoraza installed.
 You can download it from the [libcoraza git repository](https://github.com/corazawaf/libcoraza). For information pertaining to the compilation and installation of libcoraza please consult the documentation provided along with it.
@@ -108,7 +120,7 @@ server {
         root /var/www/html/opts;
         coraza_rules '
           SecRuleEngine On
-          SecDebugLog /tmp/modsec_debug.log
+          SecDebugLog /tmp/coraza_debug.log
           SecDebugLogLevel 9
           SecRuleRemoveById 10
         ';
@@ -234,7 +246,7 @@ version of your libcoraza and the version of the nginx connector you are running
 ### Security issue
 
 Please do not publicly report any security issue. Instead, contact us at:
-security@coraza.org to report the issue. Once the problem is fixed we will provide you with credit for the discovery.
+security@coraza.io to report the issue. Once the problem is fixed we will provide you with credit for the discovery.
 
 
 ## Feature Request

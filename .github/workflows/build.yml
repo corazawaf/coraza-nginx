@@ -16,18 +16,18 @@ jobs:
       libcoraza_version: master
     strategy:
       matrix:
-        nginx_version: ['1.22.0']
+        nginx_version: ['1.24.0']
         # The type of runner that the job will run on
-        os: [ubuntu-20.04]
+        os: [ubuntu-22.04]
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       - name: "Checkout repo"
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       # Grab nginx source, from cache if possible, or from web
       - name: Grab nginx-${{ matrix.nginx_version }} cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         id: cache-nginx
         with:
           path: nginx-${{ matrix.nginx_version }}
@@ -41,7 +41,7 @@ jobs:
 
       # Grab libcoraza
       - name: Grab libcoraza-${{ env.libcoraza_version }} cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         id: cache-pcre
         with:
           path: libcoraza-${{ env.libcoraza_version }}
@@ -57,9 +57,9 @@ jobs:
       - name: Install dependencies with apt
         run: |
           sudo add-apt-repository universe
-          sudo apt-get update
-          sudo apt-get -y \
-          --fix-missing install \
+          sudo apt-get -qq update
+          sudo apt-get -y -qq \
+          --fix-missing --no-install-recommends install \
           gcc make \
           libxml2-dev \
           libxslt-dev \
@@ -67,9 +67,9 @@ jobs:
           libgeoip-dev
 
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v4
         with:
-          go-version: ^1.17.7
+          go-version: ^1.21.x
 
       - name: Configure environment
         run: |
@@ -89,26 +89,28 @@ jobs:
 
       - name: Configure compilation of dynamic module
         run: |
-          ls -l
           cd ${{ github.workspace }}/nginx-${{ matrix.nginx_version }}
           ./configure \
           --with-compat \
           --add-dynamic-module=${{ github.workspace }}/ \
           --with-cc-opt='-g -O2 -fstack-protector-strong -Wformat -Werror=format-security -fPIC -Wdate-time -D_FORTIFY_SOURCE=2' \
           --with-ld-opt='-Wl,-Bsymbolic-functions -Wl,-z,relro -Wl,-z,now -fPIC' \
-          --prefix=/usr/share/nginx \
+          --prefix=/etc/nginx \
+          --sbin-path=/usr/sbin/nginx \
           --conf-path=/etc/nginx/nginx.conf \
           --http-log-path=/var/log/nginx/access.log \
           --error-log-path=/var/log/nginx/error.log \
           --lock-path=/var/lock/nginx.lock \
           --pid-path=/run/nginx.pid \
           --modules-path=/usr/lib/nginx/modules \
-          --http-client-body-temp-path=/var/lib/nginx/body \
-          --http-fastcgi-temp-path=/var/lib/nginx/fastcgi \
-          --http-proxy-temp-path=/var/lib/nginx/proxy \
-          --http-scgi-temp-path=/var/lib/nginx/scgi \
-          --http-uwsgi-temp-path=/var/lib/nginx/uwsgi \
+          --http-client-body-temp-path=/var/cache/nginx/client_temp \
+          --http-proxy-temp-path=/var/cache/nginx/proxy_temp \
+          --http-fastcgi-temp-path=/var/cache/nginx/fastcgi_temp \
+          --http-uwsgi-temp-path=/var/cache/nginx/uwsgi_temp \
+          --http-scgi-temp-path=/var/cache/nginx/scgi_temp \
           --with-debug \
+          --with-file-aio \
+          --with-threads \
           --with-http_ssl_module \
           --with-http_stub_status_module \
           --with-http_realip_module \
@@ -126,10 +128,22 @@ jobs:
           --with-http_xslt_module=dynamic \
           --with-stream=dynamic
 
-      - name: Compile dynamic module  
-        run: |  
+      - name: Compile dynamic module and install nginx
+        run: |
           cd ${{ github.workspace }}/nginx-${{ matrix.nginx_version }}
           make modules
+          make
+          sudo make install
+
+      - name: Run tests
+        run: |
+          wget http://hg.nginx.org/nginx-tests/archive/tip.tar.gz
+          tar xzf tip.tar.gz
+          cd nginx-tests-*
+          cp ../t/* .
+          export TEST_NGINX_BINARY=/usr/sbin/nginx
+          export TEST_NGINX_GLOBALS="load_module \"/usr/lib/nginx/modules/ngx_http_coraza_module.so\";"
+          prove . -t coraza*.t
 
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2

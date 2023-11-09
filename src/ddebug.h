@@ -1,4 +1,12 @@
-
+/*
+ * Coraza connector for nginx
+ *
+ * You may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ */
 
 // From: https://raw.githubusercontent.com/openresty/lua-nginx-module/master/src/ddebug.h
 
@@ -34,7 +42,7 @@
 
 #   if (NGX_HAVE_VARIADIC_MACROS)
 
-#       define dd(...) fprintf(stderr, "modsec *** %s: ", __func__); \
+#       define dd(...) fprintf(stderr, "coraza *** %s: ", __func__); \
             fprintf(stderr, __VA_ARGS__); \
             fprintf(stderr, " at %s line %d.\n", __FILE__, __LINE__)
 

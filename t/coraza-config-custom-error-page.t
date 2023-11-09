@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 #
-# ModSecurity, http://www.modsecurity.org/
+# Coraza, http://www.coraza.io/
 # Copyright (c) 2015 Trustwave Holdings, Inc. (http://www.trustwave.com/)
 #
 # You may not use this file except in compliance with
@@ -11,11 +11,11 @@
 #
 # If any of the files related to licensing are missing or if you have any
 # other questions related to licensing please contact Trustwave Holdings, Inc.
-# directly using the email address security@modsecurity.org.
+# directly using the email address security@coraza.io.
 #
 
 
-# Tests for ModSecurity module.
+# Tests for Coraza module.
 
 ###############################################################################
 
@@ -60,8 +60,8 @@ http {
         }
 
         location / {
-            modsecurity on;
-            modsecurity_rules '
+            coraza on;
+            coraza_rules '
                 SecRuleEngine On
                 SecRule ARGS "@streq root" "id:10,phase:1,auditlog,status:403,deny"
                 SecDebugLog %%TESTDIR%%/auditlog-debug-local.txt
@@ -79,8 +79,8 @@ http {
         listen       127.0.0.1:8080;
         server_name  s2;
 
-        modsecurity on;
-        modsecurity_rules '
+        coraza on;
+        coraza_rules '
             SecRuleEngine On
             SecRule ARGS "@streq root" "id:10,phase:1,auditlog,status:403,deny"
             SecDebugLog %%TESTDIR%%/auditlog-debug-global.txt
@@ -95,7 +95,7 @@ http {
         error_page 403 /403.html;
 
         location /403.html {
-            modsecurity off;
+            coraza off;
             root %%TESTDIR%%/http;
             internal;
         }
@@ -125,11 +125,11 @@ my $t2;
 my $t3;
 my $t4;
 
-# Performing requests to a server with ModSecurity enabled at location context
+# Performing requests to a server with Coraza enabled at location context
 $t1 = http_get_host('s1', '/index.html?what=root');
 $t2 = http_get_host('s1', '/index.html?what=other');
 
-# Performing requests to a server with ModSecurity enabled at server context
+# Performing requests to a server with Coraza enabled at server context
 $t3 = http_get_host('s2', '/index.html?what=root');
 $t4 = http_get_host('s2', '/index.html?what=other');
 
@@ -147,18 +147,18 @@ my $global = do {
     <$fh>;
 };
 
-like($t1, qr/$custom_txt/, 'ModSecurity at location / root');
-like($t2, qr/$index_txt/, 'ModSecurity at location / other');
-like($local, qr/what=root/, 'ModSecurity at location / root present in auditlog');
-unlike($local, qr/what=other/, 'ModSecurity at location / other not present in auditlog');
+like($t1, qr/$custom_txt/, 'Coraza at location / root');
+like($t2, qr/$index_txt/, 'Coraza at location / other');
+like($local, qr/what=root/, 'Coraza at location / root present in auditlog');
+unlike($local, qr/what=other/, 'Coraza at location / other not present in auditlog');
 
-like($t3, qr/$custom_txt/, 'ModSecurity at server / root');
-like($t4, qr/$index_txt/, 'ModSecurity at server / other');
-like($global, qr/what=root/, 'ModSecurity at server / root present in auditlog');
-unlike($global, qr/what=other/, 'ModSecurity at server / other not present in auditlog');
+like($t3, qr/$custom_txt/, 'Coraza at server / root');
+like($t4, qr/$index_txt/, 'Coraza at server / other');
+like($global, qr/what=root/, 'Coraza at server / root present in auditlog');
+unlike($global, qr/what=other/, 'Coraza at server / other not present in auditlog');
 
-like($local, qr/Access denied with code 403/, 'ModSecurity at location / 403 in auditlog');
-like($global, qr/Access denied with code 403/, 'ModSecurity at server / 403 in auditlog');
+like($local, qr/Access denied with code 403/, 'Coraza at location / 403 in auditlog');
+like($global, qr/Access denied with code 403/, 'Coraza at server / 403 in auditlog');
 
 ###############################################################################
 

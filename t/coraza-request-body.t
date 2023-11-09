@@ -2,7 +2,7 @@
 
 # (C) Andrei Belov
 
-# Tests for ModSecurity-nginx connector (request body operations).
+# Tests for Coraza-nginx connector (request body operations).
 
 ###############################################################################
 
@@ -40,11 +40,11 @@ http {
         listen       127.0.0.1:8080;
         server_name  localhost;
 
-        modsecurity on;
+        coraza on;
         client_header_buffer_size 1024;
 
         location /bodyaccess {
-            modsecurity_rules '
+            coraza_rules '
                 SecRuleEngine On
                 SecRequestBodyAccess On
                 SecRule REQUEST_BODY "@rx BAD BODY" "id:11,phase:request,deny,log,status:403"
@@ -53,7 +53,7 @@ http {
         }
 
         location /nobodyaccess {
-            modsecurity_rules '
+            coraza_rules '
                 SecRuleEngine On
                 SecRequestBodyAccess Off
                 SecRule REQUEST_BODY "@rx BAD BODY" "id:21,phase:request,deny,log,status:403"
@@ -63,7 +63,7 @@ http {
         }
 
         location /bodylimitreject {
-            modsecurity_rules '
+            coraza_rules '
                 SecRuleEngine On
                 SecRequestBodyAccess On
                 SecRequestBodyLimit 128
@@ -74,12 +74,12 @@ http {
         }
 
         location /bodylimitrejectserver {
-            modsecurity off;
+            coraza off;
             proxy_pass http://127.0.0.1:%%PORT_8082%%;
         }
 
         location /bodylimitprocesspartial {
-            modsecurity_rules '
+            coraza_rules '
                 SecRuleEngine On
                 SecRequestBodyAccess On
                 SecRequestBodyLimit 128
@@ -94,8 +94,8 @@ http {
         }
 
         location = /useauth {
-            modsecurity on;
-            modsecurity_rules '
+            coraza on;
+            coraza_rules '
                 SecRuleEngine On
                 SecRequestBodyAccess On
             ';
@@ -106,8 +106,8 @@ http {
 
     server {
         listen 127.0.0.1:%%PORT_8082%%;
-        modsecurity on;
-        modsecurity_rules '
+        coraza on;
+        coraza_rules '
             SecRuleEngine On
             SecRequestBodyAccess On
             SecRequestBodyLimit 128
