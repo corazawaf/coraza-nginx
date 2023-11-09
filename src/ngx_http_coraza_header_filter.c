@@ -1,5 +1,5 @@
 /*
- * Coraza connector for nginx, http://www.modsecurity.org/
+ * Coraza connector for nginx
  * Copyright (c) 2022 Coraza author and contributors (https://www.coraza.io/)
  * Based on ModSecurity connector for nginx, http://www.modsecurity.org/
  *
@@ -7,10 +7,6 @@
  * the License.  You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * If any of the files related to licensing are missing or if you have any
- * other questions related to licensing please contact Trustwave Holdings, Inc.
- * directly using the email address security@coraza.io.
  *
  */
 

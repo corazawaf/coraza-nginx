@@ -1,4 +1,12 @@
-
+/*
+ * Coraza connector for nginx
+ *
+ * You may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ */
 
 // From: https://raw.githubusercontent.com/openresty/lua-nginx-module/master/src/ddebug.h
 
