@@ -18,16 +18,16 @@ jobs:
       matrix:
         nginx_version: ['1.24.0']
         # The type of runner that the job will run on
-        os: [ubuntu-20.04]
+        os: [ubuntu-22.04]
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       - name: "Checkout repo"
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       # Grab nginx source, from cache if possible, or from web
       - name: Grab nginx-${{ matrix.nginx_version }} cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         id: cache-nginx
         with:
           path: nginx-${{ matrix.nginx_version }}
@@ -41,7 +41,7 @@ jobs:
 
       # Grab libcoraza
       - name: Grab libcoraza-${{ env.libcoraza_version }} cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         id: cache-pcre
         with:
           path: libcoraza-${{ env.libcoraza_version }}
@@ -69,7 +69,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: ^1.19.x
+          go-version: ^1.21.x
 
       - name: Configure environment
         run: |
