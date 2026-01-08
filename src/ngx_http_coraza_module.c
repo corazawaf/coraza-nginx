@@ -551,7 +551,11 @@ ngx_http_coraza_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 	/* If child has no WAF, use parent's WAF */
 	if (c->waf == 0 && p->waf != 0) {
 		c->waf = p->waf;
-		/* Do not share config to avoid double-free - each location owns its own config */
+		/* 
+		 * Do not share config to avoid double-free.
+		 * Each location owns its own config which is freed in cleanup.
+		 * WAF instances can be safely shared as they are reference-counted.
+		 */
 	}
 
 	return NGX_CONF_OK;
