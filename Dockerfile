@@ -20,7 +20,10 @@ RUN set -eux; \
     ./build.sh; \
     ./configure; \
     make; \
-    make V=1 install
+    cp libcoraza.a /usr/local/lib/; \
+    cp libcoraza.so /usr/local/lib/; \
+    mkdir -p /usr/local/include/coraza; \
+    cp coraza/coraza.h /usr/local/include/coraza/
 
 FROM nginx:stable as ngx-coraza
 
@@ -41,7 +44,7 @@ RUN set -eux; \
   curl \
   gnupg \
   wget \
-  libpcre3 libpcre3-dev \
+  libpcre2-dev \
   zlib1g-dev
 
 COPY . /usr/src/coraza-nginx

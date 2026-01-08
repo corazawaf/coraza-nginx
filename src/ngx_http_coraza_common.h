@@ -17,6 +17,9 @@
 #include <ngx_http.h>
 #include <coraza/coraza.h>
 
+/* Forward declare the new types from libcoraza */
+typedef uint64_t coraza_waf_config_t;
+
 
 /**
  * TAG_NUM:
@@ -69,6 +72,7 @@ typedef struct {
 
 typedef struct {
     void                      *pool;
+    coraza_waf_config_t        config;
     coraza_waf_t               waf;
     ngx_uint_t                 rules_inline;
     ngx_uint_t                 rules_file;
@@ -79,7 +83,8 @@ typedef struct {
 typedef struct {
     void                      *pool;
     /* RulesSet or Rules */
-    coraza_waf_t waf;
+    coraza_waf_config_t        config;
+    coraza_waf_t               waf;
 
     ngx_flag_t                 enable;
 
@@ -99,7 +104,7 @@ typedef struct {
 extern ngx_module_t ngx_http_coraza_module;
 
 /* ngx_http_coraza_module.c */
-ngx_int_t ngx_http_coraza_process_intervention (coraza_transaction_t *transaction, ngx_http_request_t *r, ngx_int_t early_log);
+ngx_int_t ngx_http_coraza_process_intervention (coraza_transaction_t transaction, ngx_http_request_t *r, ngx_int_t early_log);
 ngx_http_coraza_ctx_t *ngx_http_coraza_create_ctx(ngx_http_request_t *r);
 
 /* ngx_http_coraza_body_filter.c */

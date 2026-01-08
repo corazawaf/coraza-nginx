@@ -28,13 +28,11 @@ static void ngx_http_coraza_cleanup_instance(void *data);
 static void ngx_http_coraza_cleanup_rules(void *data);
 
 ngx_inline ngx_int_t
-ngx_http_coraza_process_intervention(coraza_transaction_t *transaction, ngx_http_request_t *r, ngx_int_t early_log)
+ngx_http_coraza_process_intervention(coraza_transaction_t transaction, ngx_http_request_t *r, ngx_int_t early_log)
 {
-	char *log = NULL;
 	coraza_intervention_t *intervention;
 	ngx_http_coraza_ctx_t *ctx = NULL;
-	ngx_table_elt_t *location = NULL;
-	
+
 	dd("processing intervention");
 
 	ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
@@ -50,50 +48,10 @@ ngx_http_coraza_process_intervention(coraza_transaction_t *transaction, ngx_http
 		return NGX_OK;
 	}
 
-	log = intervention->log;
-	if (intervention->log == NULL)
+	if (intervention->action != NULL)
 	{
-		log = "(no log message was specified)";
-	}
-
-	ngx_log_error(NGX_LOG_ERR, (ngx_log_t *)r->connection->log, 0, "%s", log);
-
-	if (intervention->log != NULL)
-	{
-		free(intervention->log);
-	}
-
-	if (intervention->url != NULL)
-	{
-		dd("intervention -- redirecting to: %s with status code: %d", intervention.url, intervention.status);
-
-		if (r->header_sent)
-		{
-			dd("Headers are already sent. Cannot perform the redirection at this point.");
-			return NGX_ERROR;
-		}
-
-		/**
-		 * Not sure if it sane to do this indepent of the phase
-		 * but, here we go...
-		 *
-		 * This code cames from: http/ngx_http_special_response.c
-		 * function: ngx_http_send_error_page
-		 * src/http/ngx_http_core_module.c
-		 * From src/http/ngx_http_core_module.c (line 1910) i learnt
-		 * that location->hash should be set to 1.
-		 *
-		 */
-		ngx_http_clear_location(r);
-		ngx_str_t a = ngx_string(intervention->url);
-
-		location = ngx_list_push(&r->headers_out.headers);
-		ngx_str_set(&location->key, "Location");
-		location->value = a;
-		r->headers_out.location = location;
-		r->headers_out.location->hash = 1;
-
-		return intervention->status;
+		dd("intervention action: %s", intervention->action);
+		ngx_log_error(NGX_LOG_ERR, (ngx_log_t *)r->connection->log, 0, "Coraza intervention: %s", intervention->action);
 	}
 
 	if (intervention->status != 200)
@@ -108,7 +66,7 @@ ngx_http_coraza_process_intervention(coraza_transaction_t *transaction, ngx_http
 
 		if (early_log)
 		{
-			dd("intervention -- calling log handler manually with code: %d", intervention.status);
+			dd("intervention -- calling log handler manually with code: %d", intervention->status);
 			ngx_http_coraza_log_handler(r);
 			ctx->logged = 1;
 		}
@@ -118,7 +76,7 @@ ngx_http_coraza_process_intervention(coraza_transaction_t *transaction, ngx_http
 			dd("Headers are already sent. Cannot perform the redirection at this point.");
 			return NGX_ERROR;
 		}
-		dd("intervention -- returning code: %d", intervention.status);
+		dd("intervention -- returning code: %d", intervention->status);
 		return intervention->status;
 	}
 	return NGX_OK;
@@ -156,17 +114,20 @@ ngx_http_coraza_create_ctx(ngx_http_request_t *r)
 
 	dd("creating transaction with the following rules: '%p' -- ms: '%p'", mcf->rules_set, mmcf->modsec);
 
+	/* Use location-specific WAF if available, otherwise fall back to main WAF */
+	coraza_waf_t waf = mcf->waf != 0 ? mcf->waf : mmcf->waf;
+
 	if (mcf->transaction_id)
 	{
 		if (ngx_http_complex_value(r, mcf->transaction_id, &s) != NGX_OK)
 		{
 			return NGX_CONF_ERROR;
 		}
-		ctx->coraza_transaction = coraza_new_transaction_with_id(mmcf->waf, (char *)s.data);
+		ctx->coraza_transaction = coraza_new_transaction_with_id(waf, (char *)s.data);
 	}
 	else
 	{
-		ctx->coraza_transaction = coraza_new_transaction(mmcf->waf);
+		ctx->coraza_transaction = coraza_new_transaction(waf);
 	}
 
 	dd("transaction created");
@@ -191,7 +152,6 @@ ngx_conf_set_rules(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 	int res;
 	char *rules = NULL;
 	ngx_str_t *value;
-	char *error = NULL;
 	ngx_http_coraza_conf_t *mcf = conf;
 	ngx_http_coraza_main_conf_t *mmcf;
 
@@ -202,16 +162,16 @@ ngx_conf_set_rules(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 		return NGX_CONF_ERROR;
 	}
 
-	res = coraza_rules_add(mcf->waf, rules, &error);
+	res = coraza_rules_add(mcf->config, rules);
 
 	if (res < 0)
 	{
-		dd("Failed to load the rules: '%s' - reason: '%s'", rules, error);
+		dd("Failed to load the rules: '%s'", rules);
 		return NGX_CONF_ERROR;
 	}
 
 	mmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_coraza_module);
-	mmcf->rules_inline += res;
+	mmcf->rules_inline += 1;
 
 	return NGX_CONF_OK;
 }
@@ -220,29 +180,28 @@ char *
 ngx_conf_set_rules_file(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
 	int res;
-	char *rules_set = NULL;
+	char *rules_file = NULL;
 	ngx_str_t *value;
-	char **error = NULL;
 	ngx_http_coraza_conf_t *mcf = conf;
 	ngx_http_coraza_main_conf_t *mmcf;
 
 	value = cf->args->elts;
 
-	if (ngx_str_to_char(value[1], rules_set, cf->pool) != NGX_OK) {
+	if (ngx_str_to_char(value[1], rules_file, cf->pool) != NGX_OK) {
 		dd("Failed to get the rules_file");
 		return NGX_CONF_ERROR;
 	}
 
-	res = coraza_rules_add(mcf->waf, rules_set, error);
+	res = coraza_rules_add_file(mcf->config, rules_file);
 
 	if (res < 0)
 	{
-		dd("Failed to load the rules from: '%s' - reason: '%s'", rules_set, error);
+		dd("Failed to load the rules from: '%s'", rules_file);
 		return NGX_CONF_ERROR;
 	}
 
 	mmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_coraza_module);
-	mmcf->rules_file += res;
+	mmcf->rules_file += 1;
 
 	return NGX_CONF_OK;
 }
@@ -446,19 +405,18 @@ ngx_http_coraza_create_main_conf(ngx_conf_t *cf)
 
 	conf->pool = cf->pool;
 
-	/* Create our CORAZA instance */
-	conf->waf = coraza_new_waf();
-	if (conf->waf == 0)
+	/* Create our CORAZA config */
+	conf->config = coraza_new_waf_config();
+	if (conf->config == 0)
 	{
-		dd("failed to create the CORAZA instance");
+		dd("failed to create the CORAZA config");
 		return NGX_CONF_ERROR;
 	}
 
-	/* Provide our connector information to LibCORAZA */
-	// coraza_set_connector_info(conf->waf, CORAZA_NGINX_WHOAMI);
-	coraza_set_log_cb(conf->waf, (coraza_log_cb) ngx_http_coraza_log);
+	/* WAF will be created later after rules are loaded */
+	conf->waf = 0;
 
-	dd("main conf created at: '%p', instance is: '%p'", conf, conf->waf);
+	dd("main conf created at: '%p', config is: '%p'", conf, conf->config);
 
 	return conf;
 }
@@ -466,8 +424,25 @@ ngx_http_coraza_create_main_conf(ngx_conf_t *cf)
 static char *
 ngx_http_coraza_init_main_conf(ngx_conf_t *cf, void *conf)
 {
+	char *error = NULL;
 	ngx_http_coraza_main_conf_t *mmcf;
 	mmcf = (ngx_http_coraza_main_conf_t *)conf;
+
+	/* Create WAF from config now that rules are loaded */
+	if (mmcf->config != 0) {
+		mmcf->waf = coraza_new_waf(mmcf->config, &error);
+		if (mmcf->waf == 0)
+		{
+			if (error != NULL) {
+				ngx_log_error(NGX_LOG_ERR, cf->log, 0,
+							  "Failed to create CORAZA WAF: %s", error);
+			} else {
+				ngx_log_error(NGX_LOG_ERR, cf->log, 0,
+							  "Failed to create CORAZA WAF");
+			}
+			return NGX_CONF_ERROR;
+		}
+	}
 
 	ngx_log_error(NGX_LOG_NOTICE, cf->log, 0,
 				  "rules loaded inline/local: %ui/%ui",
@@ -497,13 +472,20 @@ ngx_http_coraza_create_conf(ngx_conf_t *cf)
 	 *
 	 *     conf->enable = 0;
 	 *     conf->sanity_checks_enabled = 0;
-	 *     conf->rules_set = NULL;
+	 *     conf->config = 0;
+	 *     conf->waf = 0;
 	 *     conf->pool = NULL;
 	 *     conf->transaction_id = NULL;
 	 */
 
 	conf->enable = NGX_CONF_UNSET;
-	conf->waf = coraza_new_waf();
+	conf->config = coraza_new_waf_config();
+	if (conf->config == 0)
+	{
+		dd("failed to create the CORAZA config");
+		return NGX_CONF_ERROR;
+	}
+	conf->waf = 0;
 	conf->pool = cf->pool;
 	conf->transaction_id = NGX_CONF_UNSET_PTR;
 #if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
@@ -536,8 +518,7 @@ ngx_http_coraza_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 		clcf->name.data, parent,
 		child);
 #endif
-	int rules;
-	char **error = NULL;
+	char *error = NULL;
 
 	dd("                  state - parent: '%d' child: '%d'",
 	   (int)c->enable, (int)p->enable);
@@ -548,23 +529,26 @@ ngx_http_coraza_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 	ngx_conf_merge_value(c->sanity_checks_enabled, p->sanity_checks_enabled, 0);
 #endif
 
-#if defined(CORAZA_DDEBUG) && (CORAZA_DDEBUG)
-	dd("PARENT RULES");
-	coraza_rules_dump(p->rules_set);
-	dd("CHILD RULES");
-	coraza_rules_dump(c->rules_set);
-#endif
-	rules = coraza_rules_merge(c->waf, p->waf, error);
-
-	if (rules < 0)
-	{
-		return *error;
+	/* Create WAF from child config if not already created */
+	if (c->config != 0 && c->waf == 0) {
+		c->waf = coraza_new_waf(c->config, &error);
+		if (c->waf == 0)
+		{
+			if (error != NULL) {
+				ngx_log_error(NGX_LOG_ERR, cf->log, 0,
+							  "Failed to create child CORAZA WAF: %s", error);
+				return error;
+			}
+			return NGX_CONF_ERROR;
+		}
 	}
 
-#if defined(CORAZA_DDEBUG) && (CORAZA_DDEBUG)
-	dd("NEW CHILD RULES");
-	coraza_rules_dump(c->rules_set);
-#endif
+	/* If child has no WAF, use parent's WAF */
+	if (c->waf == 0 && p->waf != 0) {
+		c->waf = p->waf;
+		c->config = p->config;
+	}
+
 	return NGX_CONF_OK;
 }
 
@@ -575,13 +559,17 @@ ngx_http_coraza_cleanup_instance(void *data)
 
 	mmcf = (ngx_http_coraza_main_conf_t *)data;
 
-	dd("deleting a main conf -- instance is: \"%p\"", mmcf->modsec);
+	dd("deleting a main conf -- waf is: \"%p\", config is: \"%p\"", mmcf->waf, mmcf->config);
 
-	// TODO
-	// msc_cleanup(mmcf->modsec);
+	if (mmcf->waf != 0) {
+		coraza_free_waf(mmcf->waf);
+		mmcf->waf = 0;
+	}
 
-	// Casting to void so variable is not unused
-	(void)mmcf;
+	if (mmcf->config != 0) {
+		coraza_free_waf_config(mmcf->config);
+		mmcf->config = 0;
+	}
 }
 
 static void
@@ -591,11 +579,13 @@ ngx_http_coraza_cleanup_rules(void *data)
 
 	mcf = (ngx_http_coraza_conf_t *)data;
 
-	dd("deleting a loc conf -- RuleSet is: \"%p\"", mcf->rules_set);
-	// TODO
+	dd("deleting a loc conf -- waf is: \"%p\", config is: \"%p\"", mcf->waf, mcf->config);
 
-	// Casting to void so variable is not unused
-	(void)mcf;
+	/* Note: WAF may be shared from parent, only free config here */
+	if (mcf->config != 0) {
+		coraza_free_waf_config(mcf->config);
+		mcf->config = 0;
+	}
 }
 
 /* vi:set ft=c ts=4 sw=4 et fdm=marker: */
