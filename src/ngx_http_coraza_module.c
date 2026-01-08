@@ -112,16 +112,22 @@ ngx_http_coraza_create_ctx(ngx_http_request_t *r)
 	mmcf = ngx_http_get_module_main_conf(r, ngx_http_coraza_module);
 	mcf = ngx_http_get_module_loc_conf(r, ngx_http_coraza_module);
 
-	dd("creating transaction with the following rules: '%p' -- ms: '%p'", mcf->rules_set, mmcf->modsec);
+	dd("creating transaction with the following WAFs: loc='%p' -- main='%p'", mcf->waf, mmcf->waf);
 
 	/* Use location-specific WAF if available, otherwise fall back to main WAF */
 	coraza_waf_t waf = mcf->waf != 0 ? mcf->waf : mmcf->waf;
+
+	if (waf == 0)
+	{
+		dd("WAF not initialized");
+		return NULL;
+	}
 
 	if (mcf->transaction_id)
 	{
 		if (ngx_http_complex_value(r, mcf->transaction_id, &s) != NGX_OK)
 		{
-			return NGX_CONF_ERROR;
+			return NULL;
 		}
 		ctx->coraza_transaction = coraza_new_transaction_with_id(waf, (char *)s.data);
 	}
@@ -138,7 +144,7 @@ ngx_http_coraza_create_ctx(ngx_http_request_t *r)
 	if (cln == NULL)
 	{
 		dd("failed to create the CORAZA context cleanup");
-		return NGX_CONF_ERROR;
+		return NULL;
 	}
 	cln->handler = ngx_http_coraza_cleanup;
 	cln->data = ctx;
@@ -537,7 +543,6 @@ ngx_http_coraza_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 			if (error != NULL) {
 				ngx_log_error(NGX_LOG_ERR, cf->log, 0,
 							  "Failed to create child CORAZA WAF: %s", error);
-				return error;
 			}
 			return NGX_CONF_ERROR;
 		}
@@ -546,7 +551,11 @@ ngx_http_coraza_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 	/* If child has no WAF, use parent's WAF */
 	if (c->waf == 0 && p->waf != 0) {
 		c->waf = p->waf;
-		c->config = p->config;
+		/* 
+		 * Do not share config to avoid double-free.
+		 * Each location owns its own config which is freed in cleanup.
+		 * WAF instances can be safely shared as they are reference-counted.
+		 */
 	}
 
 	return NGX_CONF_OK;
