@@ -17,10 +17,11 @@
 #include <ngx_http.h>
 #include <coraza/coraza.h>
 
-/* Type alias for coraza_waf_config_t if not already defined in libcoraza */
-#ifndef coraza_waf_config_t
+/* 
+ * Type definition for coraza_waf_config_t from the new libcoraza API.
+ * This type represents an opaque handle to a WAF configuration object.
+ */
 typedef uint64_t coraza_waf_config_t;
-#endif
 
 
 /**
