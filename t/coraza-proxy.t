@@ -9,6 +9,7 @@ use warnings;
 use strict;
 
 use Test::More;
+use IO::Socket::INET;
 
 BEGIN { use FindBin; chdir($FindBin::Bin); }
 
