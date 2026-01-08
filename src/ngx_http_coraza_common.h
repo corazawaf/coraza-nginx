@@ -17,8 +17,10 @@
 #include <ngx_http.h>
 #include <coraza/coraza.h>
 
-/* Forward declare the new types from libcoraza */
+/* Type alias for coraza_waf_config_t if not already defined in libcoraza */
+#ifndef coraza_waf_config_t
 typedef uint64_t coraza_waf_config_t;
+#endif
 
 
 /**
