@@ -84,5 +84,5 @@ RUN set -eux; \
     cp /tmp/t/* . ;\
     export TEST_NGINX_BINARY=/usr/sbin/nginx; \
     export TEST_NGINX_GLOBALS="load_module \"/usr/lib/nginx/modules/ngx_http_coraza_module.so\";"; \
-    prove . -t coraza*.t
+    prove coraza*.t
 
