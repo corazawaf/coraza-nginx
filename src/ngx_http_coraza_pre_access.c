@@ -152,7 +152,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
 
         if (r->request_body->temp_file != NULL) {
             ngx_str_t file_path = r->request_body->temp_file->file.name;
-            if (ngx_str_to_char(file_path, file_name, r->pool) != NGX_OK) {
+            if (ngx_str_to_char(file_path, &file_name, r->pool) != NGX_OK) {
                 return NGX_HTTP_INTERNAL_SERVER_ERROR;
             }
             /*

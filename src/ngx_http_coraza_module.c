@@ -163,7 +163,7 @@ ngx_conf_set_rules(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
 	value = cf->args->elts;
 
-	if (ngx_str_to_char(value[1], rules, cf->pool) != NGX_OK) {
+	if (ngx_str_to_char(value[1], &rules, cf->pool) != NGX_OK) {
 		dd("Failed to get the rules");
 		return NGX_CONF_ERROR;
 	}
@@ -193,7 +193,7 @@ ngx_conf_set_rules_file(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
 	value = cf->args->elts;
 
-	if (ngx_str_to_char(value[1], rules_file, cf->pool) != NGX_OK) {
+	if (ngx_str_to_char(value[1], &rules_file, cf->pool) != NGX_OK) {
 		dd("Failed to get the rules_file");
 		return NGX_CONF_ERROR;
 	}
