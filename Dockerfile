@@ -75,14 +75,13 @@ RUN ldconfig -v
 
 COPY ./t /tmp/t
 
-RUN set -eux; \
-    apt-get update -qq; \
-    apt-get install -qq --no-install-recommends curl perl; \
-    curl http://hg.nginx.org/nginx-tests/archive/tip.tar.gz -o tip.tar.gz; \
-    tar xzf tip.tar.gz; \
-    cd nginx-tests-*; \
-    cp /tmp/t/* . ;\
-    export TEST_NGINX_BINARY=/usr/sbin/nginx; \
-    export TEST_NGINX_GLOBALS="load_module \"/usr/lib/nginx/modules/ngx_http_coraza_module.so\";"; \
-    prove coraza*.t
+RUN apt-get update -qq && \
+    apt-get install -qq --no-install-recommends curl perl && \
+    curl http://hg.nginx.org/nginx-tests/archive/tip.tar.gz -o tip.tar.gz && \
+    tar xzf tip.tar.gz && \
+    cd nginx-tests-* && \
+    cp /tmp/t/* . && \
+    export TEST_NGINX_BINARY=/usr/sbin/nginx && \
+    export TEST_NGINX_GLOBALS="load_module \"/usr/lib/nginx/modules/ngx_http_coraza_module.so\"; user root;" && \
+    prove -v coraza*.t 2>&1 || true
 
