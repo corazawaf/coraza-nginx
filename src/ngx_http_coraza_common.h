@@ -66,11 +66,15 @@ typedef struct {
     coraza_intervention_t *delayed_intervention;
     ngx_str_t transaction_id;
 
+    ngx_chain_t *pending_chain;
+    ngx_chain_t **pending_chain_last;
+
     unsigned waiting_more_body:1;
     unsigned body_requested:1;
     unsigned processed:1;
     unsigned logged:1;
     unsigned intervention_triggered:1;
+    unsigned headers_delayed:1;
 } ngx_http_coraza_ctx_t;
 
 
@@ -119,6 +123,7 @@ ngx_int_t ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in);
 /* ngx_http_coraza_header_filter.c */
 ngx_int_t ngx_http_coraza_header_filter_init(void);
 ngx_int_t ngx_http_coraza_header_filter(ngx_http_request_t *r);
+ngx_int_t ngx_http_coraza_forward_header(ngx_http_request_t *r);
 
 /* ngx_http_coraza_log.c */
 void ngx_http_coraza_log(void *log, const void* data);
