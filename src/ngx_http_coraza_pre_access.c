@@ -189,6 +189,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
              */
             ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
             if (ret > 0) {
+                ctx->intervention_triggered = 1;
                 return ret;
             }
         }
@@ -207,8 +208,9 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
         ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
         if (r->error_page) {
             return NGX_DECLINED;
-            }
+        }
         if (ret > 0) {
+            ctx->intervention_triggered = 1;
             return ret;
         }
     }
