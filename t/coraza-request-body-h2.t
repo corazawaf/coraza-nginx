@@ -55,7 +55,8 @@ http {
             coraza_rules '
                 SecRuleEngine On
                 SecRequestBodyAccess On
-                SecRule REQUEST_BODY "@rx BAD BODY" "id:11,phase:request,deny,log,status:403"
+                SecAction "id:1,phase:1,pass,nolog,ctl:requestBodyProcessor=URLENCODED"
+                SecRule REQUEST_BODY "@rx BAD BODY" "id:11,phase:2,deny,log,status:403"
             ';
             proxy_pass http://127.0.0.1:8081;
         }
@@ -64,8 +65,8 @@ http {
             coraza_rules '
                 SecRuleEngine On
                 SecRequestBodyAccess Off
-                SecRule REQUEST_BODY "@rx BAD BODY" "id:21,phase:request,deny,log,status:403"
-                SecRule ARGS_POST|ARGS_POST_NAMES "@rx BAD ARG" "id:22,phase:request,deny,log,status:403"
+                SecRule REQUEST_BODY "@rx BAD BODY" "id:21,phase:2,deny,log,status:403"
+                SecRule ARGS_POST|ARGS_POST_NAMES "@rx BAD ARG" "id:22,phase:2,deny,log,status:403"
             ';
             proxy_pass http://127.0.0.1:8081;
         }
@@ -74,9 +75,10 @@ http {
             coraza_rules '
                 SecRuleEngine On
                 SecRequestBodyAccess On
-                SecRequestBodyLimit 128
+                SecAction "id:1,phase:1,pass,nolog,ctl:requestBodyProcessor=URLENCODED"
+                SecRequestBodyLimit 129
                 SecRequestBodyLimitAction Reject
-                SecRule REQUEST_BODY "@rx BAD BODY" "id:31,phase:request,deny,log,status:403"
+                SecRule REQUEST_BODY "@rx BAD BODY" "id:31,phase:2,deny,log,status:403"
             ';
             proxy_pass http://127.0.0.1:8081;
         }
@@ -85,9 +87,10 @@ http {
             coraza_rules '
                 SecRuleEngine On
                 SecRequestBodyAccess On
-                SecRequestBodyLimit 128
+                SecAction "id:1,phase:1,pass,nolog,ctl:requestBodyProcessor=URLENCODED"
+                SecRequestBodyLimit 129
                 SecRequestBodyLimitAction ProcessPartial
-                SecRule REQUEST_BODY "@rx BAD BODY" "id:41,phase:request,deny,log,status:403"
+                SecRule REQUEST_BODY "@rx BAD BODY" "id:41,phase:2,deny,log,status:403"
             ';
             proxy_pass http://127.0.0.1:8081;
         }
@@ -166,7 +169,7 @@ $sid = $s->new_stream({ method => $method, path => '/bodylimitreject', 'body_mor
 $s->h2_body('BODY' x 33);
 $frames = $s->read(all => [{ sid => $sid, fin => 1 }]);
 ($frame) = grep { $_->{type} eq "HEADERS" } @$frames;
-is($frame->{headers}->{':status'}, 403, "${method} request body limit reject, block");
+is($frame->{headers}->{':status'}, 413, "${method} request body limit reject, block");
 
 $s = Test::Nginx::HTTP2->new();
 $sid = $s->new_stream({ method => $method, path => '/bodylimitprocesspartial', 'body_more' => 1 });

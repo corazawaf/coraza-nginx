@@ -70,7 +70,6 @@ http {
                 SecAuditLogParts ABIJDEFHZ
                 SecAuditLog %%TESTDIR%%/auditlog-local.txt
                 SecAuditLogType Serial
-                SecAuditLogStorageDir %%TESTDIR%%/
             ';
         }
     }
@@ -89,7 +88,6 @@ http {
             SecAuditLogParts ABIJDEFHZ
             SecAuditLog %%TESTDIR%%/auditlog-global.txt
             SecAuditLogType Serial
-            SecAuditLogStorageDir %%TESTDIR%%/
         ';
 
         error_page 403 /403.html;

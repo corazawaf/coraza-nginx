@@ -47,7 +47,7 @@ http {
                 SecRuleEngine On
                 SecResponseBodyAccess On
                 SecResponseBodyLimit 128
-                SecRule RESPONSE_BODY "@rx BAD BODY" "id:11,phase:response,deny,log,status:403"
+                SecRule RESPONSE_BODY "@rx BAD BODY" "id:11,phase:4,deny,log,status:403"
             ';
         }
     }

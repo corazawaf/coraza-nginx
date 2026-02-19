@@ -55,8 +55,8 @@ http {
         coraza on;
         coraza_rules '
             SecRuleEngine On
-            SecRule ARGS "@streq whee" "id:10,phase:2"
-            SecRule ARGS "@streq whee" "id:11,phase:2"
+            SecRule ARGS "@streq whee" "id:10,phase:2,pass"
+            SecRule ARGS "@streq whee" "id:11,phase:2,pass"
         ';
 
         location / {
