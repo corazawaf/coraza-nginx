@@ -91,6 +91,7 @@ typedef struct {
     coraza_waf_t               waf;
 
     ngx_flag_t                 enable;
+    ngx_flag_t                 has_rules;
 
     ngx_http_complex_value_t  *transaction_id;
 } ngx_http_coraza_conf_t;

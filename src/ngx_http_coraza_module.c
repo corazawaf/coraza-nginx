@@ -188,6 +188,8 @@ ngx_conf_set_rules(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 		return NGX_CONF_ERROR;
 	}
 
+	mcf->has_rules = 1;
+
 	mmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_coraza_module);
 	mmcf->rules_inline += 1;
 
@@ -217,6 +219,8 @@ ngx_conf_set_rules_file(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 		dd("Failed to load the rules from: '%s'", rules_file);
 		return NGX_CONF_ERROR;
 	}
+
+	mcf->has_rules = 1;
 
 	mmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_coraza_module);
 	mmcf->rules_file += 1;
@@ -547,8 +551,21 @@ ngx_http_coraza_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 	ngx_conf_merge_value(c->sanity_checks_enabled, p->sanity_checks_enabled, 0);
 #endif
 
-	/* Create WAF from child config if not already created */
-	if (c->config != 0 && c->waf == 0) {
+	/* Create WAF from parent config if not already created and has rules */
+	if (p->config != 0 && p->waf == 0 && p->has_rules) {
+		p->waf = coraza_new_waf(p->config, &error);
+		if (p->waf == 0)
+		{
+			if (error != NULL) {
+				ngx_log_error(NGX_LOG_ERR, cf->log, 0,
+							  "Failed to create parent CORAZA WAF: %s", error);
+			}
+			return NGX_CONF_ERROR;
+		}
+	}
+
+	/* Create WAF from child config only if rules were explicitly added */
+	if (c->config != 0 && c->waf == 0 && c->has_rules) {
 		c->waf = coraza_new_waf(c->config, &error);
 		if (c->waf == 0)
 		{
@@ -560,14 +577,20 @@ ngx_http_coraza_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 		}
 	}
 
+	/* Merge parent rules into child WAF */
+	if (c->waf != 0 && p->waf != 0 && c->waf != p->waf) {
+		if (coraza_rules_merge(c->waf, p->waf, &error) != 0) {
+			if (error != NULL) {
+				ngx_log_error(NGX_LOG_ERR, cf->log, 0,
+							  "Failed to merge CORAZA rules: %s", error);
+			}
+			return NGX_CONF_ERROR;
+		}
+	}
+
 	/* If child has no WAF, use parent's WAF */
 	if (c->waf == 0 && p->waf != 0) {
 		c->waf = p->waf;
-		/* 
-		 * Do not share config to avoid double-free.
-		 * Each location owns its own config which is freed in cleanup.
-		 * WAF instances can be safely shared as they are reference-counted.
-		 */
 	}
 
 	return NGX_CONF_OK;
