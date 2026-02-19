@@ -63,7 +63,7 @@ http {
             coraza on;
             coraza_rules '
                 SecRuleEngine On
-                SecRule ARGS "@streq root" "id:10,phase:1,auditlog,status:403,deny"
+                SecRule ARGS "@streq root" "id:10,phase:1,log,auditlog,status:403,deny"
                 SecDebugLog %%TESTDIR%%/auditlog-debug-local.txt
                 SecDebugLogLevel 9
                 SecAuditEngine RelevantOnly
@@ -81,7 +81,7 @@ http {
         coraza on;
         coraza_rules '
             SecRuleEngine On
-            SecRule ARGS "@streq root" "id:10,phase:1,auditlog,status:403,deny"
+            SecRule ARGS "@streq root" "id:10,phase:1,log,auditlog,status:403,deny"
             SecDebugLog %%TESTDIR%%/auditlog-debug-global.txt
             SecDebugLogLevel 9
             SecAuditEngine RelevantOnly
@@ -155,11 +155,8 @@ like($t4, qr/$index_txt/, 'Coraza at server / other');
 like($global, qr/what=root/, 'Coraza at server / root present in auditlog');
 unlike($global, qr/what=other/, 'Coraza at server / other not present in auditlog');
 
-TODO: {
-local $TODO = 'libcoraza audit log H section does not include rule match messages';
-like($local, qr/Access denied with code 403/, 'Coraza at location / 403 in auditlog');
-like($global, qr/Access denied with code 403/, 'Coraza at server / 403 in auditlog');
-}
+like($local, qr/Access denied/, 'Coraza at location / 403 in auditlog');
+like($global, qr/Access denied/, 'Coraza at server / 403 in auditlog');
 
 ###############################################################################
 

@@ -46,6 +46,7 @@ http {
             coraza_rules '
                 SecRuleEngine On
                 SecResponseBodyAccess On
+                SecResponseBodyMimeType text/plain
                 SecResponseBodyLimit 128
                 SecRule RESPONSE_BODY "@rx BAD BODY" "id:11,phase:4,deny,log,status:403"
             ';
@@ -61,9 +62,5 @@ $t->plan(1);
 
 ###############################################################################
 
-TODO: {
-local $TODO = 'not yet';
-
 like(http_get('/body1'), qr/^HTTP.*403/, 'response body (block)');
-}
 

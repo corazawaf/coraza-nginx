@@ -466,5 +466,29 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      */
      //r->headers_out.content_length_n = -1;
 
+    /*
+     * Delay forwarding response headers until the body filter has finished
+     * processing phase 4 (response body inspection).  This ensures that if
+     * a phase-4 rule denies the request we can still return a clean error
+     * page because the original 200 headers have not yet been sent to the
+     * client.
+     *
+     * We skip the delay for HEAD requests (no body to inspect), error pages
+     * (already an error response), and subrequests (handled independently).
+     */
+    if (!r->header_only && !r->error_page && r == r->main) {
+        ctx->headers_delayed = 1;
+        ctx->pending_chain = NULL;
+        ctx->pending_chain_last = &ctx->pending_chain;
+        return NGX_OK;
+    }
+
+    return ngx_http_next_header_filter(r);
+}
+
+
+ngx_int_t
+ngx_http_coraza_forward_header(ngx_http_request_t *r)
+{
     return ngx_http_next_header_filter(r);
 }
