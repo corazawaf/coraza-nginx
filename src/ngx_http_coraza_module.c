@@ -63,6 +63,12 @@ ngx_http_coraza_process_intervention(coraza_transaction_t transaction, ngx_http_
 		 */
 		coraza_update_status_code(ctx->coraza_transaction, intervention->status);
 
+		if (ctx->transaction_id.len > 0) {
+			ngx_log_error(NGX_LOG_ERR, (ngx_log_t *)r->connection->log, 0,
+				"Coraza: Access denied with code %d, unique_id \"%V\"",
+				intervention->status, &ctx->transaction_id);
+		}
+
 		if (early_log)
 		{
 			dd("intervention -- calling log handler manually with code: %d", intervention->status);
@@ -133,10 +139,13 @@ ngx_http_coraza_create_ctx(ngx_http_request_t *r)
 			return NULL;
 		}
 		ctx->coraza_transaction = coraza_new_transaction_with_id(waf, (char *)s.data);
+		ctx->transaction_id.data = ngx_pstrdup(r->pool, &s);
+		ctx->transaction_id.len = s.len;
 	}
 	else
 	{
 		ctx->coraza_transaction = coraza_new_transaction(waf);
+		ngx_str_null(&ctx->transaction_id);
 	}
 
 	dd("transaction created");

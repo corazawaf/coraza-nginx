@@ -64,6 +64,7 @@ typedef struct {
     ngx_http_request_t *r;
     coraza_transaction_t coraza_transaction;
     coraza_intervention_t *delayed_intervention;
+    ngx_str_t transaction_id;
 
     unsigned waiting_more_body:1;
     unsigned body_requested:1;
