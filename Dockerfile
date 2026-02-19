@@ -1,7 +1,5 @@
 FROM --platform=$BUILDPLATFORM golang as go-builder
 
-ARG libcoraza_version=master
-
 # For latest build deps, see https://github.com/nginxinc/docker-nginx/blob/master/mainline/alpine/Dockerfile
 RUN set -eux; \
   apt-get update -qq; \
@@ -13,10 +11,12 @@ RUN set -eux; \
     bash \
     make
 
+ARG libcoraza_repo=ppomes/libcoraza
+
 RUN set -eux; \
-    wget https://github.com/corazawaf/libcoraza/tarball/master -O /tmp/master; \
+    wget https://github.com/${libcoraza_repo}/tarball/master -O /tmp/master; \
     tar -xvf /tmp/master; \
-    cd corazawaf-libcoraza-*; \
+    cd *-libcoraza-*; \
     ./build.sh; \
     ./configure; \
     make; \
