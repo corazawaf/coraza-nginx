@@ -62,8 +62,7 @@ $t->plan(1);
 ###############################################################################
 
 TODO: {
-local $TODO = 'not yet';
-
+local $TODO = 'response body rule matching is intermittent';
 like(http_get('/body1'), qr/^HTTP.*403/, 'response body (block)');
 }
 

@@ -106,10 +106,7 @@ like(http_get('/subfolder1/index.html?what=subfolder2'), qr/should be moved\/blo
 
 # Performing requests at subfolder2
 like(http_get('/subfolder1/subfolder2/index.html?what=root'), qr/should be moved\/blocked before this./, 'nothing - requested root at subfolder 2');
-TODO: {
-local $TODO = 'coraza_rules_merge does not merge parent rules into child WAF';
 like(http_get('/subfolder1/subfolder2/index.html?what=subfolder1'), qr/^HTTP.*302/, 'redirect 302 - subfolder 2');
-}
 like(http_get('/subfolder1/subfolder2/index.html?what=subfolder2'), qr/^HTTP.*302/, 'redirect 302 - subfolder 2');
 
 

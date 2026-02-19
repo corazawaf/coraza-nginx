@@ -225,7 +225,4 @@ like($subfolder4, qr/what=subfolder4/, 'subfolder4');
 like($subfolder4, qr/what=subfolder3/, 'subfolder4 / subfolder3');
 
 like($subfolder4, qr/what=subfolder4withE/, 'subfolder4');
-TODO: {
-local $TODO = 'ctl:auditLogParts not supported by libcoraza';
 like($subfolder4, qr/-E--/, 'subfolder4 - E section via ctl:auditLogParts=+E');
-}
