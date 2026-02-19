@@ -51,7 +51,6 @@ ngx_http_coraza_process_intervention(coraza_transaction_t transaction, ngx_http_
 	if (intervention->action != NULL)
 	{
 		dd("intervention action: %s", intervention->action);
-		ngx_log_error(NGX_LOG_ERR, (ngx_log_t *)r->connection->log, 0, "Coraza intervention: %s", intervention->action);
 	}
 
 	if (intervention->status != 200)
@@ -74,11 +73,15 @@ ngx_http_coraza_process_intervention(coraza_transaction_t transaction, ngx_http_
 		if (r->header_sent)
 		{
 			dd("Headers are already sent. Cannot perform the redirection at this point.");
+			coraza_free_intervention(intervention);
 			return NGX_ERROR;
 		}
 		dd("intervention -- returning code: %d", intervention->status);
-		return intervention->status;
+		ngx_int_t status = intervention->status;
+		coraza_free_intervention(intervention);
+		return status;
 	}
+	coraza_free_intervention(intervention);
 	return NGX_OK;
 }
 
