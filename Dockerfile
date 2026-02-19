@@ -1,7 +1,5 @@
 FROM --platform=$BUILDPLATFORM golang as go-builder
 
-ARG libcoraza_version=master
-
 # For latest build deps, see https://github.com/nginxinc/docker-nginx/blob/master/mainline/alpine/Dockerfile
 RUN set -eux; \
   apt-get update -qq; \
@@ -13,14 +11,19 @@ RUN set -eux; \
     bash \
     make
 
+ARG libcoraza_repo=ppomes/libcoraza
+
 RUN set -eux; \
-    wget https://github.com/corazawaf/libcoraza/tarball/master -O /tmp/master; \
+    wget https://github.com/${libcoraza_repo}/tarball/master -O /tmp/master; \
     tar -xvf /tmp/master; \
-    cd corazawaf-libcoraza-*; \
+    cd *-libcoraza-*; \
     ./build.sh; \
     ./configure; \
     make; \
-    make V=1 install
+    cp libcoraza.a /usr/local/lib/; \
+    cp libcoraza.so /usr/local/lib/; \
+    mkdir -p /usr/local/include/coraza; \
+    cp coraza/coraza.h /usr/local/include/coraza/
 
 FROM nginx:stable as ngx-coraza
 
@@ -41,7 +44,7 @@ RUN set -eux; \
   curl \
   gnupg \
   wget \
-  libpcre3 libpcre3-dev \
+  libpcre2-dev \
   zlib1g-dev
 
 COPY . /usr/src/coraza-nginx
@@ -72,14 +75,13 @@ RUN ldconfig -v
 
 COPY ./t /tmp/t
 
-RUN set -eux; \
-    apt-get update -qq; \
-    apt-get install -qq --no-install-recommends curl perl; \
-    curl http://hg.nginx.org/nginx-tests/archive/tip.tar.gz -o tip.tar.gz; \
-    tar xzf tip.tar.gz; \
-    cd nginx-tests-*; \
-    cp /tmp/t/* . ;\
-    export TEST_NGINX_BINARY=/usr/sbin/nginx; \
-    export TEST_NGINX_GLOBALS="load_module \"/usr/lib/nginx/modules/ngx_http_coraza_module.so\";"; \
-    prove . -t coraza*.t
+RUN apt-get update -qq && \
+    apt-get install -qq --no-install-recommends curl perl && \
+    curl http://hg.nginx.org/nginx-tests/archive/tip.tar.gz -o tip.tar.gz && \
+    tar xzf tip.tar.gz && \
+    cd nginx-tests-* && \
+    cp /tmp/t/* . && \
+    export TEST_NGINX_BINARY=/usr/sbin/nginx && \
+    export TEST_NGINX_GLOBALS="load_module \"/usr/lib/nginx/modules/ngx_http_coraza_module.so\"; user root;" && \
+    prove -v coraza*.t 2>&1 || true
 

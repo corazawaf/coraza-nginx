@@ -17,6 +17,12 @@
 #include <ngx_http.h>
 #include <coraza/coraza.h>
 
+/* 
+ * Type definition for coraza_waf_config_t from the new libcoraza API.
+ * This type represents an opaque handle to a WAF configuration object.
+ */
+typedef uint64_t coraza_waf_config_t;
+
 
 /**
  * TAG_NUM:
@@ -58,6 +64,7 @@ typedef struct {
     ngx_http_request_t *r;
     coraza_transaction_t coraza_transaction;
     coraza_intervention_t *delayed_intervention;
+    ngx_str_t transaction_id;
 
     unsigned waiting_more_body:1;
     unsigned body_requested:1;
@@ -69,6 +76,7 @@ typedef struct {
 
 typedef struct {
     void                      *pool;
+    coraza_waf_config_t        config;
     coraza_waf_t               waf;
     ngx_uint_t                 rules_inline;
     ngx_uint_t                 rules_file;
@@ -79,9 +87,11 @@ typedef struct {
 typedef struct {
     void                      *pool;
     /* RulesSet or Rules */
-    coraza_waf_t waf;
+    coraza_waf_config_t        config;
+    coraza_waf_t               waf;
 
     ngx_flag_t                 enable;
+    ngx_flag_t                 has_rules;
 
     ngx_http_complex_value_t  *transaction_id;
 } ngx_http_coraza_conf_t;
@@ -99,7 +109,7 @@ typedef struct {
 extern ngx_module_t ngx_http_coraza_module;
 
 /* ngx_http_coraza_module.c */
-ngx_int_t ngx_http_coraza_process_intervention (coraza_transaction_t *transaction, ngx_http_request_t *r, ngx_int_t early_log);
+ngx_int_t ngx_http_coraza_process_intervention (coraza_transaction_t transaction, ngx_http_request_t *r, ngx_int_t early_log);
 ngx_http_coraza_ctx_t *ngx_http_coraza_create_ctx(ngx_http_request_t *r);
 
 /* ngx_http_coraza_body_filter.c */
@@ -121,6 +131,6 @@ ngx_int_t ngx_http_coraza_pre_access_handler(ngx_http_request_t *r);
 ngx_int_t ngx_http_coraza_rewrite_handler(ngx_http_request_t *r);
 
 /* ngx_http_coraza_utils.c */
-ngx_int_t ngx_str_to_char(ngx_str_t a, char *str, ngx_pool_t *p);
+ngx_int_t ngx_str_to_char(ngx_str_t a, char **str, ngx_pool_t *p);
 
 #endif /* _ngx_http_coraza_COMMON_H_INCLUDED_ */

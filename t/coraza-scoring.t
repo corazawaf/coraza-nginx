@@ -44,19 +44,19 @@ http {
         location /absolute {
             coraza_rules '
                 SecRuleEngine On
-                SecRule ARGS "@streq badarg1" "id:11,phase:2,setvar:tx.score=1"
-                SecRule ARGS "@streq badarg2" "id:12,phase:2,setvar:tx.score=2"
-                SecRule TX:SCORE "@ge 2" "id:199,phase:request,deny,log,status:403"
+                SecRule ARGS "@streq badarg1" "id:11,phase:2,pass,setvar:tx.score=1"
+                SecRule ARGS "@streq badarg2" "id:12,phase:2,pass,setvar:tx.score=2"
+                SecRule TX:SCORE "@ge 2" "id:199,phase:2,deny,log,status:403"
             ';
         }
 
         location /iterative {
             coraza_rules '
                 SecRuleEngine On
-                SecRule ARGS "@streq badarg1" "id:21,phase:2,setvar:tx.score=+1"
-                SecRule ARGS "@streq badarg2" "id:22,phase:2,setvar:tx.score=+1"
-                SecRule ARGS "@streq badarg3" "id:23,phase:2,setvar:tx.score=+1"
-                SecRule TX:SCORE "@ge 3" "id:299,phase:request,deny,log,status:403"
+                SecRule ARGS "@streq badarg1" "id:21,phase:2,pass,setvar:tx.score=+1"
+                SecRule ARGS "@streq badarg2" "id:22,phase:2,pass,setvar:tx.score=+1"
+                SecRule ARGS "@streq badarg3" "id:23,phase:2,pass,setvar:tx.score=+1"
+                SecRule TX:SCORE "@ge 3" "id:299,phase:2,deny,log,status:403"
             ';
         }
     }

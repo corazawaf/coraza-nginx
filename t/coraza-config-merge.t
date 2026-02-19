@@ -11,6 +11,7 @@ use strict;
 
 use Test::More;
 use Socket qw/ CRLF /;
+use IO::Socket::INET;
 
 BEGIN { use FindBin; chdir($FindBin::Bin); }
 
@@ -40,9 +41,10 @@ http {
     coraza_rules '
         SecRuleEngine On
         SecRequestBodyAccess On
+        SecAction "id:1,phase:1,pass,nolog,ctl:requestBodyProcessor=URLENCODED"
         SecRequestBodyLimit 128
         SecRequestBodyLimitAction Reject
-        SecRule REQUEST_BODY "@rx BAD BODY" "id:11,phase:request,deny,log,status:403"
+        SecRule REQUEST_BODY "@rx BAD BODY" "id:11,phase:2,deny,log,status:403"
     ';
 
     server {

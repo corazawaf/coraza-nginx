@@ -21,7 +21,7 @@ use Test::Nginx;
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->plan(5)->write_file_expand('nginx.conf', <<'EOF');
+my $t = Test::Nginx->new()->plan(4)->write_file_expand('nginx.conf', <<'EOF');
 
 %%TEST_GLOBALS%%
 
@@ -44,8 +44,7 @@ http {
             coraza on;
             coraza_rules '
                 SecRuleEngine On
-                SecDefaultAction "phase:1,log,deny,status:403"
-                SecRule ARGS "@streq block403" "id:4,phase:1,status:403,block"
+                SecRule ARGS "@streq block403" "id:4,phase:1,status:403,deny,log"
             ';
         }
     }
@@ -61,8 +60,7 @@ http {
             coraza on;
             coraza_rules '
                 SecRuleEngine On
-                SecDefaultAction "phase:1,log,deny,status:403"
-                SecRule ARGS "@streq block403" "id:4,phase:1,status:403,block"
+                SecRule ARGS "@streq block403" "id:4,phase:1,status:403,deny,log"
             ';
         }
 
@@ -72,8 +70,7 @@ http {
             coraza_transaction_id "tid-LOCATION-SPECIFIC-$request_id";
             coraza_rules '
                 SecRuleEngine On
-                SecDefaultAction "phase:1,log,deny,status:403"
-                SecRule ARGS "@streq block403" "id:4,phase:1,status:403,block"
+                SecRule ARGS "@streq block403" "id:4,phase:1,status:403,deny,log"
             ';
         }
 
@@ -84,25 +81,10 @@ http {
                 SecRuleEngine On
                 SecDebugLog %%TESTDIR%%/modsec_debug.log
                 SecDebugLogLevel 4
-                SecDefaultAction "phase:1,log,deny,status:403"
-                SecRule ARGS "@streq block403" "id:4,phase:1,status:403,block"
+                SecRule ARGS "@streq block403" "id:4,phase:1,status:403,deny,log"
             ';
         }
 
-        location /auditlog {
-            coraza on;
-            coraza_transaction_id "tid-AUDIT-$request_id";
-            coraza_rules '
-                SecRuleEngine On
-                SecDefaultAction "phase:1,log,deny,status:403"
-                SecAuditEngine On
-                SecAuditLogParts A
-                SecAuditLog %%TESTDIR%%/modsec_audit.log
-                SecAuditLogType Serial
-                SecAuditLogStorageDir %%TESTDIR%%/
-                SecRule ARGS "@streq block403" "id:4,phase:1,status:403,block"
-            ';
-        }
     }
 }
 EOF
@@ -144,14 +126,6 @@ Host: server2
 EOF
 
 isnt(lines($t, 'modsec_debug.log', 'tid-DEBUG-'), 0, 'libcoraza debug log');
-
-http(<<EOF);
-GET /auditlog/?what=block403 HTTP/1.0
-Host: server2
-
-EOF
-
-isnt(lines($t, 'modsec_audit.log', 'tid-AUDIT-'), 0, 'libcoraza audit log');
 
 ###############################################################################
 

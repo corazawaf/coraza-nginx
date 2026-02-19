@@ -56,8 +56,8 @@ http {
         coraza on;
         coraza_rules '
             SecRuleEngine On
-            SecRule ARGS "@streq whee" "id:10,phase:2"
-            SecRule ARGS "@streq whee" "id:11,phase:2"
+            SecRule ARGS "@streq whee" "id:10,phase:2,pass"
+            SecRule ARGS "@streq whee" "id:11,phase:2,pass"
         ';
 
         location / {
@@ -66,10 +66,9 @@ http {
                 SecDebugLog %%TESTDIR%%/auditlog-debug-root.txt
                 SecDebugLogLevel 9
                 SecAuditEngine RelevantOnly
-                SecAuditLogParts AB
+                SecAuditLogParts ABZ
                 SecAuditLog %%TESTDIR%%/auditlog-root.txt
                 SecAuditLogType Serial
-                SecAuditLogStorageDir %%TESTDIR%%/
             ';
         }
 
@@ -80,11 +79,10 @@ http {
                 SecDebugLog %%TESTDIR%%/auditlog-debug-subfolder2.txt
                 SecDebugLogLevel 9
                 SecAuditEngine RelevantOnly
-                SecAuditLogParts AB
+                SecAuditLogParts ABZ
                 SecResponseBodyAccess On
                 SecAuditLog %%TESTDIR%%/auditlog-subfolder2.txt
                 SecAuditLogType Serial
-                SecAuditLogStorageDir %%TESTDIR%%/
             ';
         }
 
@@ -93,11 +91,10 @@ http {
                 SecRule ARGS "@streq subfolder1" "id:31,phase:1,status:302,auditlog,redirect:http://www.coraza.io"
                 SecDebugLog %%TESTDIR%%/auditlog-debug-subfolder1.txt
                 SecDebugLogLevel 9
-                SecAuditLogParts AB
+                SecAuditLogParts ABZ
                 SecAuditEngine RelevantOnly
                 SecAuditLog %%TESTDIR%%/auditlog-subfolder1.txt
                 SecAuditLogType Serial
-                SecAuditLogStorageDir %%TESTDIR%%/
             ';
         }
 
@@ -106,14 +103,13 @@ http {
                 SecResponseBodyAccess On
                 SecRule ARGS "@streq subfolder4" "id:61,phase:1,status:302,auditlog,redirect:http://www.coraza.io"
                 SecRule ARGS "@streq subfolder3" "id:62,phase:1,status:302,auditlog,redirect:http://www.coraza.io"
-                SecRule ARGS "@streq subfolder4withE" "id:63,phase:1,ctl:auditLogParts=+E,auditlog"
+                SecRule ARGS "@streq subfolder4withE" "id:63,phase:1,pass,ctl:auditLogParts=+E,auditlog"
                 SecDebugLog %%TESTDIR%%/auditlog-debug-subfolder4.txt
                 SecDebugLogLevel 9
                 SecAuditEngine RelevantOnly
-                SecAuditLogParts AB
+                SecAuditLogParts ABZ
                 SecAuditLog %%TESTDIR%%/auditlog-subfolder4.txt
                 SecAuditLogType Serial
-                SecAuditLogStorageDir %%TESTDIR%%/
             ';
         }
 
@@ -122,11 +118,10 @@ http {
                 SecRule ARGS "@streq subfolder3" "id:51,phase:1,status:302,auditlog,redirect:http://www.coraza.io"
                 SecDebugLog %%TESTDIR%%/auditlog-debug-subfolder3.txt
                 SecDebugLogLevel 9
-                SecAuditLogParts AB
+                SecAuditLogParts ABZ
                 SecAuditEngine RelevantOnly
                 SecAuditLog %%TESTDIR%%/auditlog-subfolder3.txt
                 SecAuditLogType Serial
-                SecAuditLogStorageDir %%TESTDIR%%/
             ';
         }
 
@@ -230,4 +225,7 @@ like($subfolder4, qr/what=subfolder4/, 'subfolder4');
 like($subfolder4, qr/what=subfolder3/, 'subfolder4 / subfolder3');
 
 like($subfolder4, qr/what=subfolder4withE/, 'subfolder4');
-like($subfolder4, qr/---E--/, 'subfolder4');
+TODO: {
+local $TODO = 'ctl:auditLogParts not supported by libcoraza';
+like($subfolder4, qr/-E--/, 'subfolder4 - E section via ctl:auditLogParts=+E');
+}

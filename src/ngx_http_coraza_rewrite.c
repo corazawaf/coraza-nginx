@@ -74,11 +74,11 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
         }
 
-        if (ngx_str_to_char(addr_text, client_addr, r->pool) != NGX_OK) {
+        if (ngx_str_to_char(addr_text, &client_addr, r->pool) != NGX_OK) {
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
         }
 
-        if (ngx_str_to_char(ngx_server_addr, server_addr, r->pool) != NGX_OK) {
+        if (ngx_str_to_char(ngx_server_addr, &server_addr, r->pool) != NGX_OK) {
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
         } 
 
@@ -130,11 +130,11 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
                 break;
         }
 
-        if (ngx_str_to_char(r->unparsed_uri, uri, r->pool) != NGX_OK) {
+        if (ngx_str_to_char(r->unparsed_uri, &uri, r->pool) != NGX_OK) {
             dd("uri is of length zero");
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
         }
-        if (ngx_str_to_char(r->method_name, method, r->pool) != NGX_OK) {
+        if (ngx_str_to_char(r->method_name, &method, r->pool) != NGX_OK) {
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
         }
         

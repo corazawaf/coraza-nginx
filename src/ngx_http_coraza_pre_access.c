@@ -152,7 +152,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
 
         if (r->request_body->temp_file != NULL) {
             ngx_str_t file_path = r->request_body->temp_file->file.name;
-            if (ngx_str_to_char(file_path, file_name, r->pool) != NGX_OK) {
+            if (ngx_str_to_char(file_path, &file_name, r->pool) != NGX_OK) {
                 return NGX_HTTP_INTERNAL_SERVER_ERROR;
             }
             /*
@@ -189,6 +189,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
              */
             ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
             if (ret > 0) {
+                ctx->intervention_triggered = 1;
                 return ret;
             }
         }
@@ -202,13 +203,24 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
 
 /* XXX: once more -- is body can be modified ?  content-length need to be adjusted ? */
 
+        /* Check for body limit intervention before processing rules */
+        ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
+        if (r->error_page) {
+            return NGX_DECLINED;
+        }
+        if (ret > 0) {
+            ctx->intervention_triggered = 1;
+            return ret;
+        }
+
         coraza_process_request_body(ctx->coraza_transaction);
 
         ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
         if (r->error_page) {
             return NGX_DECLINED;
-            }
+        }
         if (ret > 0) {
+            ctx->intervention_triggered = 1;
             return ret;
         }
     }
