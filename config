@@ -31,10 +31,11 @@ if test -n "$ngx_module_link"; then
                      $ngx_addon_dir/src/ngx_http_coraza_body_filter.c \
                      $ngx_addon_dir/src/ngx_http_coraza_log.c \
                      $ngx_addon_dir/src/ngx_http_coraza_rewrite.c \
-                     $ngx_addon_dir/src/ngx_http_coraza_utils.c";
+                     $ngx_addon_dir/src/ngx_http_coraza_utils.c \
+                     $ngx_addon_dir/src/ngx_http_coraza_dl.c";
 
 	ngx_module_deps="$ngx_addon_dir/src/ddebug.h";
-    ngx_module_libs="-lcoraza"
+    ngx_module_libs="-ldl"
     ngx_module_incs="-L/usr/local/lib"
 
     ngx_module_order="ngx_http_chunked_filter_module \
@@ -47,7 +48,7 @@ if test -n "$ngx_module_link"; then
 	. auto/module
 else
 	CFLAGS="-I /usr/local/include $CFLAGS"
-	NGX_LD_OPT="-lcoraza $NGX_LD_OPT"
+	NGX_LD_OPT="-ldl $NGX_LD_OPT"
 
 	CORE_INCS="$CORE_INCS $ngx_feature_path"
 	CORE_LIBS="$CORE_LIBS $ngx_feature_libs"
@@ -60,7 +61,8 @@ else
                     $ngx_addon_dir/src/ngx_http_coraza_body_filter.c \
                     $ngx_addon_dir/src/ngx_http_coraza_log.c \
                     $ngx_addon_dir/src/ngx_http_coraza_rewrite.c \
-                    $ngx_addon_dir/src/ngx_http_coraza_utils.c";
+                    $ngx_addon_dir/src/ngx_http_coraza_utils.c \
+                    $ngx_addon_dir/src/ngx_http_coraza_dl.c";
 
 	NGX_ADDON_DEPS="$NGX_ADDON_DEPS \
                     $ngx_addon_dir/src/ddebug.h \

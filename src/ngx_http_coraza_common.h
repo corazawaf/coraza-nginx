@@ -17,12 +17,6 @@
 #include <ngx_http.h>
 #include <coraza/coraza.h>
 
-/* 
- * Type definition for coraza_waf_config_t from the new libcoraza API.
- * This type represents an opaque handle to a WAF configuration object.
- */
-typedef uint64_t coraza_waf_config_t;
-
 
 /**
  * TAG_NUM:
@@ -54,6 +48,21 @@ typedef uint64_t coraza_waf_config_t;
 #define CORAZA_NGINX_WHOAMI "coraza-nginx v" \
     CORAZA_NGINX_VERSION
 
+
+/* Deferred rule storage — rules are collected as strings during config
+ * parsing (master process) and replayed after fork in init_process. */
+
+typedef enum {
+    NGX_CORAZA_RULE_INLINE,
+    NGX_CORAZA_RULE_FILE
+} ngx_http_coraza_rule_type_e;
+
+typedef struct {
+    ngx_http_coraza_rule_type_e  type;
+    ngx_str_t                    value;
+} ngx_http_coraza_rule_entry_t;
+
+
 typedef struct {
     ngx_str_t name;
     ngx_str_t value;
@@ -80,8 +89,9 @@ typedef struct {
 
 typedef struct {
     void                      *pool;
-    coraza_waf_config_t        config;
     coraza_waf_t               waf;
+    ngx_array_t               *rules;       /* of ngx_http_coraza_rule_entry_t */
+    ngx_array_t               *loc_confs;   /* of ngx_http_coraza_conf_t * */
     ngx_uint_t                 rules_inline;
     ngx_uint_t                 rules_file;
     ngx_uint_t                 rules_remote;
@@ -90,9 +100,8 @@ typedef struct {
 
 typedef struct {
     void                      *pool;
-    /* RulesSet or Rules */
-    coraza_waf_config_t        config;
     coraza_waf_t               waf;
+    ngx_array_t               *rules;       /* of ngx_http_coraza_rule_entry_t */
 
     ngx_flag_t                 enable;
     ngx_flag_t                 has_rules;
@@ -115,6 +124,10 @@ extern ngx_module_t ngx_http_coraza_module;
 /* ngx_http_coraza_module.c */
 ngx_int_t ngx_http_coraza_process_intervention (coraza_transaction_t transaction, ngx_http_request_t *r, ngx_int_t early_log);
 ngx_http_coraza_ctx_t *ngx_http_coraza_create_ctx(ngx_http_request_t *r);
+
+/* ngx_http_coraza_dl.c */
+ngx_int_t ngx_http_coraza_dl_open(ngx_log_t *log);
+void ngx_http_coraza_dl_close(ngx_log_t *log);
 
 /* ngx_http_coraza_body_filter.c */
 ngx_int_t ngx_http_coraza_body_filter_init(void);
