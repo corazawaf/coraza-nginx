@@ -400,7 +400,7 @@ ngx_http_coraza_create_main_conf(ngx_conf_t *cf)
 
 	if (conf == NULL)
 	{
-		return NGX_CONF_ERROR;
+		return NULL;
 	}
 
 	/*
@@ -418,13 +418,13 @@ ngx_http_coraza_create_main_conf(ngx_conf_t *cf)
 	conf->rules = ngx_array_create(cf->pool, 4,
 								   sizeof(ngx_http_coraza_rule_entry_t));
 	if (conf->rules == NULL) {
-		return NGX_CONF_ERROR;
+		return NULL;
 	}
 
 	conf->loc_confs = ngx_array_create(cf->pool, 8,
 										sizeof(ngx_http_coraza_conf_t *));
 	if (conf->loc_confs == NULL) {
-		return NGX_CONF_ERROR;
+		return NULL;
 	}
 
 	/* No coraza_* calls here — library not loaded yet */
@@ -462,7 +462,7 @@ ngx_http_coraza_create_conf(ngx_conf_t *cf)
 	if (conf == NULL)
 	{
 		dd("Failed to allocate space for CORAZA configuration");
-		return NGX_CONF_ERROR;
+		return NULL;
 	}
 
 	/*
@@ -483,7 +483,7 @@ ngx_http_coraza_create_conf(ngx_conf_t *cf)
 	conf->rules = ngx_array_create(cf->pool, 4,
 								   sizeof(ngx_http_coraza_rule_entry_t));
 	if (conf->rules == NULL) {
-		return NGX_CONF_ERROR;
+		return NULL;
 	}
 
 	/* No coraza_* calls or cleanup handlers — library not loaded yet */
@@ -533,10 +533,21 @@ ngx_http_coraza_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 				return NGX_CONF_ERROR;
 			}
 
-			ngx_memcpy(ngx_array_push_n(merged, p->rules->nelts),
+			ngx_http_coraza_rule_entry_t *dst;
+
+			dst = ngx_array_push_n(merged, p->rules->nelts);
+			if (dst == NULL) {
+				return NGX_CONF_ERROR;
+			}
+			ngx_memcpy(dst,
 					   p->rules->elts,
 					   p->rules->nelts * sizeof(ngx_http_coraza_rule_entry_t));
-			ngx_memcpy(ngx_array_push_n(merged, c->rules->nelts),
+
+			dst = ngx_array_push_n(merged, c->rules->nelts);
+			if (dst == NULL) {
+				return NGX_CONF_ERROR;
+			}
+			ngx_memcpy(dst,
 					   c->rules->elts,
 					   c->rules->nelts * sizeof(ngx_http_coraza_rule_entry_t));
 

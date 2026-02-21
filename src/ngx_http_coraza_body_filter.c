@@ -52,15 +52,30 @@ ngx_http_coraza_read_body_data(ngx_http_request_t *r, ngx_buf_t *buf,
             return NGX_ERROR;
         }
 
-        ssize_t n = ngx_read_file(buf->file, data, len, buf->file_pos);
-        if (n == NGX_ERROR) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, ngx_errno,
-                          "coraza: failed to read response body from file");
-            return NGX_ERROR;
+        size_t  remaining = len;
+        off_t   offset = buf->file_pos;
+        size_t  total_read = 0;
+
+        while (remaining > 0) {
+            ssize_t n = ngx_read_file(buf->file, data + total_read,
+                                      remaining, offset);
+            if (n == NGX_ERROR) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, ngx_errno,
+                              "coraza: failed to read response body from file");
+                return NGX_ERROR;
+            }
+
+            if (n == 0) {
+                break;
+            }
+
+            total_read += (size_t) n;
+            remaining -= (size_t) n;
+            offset += n;
         }
 
         *out_data = data;
-        *out_len = (size_t) n;
+        *out_len = total_read;
         return NGX_OK;
     }
 
