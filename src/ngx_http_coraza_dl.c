@@ -10,7 +10,7 @@
  * thin wrapper that forwards to the real symbol resolved via dlsym().
  */
 
-#include <dlfcn.h>
+#include "dynlib.h"
 #include <ngx_core.h>
 #include <coraza/coraza.h>
 
@@ -78,7 +78,7 @@ static fn_coraza_process_logging         dl_process_logging;
 static fn_coraza_update_status_code      dl_update_status_code;
 static fn_coraza_add_get_args            dl_add_get_args;
 
-static void *dl_handle;
+static dynlib_t dl_handle;
 
 /* ------------------------------------------------------------------ */
 /* Resolve one symbol — returns NGX_ERROR on failure                   */
@@ -86,12 +86,12 @@ static void *dl_handle;
 
 #define DL_SYM(ptr, name)                                               \
     do {                                                                \
-        *(void **)(&ptr) = dlsym(dl_handle, #name);                    \
+        *(void **)(&ptr) = dynlib_sym(dl_handle, #name);               \
         if ((ptr) == NULL) {                                            \
             ngx_log_error(NGX_LOG_EMERG, log, 0,                       \
-                          "coraza: dlsym(\"%s\") failed: %s",          \
-                          #name, dlerror());                            \
-            dlclose(dl_handle);                                        \
+                          "coraza: dynlib_sym(\"%s\") failed: %s",     \
+                          #name, dynlib_error());                       \
+            dynlib_close(dl_handle);                                   \
             dl_handle = NULL;                                          \
             return NGX_ERROR;                                          \
         }                                                              \
@@ -108,11 +108,11 @@ ngx_http_coraza_dl_open(ngx_log_t *log)
         return NGX_OK;                     /* already loaded */
     }
 
-    dl_handle = dlopen("libcoraza.so", RTLD_NOW | RTLD_LOCAL);
+    dl_handle = dynlib_open("libcoraza" DYNLIB_EXT);
     if (dl_handle == NULL) {
         ngx_log_error(NGX_LOG_EMERG, log, 0,
-                      "coraza: dlopen(\"libcoraza.so\") failed: %s",
-                      dlerror());
+                      "coraza: dynlib_open(\"libcoraza" DYNLIB_EXT "\") failed: %s",
+                      dynlib_error());
         return NGX_ERROR;
     }
 
@@ -145,7 +145,7 @@ ngx_http_coraza_dl_open(ngx_log_t *log)
     DL_SYM(dl_add_get_args,             coraza_add_get_args);
 
     ngx_log_error(NGX_LOG_NOTICE, log, 0,
-                  "coraza: libcoraza.so loaded via dlopen");
+                  "coraza: libcoraza" DYNLIB_EXT " loaded via dynlib_open");
 
     return NGX_OK;
 }
@@ -158,10 +158,10 @@ void
 ngx_http_coraza_dl_close(ngx_log_t *log)
 {
     if (dl_handle != NULL) {
-        dlclose(dl_handle);
+        dynlib_close(dl_handle);
         dl_handle = NULL;
         ngx_log_error(NGX_LOG_NOTICE, log, 0,
-                      "coraza: libcoraza.so unloaded");
+                      "coraza: libcoraza" DYNLIB_EXT " unloaded");
     }
 }
 
