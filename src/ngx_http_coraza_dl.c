@@ -108,10 +108,11 @@ ngx_http_coraza_dl_open(ngx_log_t *log)
         return NGX_OK;                     /* already loaded */
     }
 
-    dl_handle = dynlib_open("libcoraza" DYNLIB_EXT);
+    dl_handle = dynlib_open(CORAZA_DYNLIB_BASENAME DYNLIB_EXT);
     if (dl_handle == NULL) {
         ngx_log_error(NGX_LOG_EMERG, log, 0,
-                      "coraza: dynlib_open(\"libcoraza" DYNLIB_EXT "\") failed: %s",
+                      "coraza: dynlib_open(\"%s\") failed: %s",
+                      CORAZA_DYNLIB_BASENAME DYNLIB_EXT,
                       dynlib_error());
         return NGX_ERROR;
     }
@@ -145,7 +146,8 @@ ngx_http_coraza_dl_open(ngx_log_t *log)
     DL_SYM(dl_add_get_args,             coraza_add_get_args);
 
     ngx_log_error(NGX_LOG_NOTICE, log, 0,
-                  "coraza: libcoraza" DYNLIB_EXT " loaded via dynlib_open");
+                  "coraza: %s loaded via dynlib_open",
+                  CORAZA_DYNLIB_BASENAME DYNLIB_EXT);
 
     return NGX_OK;
 }
@@ -161,7 +163,8 @@ ngx_http_coraza_dl_close(ngx_log_t *log)
         dynlib_close(dl_handle);
         dl_handle = NULL;
         ngx_log_error(NGX_LOG_NOTICE, log, 0,
-                      "coraza: libcoraza" DYNLIB_EXT " unloaded");
+                      "coraza: %s unloaded",
+                      CORAZA_DYNLIB_BASENAME DYNLIB_EXT);
     }
 }
 

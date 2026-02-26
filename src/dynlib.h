@@ -11,12 +11,14 @@
 #ifndef DYNLIB_H
 #define DYNLIB_H
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(_WIN64)
 
 #include <windows.h>
 
 typedef HMODULE dynlib_t;
 
+/* Windows typically doesn't use "lib" prefix */
+#define CORAZA_DYNLIB_BASENAME "coraza"
 /* Library file extension per platform */
 #define DYNLIB_EXT ".dll"
 
@@ -49,6 +51,8 @@ static inline const char *dynlib_error(void)
 
 typedef void *dynlib_t;
 
+#define CORAZA_DYNLIB_BASENAME "libcoraza"
+
 #ifdef __APPLE__
 #define DYNLIB_EXT ".dylib"
 #else
@@ -75,6 +79,6 @@ static inline const char *dynlib_error(void)
     return dlerror();
 }
 
-#endif /* _WIN32 */
+#endif /* _WIN32 || _WIN64 */
 
 #endif /* DYNLIB_H */
