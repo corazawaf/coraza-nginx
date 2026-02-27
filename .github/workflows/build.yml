@@ -143,7 +143,7 @@ jobs:
           cp ../t/* .
           export TEST_NGINX_BINARY=/usr/sbin/nginx
           export TEST_NGINX_GLOBALS="load_module \"/usr/lib/nginx/modules/ngx_http_coraza_module.so\";"
-          prove . -t coraza*.t
+          prove coraza*.t
 
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # ratchet:actions/upload-artifact@v6
