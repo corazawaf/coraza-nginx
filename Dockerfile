@@ -11,11 +11,11 @@ RUN set -eux; \
     bash \
     make
 
-ARG libcoraza_repo=corazawaf/libcoraza
+ARG LIBCORAZA_VERSION=v1.0.0
 
 RUN set -eux; \
-    wget https://github.com/${libcoraza_repo}/tarball/master -O /tmp/master; \
-    tar -xvf /tmp/master; \
+    wget https://github.com/corazawaf/libcoraza/tarball/${LIBCORAZA_VERSION} -O /tmp/libcoraza.tar.gz; \
+    tar -xvf /tmp/libcoraza.tar.gz; \
     cd *-libcoraza-*; \
     ./build.sh; \
     ./configure; \
