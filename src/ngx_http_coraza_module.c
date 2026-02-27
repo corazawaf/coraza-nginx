@@ -755,17 +755,20 @@ ngx_http_coraza_exit_process(ngx_cycle_t *cycle)
 		return;
 	}
 
-	/* Free loc_conf WAFs (skip shared ones) */
+	/* Free loc_conf WAFs, skipping shared ones.
+	 * Walk the array twice: first pass frees unique WAFs,
+	 * second pass zeroes all pointers.  This avoids a double-free
+	 * bug where zeroing waf in the first pass defeats the dedup check
+	 * for later loc_confs that share the same handle. */
 	loc_confs = mmcf->loc_confs->elts;
 	for (i = 0; i < mmcf->loc_confs->nelts; i++) {
 		ngx_http_coraza_conf_t *lcf = loc_confs[i];
 
 		if (lcf->waf == 0 || lcf->waf == mmcf->waf) {
-			lcf->waf = 0;
 			continue;
 		}
 
-		/* Check if an earlier loc_conf shares this WAF */
+		/* Check if an earlier loc_conf already freed this WAF */
 		ngx_uint_t j;
 		ngx_int_t shared = 0;
 		for (j = 0; j < i; j++) {
@@ -777,7 +780,9 @@ ngx_http_coraza_exit_process(ngx_cycle_t *cycle)
 		if (!shared) {
 			coraza_free_waf(lcf->waf);
 		}
-		lcf->waf = 0;
+	}
+	for (i = 0; i < mmcf->loc_confs->nelts; i++) {
+		loc_confs[i]->waf = 0;
 	}
 
 	/* Free main WAF */
