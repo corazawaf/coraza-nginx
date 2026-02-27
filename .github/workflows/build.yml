@@ -13,7 +13,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       module_version: 1.26
-      libcoraza_version: master
+      libcoraza_version: v1.0.0
     strategy:
       matrix:
         nginx_version: ['1.24.0']
@@ -42,15 +42,15 @@ jobs:
       # Grab libcoraza
       - name: Grab libcoraza-${{ env.libcoraza_version }} cache
         uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # ratchet:actions/cache@v5
-        id: cache-pcre
+        id: cache-libcoraza
         with:
-          path: libcoraza-${{ env.libcoraza_version }}
+          path: libcoraza-*
           key: libcoraza-${{ env.libcoraza_version }}
       - name: Download libcoraza
         if: steps.cache-libcoraza.outputs.cache-hit != 'true'
         run: |
           cd ${{ github.workspace }}
-          wget https://github.com/corazawaf/libcoraza/archive/refs/heads/${{ env.libcoraza_version }}.zip
+          wget https://github.com/corazawaf/libcoraza/archive/refs/tags/${{ env.libcoraza_version }}.zip
           unzip -o ${{ env.libcoraza_version }}.zip
 
       # Grab prebuilts from apt
@@ -80,7 +80,7 @@ jobs:
       # Build libcoraza
       - name: Build libcoraza
         run: |
-          cd libcoraza-${{ env.libcoraza_version }}
+          cd libcoraza-*
           ./build.sh
           ./configure
           make
