@@ -11,7 +11,7 @@ RUN set -eux; \
     bash \
     make
 
-ARG libcoraza_repo=ppomes/libcoraza
+ARG libcoraza_repo=corazawaf/libcoraza
 
 RUN set -eux; \
     wget https://github.com/${libcoraza_repo}/tarball/master -O /tmp/master; \
