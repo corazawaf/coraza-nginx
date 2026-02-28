@@ -1,13 +1,3 @@
-⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️
-THIS MODULE IS NOT PRODUCTION READY
-⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️
-
-👉 YOU CANNOT CREATE ISSUES HERE, BUT YOU CAN CREATE PULL REQUESTS FIXING PROBLEMS 👈
-
-🙏 DO NOT CREATE PULL REQUESTS TO COMPLAIN ABOUT THINGS NOT WORKING. THIS IS EXPERIMENTAL AND NO WORK IS BEING DONE HERE. 
-
-👉YOU ARE WELCOME TO WORK ON IT AND SEND PULL REQUESTS! 👈
-
 [![Compile module](https://github.com/corazawaf/coraza-nginx/actions/workflows/build.yml/badge.svg)](https://github.com/corazawaf/coraza-nginx/actions/workflows/build.yml)
 
 # Coraza NGINX Connector
