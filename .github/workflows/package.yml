@@ -1,0 +1,188 @@
+name: Package and Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write   # to upload release assets
+  id-token: write   # for cosign OIDC keyless signing
+
+jobs:
+  package:
+    name: Package for nginx ${{ matrix.nginx_version }}
+    runs-on: ubuntu-22.04
+    env:
+      libcoraza_version: v1.0.0
+    strategy:
+      matrix:
+        nginx_version: ['1.24.0', '1.26.0']
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # ratchet:actions/checkout@v6
+
+      # Grab nginx source, from cache if possible, or from web
+      - name: Grab nginx-${{ matrix.nginx_version }} cache
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # ratchet:actions/cache@v5
+        id: cache-nginx
+        with:
+          path: nginx-${{ matrix.nginx_version }}
+          key: nginx-${{ matrix.nginx_version }}
+      - name: Download nginx
+        if: steps.cache-nginx.outputs.cache-hit != 'true'
+        run: |
+          cd ${{ github.workspace }}
+          wget https://nginx.org/download/nginx-${{ matrix.nginx_version }}.tar.gz
+          tar -xzvf nginx-${{ matrix.nginx_version }}.tar.gz
+
+      # Grab libcoraza
+      - name: Grab libcoraza-${{ env.libcoraza_version }} cache
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # ratchet:actions/cache@v5
+        id: cache-libcoraza
+        with:
+          path: libcoraza-*
+          key: libcoraza-${{ env.libcoraza_version }}
+      - name: Download libcoraza
+        if: steps.cache-libcoraza.outputs.cache-hit != 'true'
+        run: |
+          cd ${{ github.workspace }}
+          wget https://github.com/corazawaf/libcoraza/archive/refs/tags/${{ env.libcoraza_version }}.zip
+          unzip -o ${{ env.libcoraza_version }}.zip
+
+      - name: Install build dependencies
+        run: |
+          sudo add-apt-repository universe
+          sudo apt-get -qq update
+          sudo apt-get -y -qq \
+          --fix-missing --no-install-recommends install \
+          gcc make ruby ruby-dev rubygems build-essential
+          sudo gem install --no-document fpm
+
+      - name: Set up Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # ratchet:actions/setup-go@v6
+        with:
+          go-version: ^1.21.x
+
+      - name: Configure environment
+        run: |
+          export LD_LIBRARY_PATH=/usr/local/lib
+          export LIBRARY_PATH=/usr/local/lib
+          export C_INCLUDE_PATH=/usr/local/include
+
+      # Build libcoraza
+      - name: Build libcoraza
+        run: |
+          cd libcoraza-*
+          ./build.sh
+          ./configure
+          make
+          sudo make install
+          sudo ldconfig
+
+      - name: Configure compilation of dynamic module
+        run: |
+          cd ${{ github.workspace }}/nginx-${{ matrix.nginx_version }}
+          ./configure \
+          --with-compat \
+          --add-dynamic-module=${{ github.workspace }}/ \
+          --with-cc-opt='-g -O2 -fstack-protector-strong -Wformat -Werror=format-security -Wno-unused-function -fPIC -Wdate-time -D_FORTIFY_SOURCE=2' \
+          --with-ld-opt='-Wl,-Bsymbolic-functions -Wl,-z,relro -Wl,-z,now -fPIC' \
+          --prefix=/etc/nginx \
+          --sbin-path=/usr/sbin/nginx \
+          --conf-path=/etc/nginx/nginx.conf \
+          --http-log-path=/var/log/nginx/access.log \
+          --error-log-path=/var/log/nginx/error.log \
+          --lock-path=/var/lock/nginx.lock \
+          --pid-path=/run/nginx.pid \
+          --modules-path=/usr/lib/nginx/modules \
+          --http-client-body-temp-path=/var/cache/nginx/client_temp \
+          --http-proxy-temp-path=/var/cache/nginx/proxy_temp \
+          --http-fastcgi-temp-path=/var/cache/nginx/fastcgi_temp \
+          --http-uwsgi-temp-path=/var/cache/nginx/uwsgi_temp \
+          --http-scgi-temp-path=/var/cache/nginx/scgi_temp \
+          --with-debug \
+          --with-threads \
+          --with-http_ssl_module \
+          --with-http_realip_module \
+          --with-http_auth_request_module \
+          --with-http_v2_module \
+          --with-http_sub_module
+
+      - name: Compile dynamic module
+        run: |
+          cd ${{ github.workspace }}/nginx-${{ matrix.nginx_version }}
+          make modules
+
+      - name: Create packages
+        run: |
+          # Strip leading 'v' from tag (e.g. v1.2.3 -> 1.2.3)
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+
+          # Populate staging directory
+          mkdir -p /tmp/pkg/usr/lib/nginx/modules
+          mkdir -p /tmp/pkg/usr/local/lib
+          cp ${{ github.workspace }}/nginx-${{ matrix.nginx_version }}/objs/ngx_http_coraza_module.so \
+             /tmp/pkg/usr/lib/nginx/modules/ngx_http_coraza_module.so
+          cp /usr/local/lib/libcoraza.so /tmp/pkg/usr/local/lib/libcoraza.so
+
+          PKGBASE="coraza-nginx_${VERSION}_nginx${{ matrix.nginx_version }}_amd64"
+
+          # Create .deb (Debian/Ubuntu)
+          fpm -s dir -t deb \
+            -n coraza-nginx \
+            -v "${VERSION}" \
+            --description "Coraza WAF nginx dynamic module" \
+            --url "https://github.com/corazawaf/coraza-nginx" \
+            --license "Apache-2.0" \
+            --architecture amd64 \
+            --maintainer "Coraza <security@coraza.io>" \
+            --vendor "Coraza" \
+            -C /tmp/pkg \
+            --package "${PKGBASE}.deb" \
+            .
+
+          # Create .rpm (RHEL/CentOS/Rocky Linux/Fedora)
+          fpm -s dir -t rpm \
+            -n coraza-nginx \
+            -v "${VERSION}" \
+            --description "Coraza WAF nginx dynamic module" \
+            --url "https://github.com/corazawaf/coraza-nginx" \
+            --license "Apache-2.0" \
+            --architecture x86_64 \
+            --maintainer "Coraza <security@coraza.io>" \
+            --vendor "Coraza" \
+            -C /tmp/pkg \
+            --package "${PKGBASE}.rpm" \
+            .
+
+          # Move packages to workspace for later steps
+          mv "${PKGBASE}.deb" "${{ github.workspace }}/"
+          mv "${PKGBASE}.rpm" "${{ github.workspace }}/"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # ratchet:sigstore/cosign-installer@v3.7.0
+
+      - name: Sign packages with cosign (keyless)
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+          PKGBASE="coraza-nginx_${VERSION}_nginx${{ matrix.nginx_version }}_amd64"
+
+          cosign sign-blob --yes \
+            --bundle "${PKGBASE}.deb.bundle" \
+            "${PKGBASE}.deb"
+
+          cosign sign-blob --yes \
+            --bundle "${PKGBASE}.rpm.bundle" \
+            "${PKGBASE}.rpm"
+
+      - name: Upload packages and signatures to release
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # ratchet:softprops/action-gh-release@v2.5.0
+        with:
+          files: |
+            coraza-nginx_*_nginx${{ matrix.nginx_version }}_amd64.deb
+            coraza-nginx_*_nginx${{ matrix.nginx_version }}_amd64.deb.bundle
+            coraza-nginx_*_nginx${{ matrix.nginx_version }}_amd64.rpm
+            coraza-nginx_*_nginx${{ matrix.nginx_version }}_amd64.rpm.bundle
