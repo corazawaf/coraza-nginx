@@ -9,6 +9,7 @@ use warnings;
 use strict;
 
 use Test::More;
+use IO::Socket::INET;
 
 BEGIN { use FindBin; chdir($FindBin::Bin); }
 
@@ -47,11 +48,10 @@ http {
             coraza on;
             coraza_rules '
                 SecRuleEngine On
-                SecDefaultAction "phase:1,log,deny,status:403"
-                SecRule ARGS "@streq redirect301" "id:1,phase:1,status:301,redirect:http://www.coraza.io"
-                SecRule ARGS "@streq redirect302" "id:2,phase:1,status:302,redirect:http://www.coraza.io"
-                SecRule ARGS "@streq block401" "id:3,phase:1,status:401,block"
-                SecRule ARGS "@streq block403" "id:4,phase:1,status:403,block"
+                SecRule ARGS "@streq redirect301" "id:1,phase:1,status:301,log,redirect:http://www.coraza.io"
+                SecRule ARGS "@streq redirect302" "id:2,phase:1,status:302,log,redirect:http://www.coraza.io"
+                SecRule ARGS "@streq block401" "id:3,phase:1,status:401,deny,log"
+                SecRule ARGS "@streq block403" "id:4,phase:1,status:403,deny,log"
             ';
             proxy_pass http://127.0.0.1:8081;
             proxy_read_timeout 1s;
@@ -60,11 +60,10 @@ http {
             coraza on;
             coraza_rules '
                 SecRuleEngine On
-                SecDefaultAction "phase:2,log,deny,status:403"
-                SecRule ARGS "@streq redirect301" "id:1,phase:2,status:301,redirect:http://www.coraza.io"
-                SecRule ARGS "@streq redirect302" "id:2,phase:2,status:302,redirect:http://www.coraza.io"
-                SecRule ARGS "@streq block401" "id:3,phase:2,status:401,block"
-                SecRule ARGS "@streq block403" "id:4,phase:2,status:403,block"
+                SecRule ARGS "@streq redirect301" "id:1,phase:2,status:301,log,redirect:http://www.coraza.io"
+                SecRule ARGS "@streq redirect302" "id:2,phase:2,status:302,log,redirect:http://www.coraza.io"
+                SecRule ARGS "@streq block401" "id:3,phase:2,status:401,deny,log"
+                SecRule ARGS "@streq block403" "id:4,phase:2,status:403,deny,log"
             ';
             proxy_pass http://127.0.0.1:8081;
             proxy_read_timeout 1s;
@@ -73,11 +72,10 @@ http {
             coraza on;
             coraza_rules '
                 SecRuleEngine On
-                SecDefaultAction "phase:3,log,deny,status:403"
-                SecRule ARGS "@streq redirect301" "id:1,phase:3,status:301,redirect:http://www.coraza.io"
-                SecRule ARGS "@streq redirect302" "id:2,phase:3,status:302,redirect:http://www.coraza.io"
-                SecRule ARGS "@streq block401" "id:3,phase:3,status:401,block"
-                SecRule ARGS "@streq block403" "id:4,phase:3,status:403,block"
+                SecRule ARGS "@streq redirect301" "id:1,phase:3,status:301,log,redirect:http://www.coraza.io"
+                SecRule ARGS "@streq redirect302" "id:2,phase:3,status:302,log,redirect:http://www.coraza.io"
+                SecRule ARGS "@streq block401" "id:3,phase:3,status:401,deny,log"
+                SecRule ARGS "@streq block403" "id:4,phase:3,status:403,deny,log"
             ';
             proxy_pass http://127.0.0.1:8081;
             proxy_read_timeout 1s;
@@ -87,11 +85,10 @@ http {
             coraza_rules '
                 SecRuleEngine On
                 SecResponseBodyAccess On
-                SecDefaultAction "phase:4,log,deny,status:403"
-                SecRule ARGS "@streq redirect301" "id:1,phase:4,status:301,redirect:http://www.coraza.io"
-                SecRule ARGS "@streq redirect302" "id:2,phase:4,status:302,redirect:http://www.coraza.io"
-                SecRule ARGS "@streq block401" "id:3,phase:4,status:401,block"
-                SecRule ARGS "@streq block403" "id:4,phase:4,status:403,block"
+                SecRule ARGS "@streq redirect301" "id:1,phase:4,status:301,log,redirect:http://www.coraza.io"
+                SecRule ARGS "@streq redirect302" "id:2,phase:4,status:302,log,redirect:http://www.coraza.io"
+                SecRule ARGS "@streq block401" "id:3,phase:4,status:401,deny,log"
+                SecRule ARGS "@streq block403" "id:4,phase:4,status:403,deny,log"
             ';
             proxy_pass http://127.0.0.1:8081;
             proxy_read_timeout 1s;
@@ -117,25 +114,25 @@ unlike(http_head('/'), qr/SEE-THIS/, 'proxy head request');
 like(http_get('/phase1?what=redirect302'), qr/^HTTP.*302/, 'redirect 302 - phase 1');
 like(http_get('/phase2?what=redirect302'), qr/^HTTP.*302/, 'redirect 302 - phase 2');
 like(http_get('/phase3?what=redirect302'), qr/^HTTP.*302/, 'redirect 302 - phase 3');
-is(http_get('/phase4?what=redirect302'), '', 'redirect 302 - phase 4');
+like(http_get('/phase4?what=redirect302'), qr/^HTTP.*302/, 'redirect 302 - phase 4');
 
 # Redirect (301)
 like(http_get('/phase1?what=redirect301'), qr/^HTTP.*301/, 'redirect 301 - phase 1');
 like(http_get('/phase2?what=redirect301'), qr/^HTTP.*301/, 'redirect 301 - phase 2');
 like(http_get('/phase3?what=redirect301'), qr/^HTTP.*301/, 'redirect 301 - phase 3');
-is(http_get('/phase4?what=redirect301'), '', 'redirect 301 - phase 4');
+like(http_get('/phase4?what=redirect301'), qr/^HTTP.*301/, 'redirect 301 - phase 4');
 
 # Block (401)
 like(http_get('/phase1?what=block401'), qr/^HTTP.*401/, 'block 401 - phase 1');
 like(http_get('/phase2?what=block401'), qr/^HTTP.*401/, 'block 401 - phase 2');
 like(http_get('/phase3?what=block401'), qr/^HTTP.*401/, 'block 401 - phase 3');
-is(http_get('/phase4?what=block401'), '', 'block 401 - phase 4');
+like(http_get('/phase4?what=block401'), qr/^HTTP.*401/, 'block 401 - phase 4');
 
 # Block (403)
 like(http_get('/phase1?what=block403'), qr/^HTTP.*403/, 'block 403 - phase 1');
 like(http_get('/phase2?what=block403'), qr/^HTTP.*403/, 'block 403 - phase 2');
 like(http_get('/phase3?what=block403'), qr/^HTTP.*403/, 'block 403 - phase 3');
-is(http_get('/phase4?what=block403'), '', 'block 403 - phase 4');
+like(http_get('/phase4?what=block403'), qr/^HTTP.*403/, 'block 403 - phase 4');
 
 # Nothing to detect
 like(http_get('/phase1?what=nothing'), qr/phase1\?what=nothing\' not found/, 'nothing phase 1');

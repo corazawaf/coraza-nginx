@@ -11,6 +11,7 @@ use strict;
 
 use Test::More;
 use Socket qw/ CRLF /;
+use IO::Socket::INET;
 
 BEGIN { use FindBin; chdir($FindBin::Bin); }
 
@@ -47,7 +48,8 @@ http {
             coraza_rules '
                 SecRuleEngine On
                 SecRequestBodyAccess On
-                SecRule REQUEST_BODY "@rx BAD BODY" "id:11,phase:request,deny,log,status:403"
+                SecAction "id:1,phase:1,pass,nolog,ctl:requestBodyProcessor=URLENCODED"
+                SecRule REQUEST_BODY "@rx BAD BODY" "id:11,phase:2,deny,log,status:403"
             ';
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
         }
@@ -56,8 +58,8 @@ http {
             coraza_rules '
                 SecRuleEngine On
                 SecRequestBodyAccess Off
-                SecRule REQUEST_BODY "@rx BAD BODY" "id:21,phase:request,deny,log,status:403"
-                SecRule ARGS_POST|ARGS_POST_NAMES "@rx BAD ARG" "id:22,phase:request,deny,log,status:403"
+                SecRule REQUEST_BODY "@rx BAD BODY" "id:21,phase:2,deny,log,status:403"
+                SecRule ARGS_POST|ARGS_POST_NAMES "@rx BAD ARG" "id:22,phase:2,deny,log,status:403"
             ';
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
         }
@@ -66,9 +68,10 @@ http {
             coraza_rules '
                 SecRuleEngine On
                 SecRequestBodyAccess On
-                SecRequestBodyLimit 128
+                SecAction "id:1,phase:1,pass,nolog,ctl:requestBodyProcessor=URLENCODED"
+                SecRequestBodyLimit 129
                 SecRequestBodyLimitAction Reject
-                SecRule REQUEST_BODY "@rx BAD BODY" "id:31,phase:request,deny,log,status:403"
+                SecRule REQUEST_BODY "@rx BAD BODY" "id:31,phase:2,deny,log,status:403"
             ';
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
         }
@@ -82,9 +85,10 @@ http {
             coraza_rules '
                 SecRuleEngine On
                 SecRequestBodyAccess On
-                SecRequestBodyLimit 128
+                SecAction "id:1,phase:1,pass,nolog,ctl:requestBodyProcessor=URLENCODED"
+                SecRequestBodyLimit 129
                 SecRequestBodyLimitAction ProcessPartial
-                SecRule REQUEST_BODY "@rx BAD BODY" "id:41,phase:request,deny,log,status:403"
+                SecRule REQUEST_BODY "@rx BAD BODY" "id:41,phase:2,deny,log,status:403"
             ';
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
         }
@@ -110,9 +114,10 @@ http {
         coraza_rules '
             SecRuleEngine On
             SecRequestBodyAccess On
-            SecRequestBodyLimit 128
+            SecAction "id:1,phase:1,pass,nolog,ctl:requestBodyProcessor=URLENCODED"
+            SecRequestBodyLimit 129
             SecRequestBodyLimitAction Reject
-            SecRule REQUEST_BODY "@rx BAD BODY" "id:31,phase:request,deny,log,status:403"
+            SecRule REQUEST_BODY "@rx BAD BODY" "id:31,phase:2,deny,log,status:403"
         ';
         location / {
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
@@ -134,7 +139,7 @@ like(http_req_body($method, '/bodyaccess', 'VERY BAD BODY'), qr/^HTTP.*403/, "$m
 like(http_req_body($method, '/nobodyaccess', 'VERY BAD BODY'), qr/TEST-OK-IF-YOU-SEE-THIS/, "$method request body access off, pass");
 like(http_req_body_postargs($method, '/nobodyaccess', 'BAD ARG'), qr/TEST-OK-IF-YOU-SEE-THIS/, "$method request body access off (ARGS_POST), pass");
 like(http_req_body($method, '/bodylimitreject', 'BODY' x 32), qr/TEST-OK-IF-YOU-SEE-THIS/, "$method request body limit reject, pass");
-like(http_req_body($method, '/bodylimitreject', 'BODY' x 33), qr/^HTTP.*403/, "$method request body limit reject, block");
+like(http_req_body($method, '/bodylimitreject', 'BODY' x 33), qr/^HTTP.*413/, "$method request body limit reject, block");
 like(http_req_body($method, '/bodylimitprocesspartial', 'BODY' x 32 . 'BAD BODY'), qr/TEST-OK-IF-YOU-SEE-THIS/, "$method request body limit process partial, pass");
 like(http_req_body($method, '/bodylimitprocesspartial', 'BODY' x 30 . 'BAD BODY' x 32), qr/^HTTP.*403/, "$method request body limit process partial, block");
 }
@@ -167,7 +172,7 @@ like(
 );
 
 foreach my $method (('GET', 'POST', 'PUT', 'DELETE')) {
-like(http_req_body($method, '/bodylimitrejectserver', 'BODY' x 33), qr/^HTTP.*403/, "$method request body limit reject, block (inherited SecRequestBodyLimit)");
+like(http_req_body($method, '/bodylimitrejectserver', 'BODY' x 33), qr/^HTTP.*413/, "$method request body limit reject, block (inherited SecRequestBodyLimit)");
 }
 
 ###############################################################################

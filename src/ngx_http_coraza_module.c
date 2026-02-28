@@ -24,17 +24,15 @@ static void *ngx_http_coraza_create_main_conf(ngx_conf_t *cf);
 static char *ngx_http_coraza_init_main_conf(ngx_conf_t *cf, void *conf);
 static void *ngx_http_coraza_create_conf(ngx_conf_t *cf);
 static char *ngx_http_coraza_merge_conf(ngx_conf_t *cf, void *parent, void *child);
-static void ngx_http_coraza_cleanup_instance(void *data);
-static void ngx_http_coraza_cleanup_rules(void *data);
+static ngx_int_t ngx_http_coraza_init_process(ngx_cycle_t *cycle);
+static void ngx_http_coraza_exit_process(ngx_cycle_t *cycle);
 
 ngx_inline ngx_int_t
-ngx_http_coraza_process_intervention(coraza_transaction_t *transaction, ngx_http_request_t *r, ngx_int_t early_log)
+ngx_http_coraza_process_intervention(coraza_transaction_t transaction, ngx_http_request_t *r, ngx_int_t early_log)
 {
-	char *log = NULL;
 	coraza_intervention_t *intervention;
 	ngx_http_coraza_ctx_t *ctx = NULL;
-	ngx_table_elt_t *location = NULL;
-	
+
 	dd("processing intervention");
 
 	ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
@@ -50,50 +48,9 @@ ngx_http_coraza_process_intervention(coraza_transaction_t *transaction, ngx_http
 		return NGX_OK;
 	}
 
-	log = intervention->log;
-	if (intervention->log == NULL)
+	if (intervention->action != NULL)
 	{
-		log = "(no log message was specified)";
-	}
-
-	ngx_log_error(NGX_LOG_ERR, (ngx_log_t *)r->connection->log, 0, "%s", log);
-
-	if (intervention->log != NULL)
-	{
-		free(intervention->log);
-	}
-
-	if (intervention->url != NULL)
-	{
-		dd("intervention -- redirecting to: %s with status code: %d", intervention.url, intervention.status);
-
-		if (r->header_sent)
-		{
-			dd("Headers are already sent. Cannot perform the redirection at this point.");
-			return NGX_ERROR;
-		}
-
-		/**
-		 * Not sure if it sane to do this indepent of the phase
-		 * but, here we go...
-		 *
-		 * This code cames from: http/ngx_http_special_response.c
-		 * function: ngx_http_send_error_page
-		 * src/http/ngx_http_core_module.c
-		 * From src/http/ngx_http_core_module.c (line 1910) i learnt
-		 * that location->hash should be set to 1.
-		 *
-		 */
-		ngx_http_clear_location(r);
-		ngx_str_t a = ngx_string(intervention->url);
-
-		location = ngx_list_push(&r->headers_out.headers);
-		ngx_str_set(&location->key, "Location");
-		location->value = a;
-		r->headers_out.location = location;
-		r->headers_out.location->hash = 1;
-
-		return intervention->status;
+		dd("intervention action: %s", intervention->action);
 	}
 
 	if (intervention->status != 200)
@@ -106,9 +63,15 @@ ngx_http_coraza_process_intervention(coraza_transaction_t *transaction, ngx_http
 		 */
 		coraza_update_status_code(ctx->coraza_transaction, intervention->status);
 
+		if (ctx->transaction_id.len > 0) {
+			ngx_log_error(NGX_LOG_ERR, (ngx_log_t *)r->connection->log, 0,
+				"Coraza: Access denied with code %d, unique_id \"%V\"",
+				intervention->status, &ctx->transaction_id);
+		}
+
 		if (early_log)
 		{
-			dd("intervention -- calling log handler manually with code: %d", intervention.status);
+			dd("intervention -- calling log handler manually with code: %d", intervention->status);
 			ngx_http_coraza_log_handler(r);
 			ctx->logged = 1;
 		}
@@ -116,11 +79,15 @@ ngx_http_coraza_process_intervention(coraza_transaction_t *transaction, ngx_http
 		if (r->header_sent)
 		{
 			dd("Headers are already sent. Cannot perform the redirection at this point.");
+			coraza_free_intervention(intervention);
 			return NGX_ERROR;
 		}
-		dd("intervention -- returning code: %d", intervention.status);
-		return intervention->status;
+		dd("intervention -- returning code: %d", intervention->status);
+		ngx_int_t status = intervention->status;
+		coraza_free_intervention(intervention);
+		return status;
 	}
+	coraza_free_intervention(intervention);
 	return NGX_OK;
 }
 
@@ -154,19 +121,31 @@ ngx_http_coraza_create_ctx(ngx_http_request_t *r)
 	mmcf = ngx_http_get_module_main_conf(r, ngx_http_coraza_module);
 	mcf = ngx_http_get_module_loc_conf(r, ngx_http_coraza_module);
 
-	dd("creating transaction with the following rules: '%p' -- ms: '%p'", mcf->rules_set, mmcf->modsec);
+	dd("creating transaction with the following WAFs: loc='%p' -- main='%p'", mcf->waf, mmcf->waf);
+
+	/* Use location-specific WAF if available, otherwise fall back to main WAF */
+	coraza_waf_t waf = mcf->waf != 0 ? mcf->waf : mmcf->waf;
+
+	if (waf == 0)
+	{
+		dd("WAF not initialized");
+		return NULL;
+	}
 
 	if (mcf->transaction_id)
 	{
 		if (ngx_http_complex_value(r, mcf->transaction_id, &s) != NGX_OK)
 		{
-			return NGX_CONF_ERROR;
+			return NULL;
 		}
-		ctx->coraza_transaction = coraza_new_transaction_with_id(mmcf->waf, (char *)s.data);
+		ctx->coraza_transaction = coraza_new_transaction_with_id(waf, (char *)s.data);
+		ctx->transaction_id.data = ngx_pstrdup(r->pool, &s);
+		ctx->transaction_id.len = s.len;
 	}
 	else
 	{
-		ctx->coraza_transaction = coraza_new_transaction(mmcf->waf);
+		ctx->coraza_transaction = coraza_new_transaction(waf);
+		ngx_str_null(&ctx->transaction_id);
 	}
 
 	dd("transaction created");
@@ -177,7 +156,7 @@ ngx_http_coraza_create_ctx(ngx_http_request_t *r)
 	if (cln == NULL)
 	{
 		dd("failed to create the CORAZA context cleanup");
-		return NGX_CONF_ERROR;
+		return NULL;
 	}
 	cln->handler = ngx_http_coraza_cleanup;
 	cln->data = ctx;
@@ -188,30 +167,30 @@ ngx_http_coraza_create_ctx(ngx_http_request_t *r)
 char *
 ngx_conf_set_rules(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
-	int res;
-	char *rules = NULL;
 	ngx_str_t *value;
-	char *error = NULL;
 	ngx_http_coraza_conf_t *mcf = conf;
 	ngx_http_coraza_main_conf_t *mmcf;
+	ngx_http_coraza_rule_entry_t *entry;
 
 	value = cf->args->elts;
 
-	if (ngx_str_to_char(value[1], rules, cf->pool) != NGX_OK) {
-		dd("Failed to get the rules");
+	/* Store the rule string for deferred replay in init_process */
+	entry = ngx_array_push(mcf->rules);
+	if (entry == NULL) {
 		return NGX_CONF_ERROR;
 	}
 
-	res = coraza_rules_add(mcf->waf, rules, &error);
-
-	if (res < 0)
-	{
-		dd("Failed to load the rules: '%s' - reason: '%s'", rules, error);
+	entry->type = NGX_CORAZA_RULE_INLINE;
+	entry->value.len = value[1].len;
+	entry->value.data = ngx_pstrdup(cf->pool, &value[1]);
+	if (entry->value.data == NULL) {
 		return NGX_CONF_ERROR;
 	}
+
+	mcf->has_rules = 1;
 
 	mmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_coraza_module);
-	mmcf->rules_inline += res;
+	mmcf->rules_inline += 1;
 
 	return NGX_CONF_OK;
 }
@@ -219,30 +198,30 @@ ngx_conf_set_rules(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 char *
 ngx_conf_set_rules_file(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
-	int res;
-	char *rules_set = NULL;
 	ngx_str_t *value;
-	char **error = NULL;
 	ngx_http_coraza_conf_t *mcf = conf;
 	ngx_http_coraza_main_conf_t *mmcf;
+	ngx_http_coraza_rule_entry_t *entry;
 
 	value = cf->args->elts;
 
-	if (ngx_str_to_char(value[1], rules_set, cf->pool) != NGX_OK) {
-		dd("Failed to get the rules_file");
+	/* Store the file path for deferred replay in init_process */
+	entry = ngx_array_push(mcf->rules);
+	if (entry == NULL) {
 		return NGX_CONF_ERROR;
 	}
 
-	res = coraza_rules_add(mcf->waf, rules_set, error);
-
-	if (res < 0)
-	{
-		dd("Failed to load the rules from: '%s' - reason: '%s'", rules_set, error);
+	entry->type = NGX_CORAZA_RULE_FILE;
+	entry->value.len = value[1].len;
+	entry->value.data = ngx_pstrdup(cf->pool, &value[1]);
+	if (entry->value.data == NULL) {
 		return NGX_CONF_ERROR;
 	}
+
+	mcf->has_rules = 1;
 
 	mmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_coraza_module);
-	mmcf->rules_file += res;
+	mmcf->rules_file += 1;
 
 	return NGX_CONF_OK;
 }
@@ -327,10 +306,10 @@ ngx_module_t ngx_http_coraza_module = {
 	NGX_HTTP_MODULE,		  /* module type */
 	NULL,					  /* init master */
 	NULL,					  /* init module */
-	NULL,					  /* init process */
+	ngx_http_coraza_init_process, /* init process */
 	NULL,					  /* init thread */
 	NULL,					  /* exit thread */
-	NULL,					  /* exit process */
+	ngx_http_coraza_exit_process, /* exit process */
 	NULL,					  /* exit master */
 	NGX_MODULE_V1_PADDING};
 
@@ -414,7 +393,6 @@ ngx_http_coraza_init(ngx_conf_t *cf)
 static void *
 ngx_http_coraza_create_main_conf(ngx_conf_t *cf)
 {
-	ngx_pool_cleanup_t *cln;
 	ngx_http_coraza_main_conf_t *conf;
 
 	conf = (ngx_http_coraza_main_conf_t *)ngx_pcalloc(cf->pool,
@@ -422,43 +400,36 @@ ngx_http_coraza_create_main_conf(ngx_conf_t *cf)
 
 	if (conf == NULL)
 	{
-		return NGX_CONF_ERROR;
+		return NULL;
 	}
 
 	/*
 	 * set by ngx_pcalloc():
 	 *
-	 *     conf->waf = NULL;
+	 *     conf->waf = 0;
 	 *     conf->pool = NULL;
 	 *     conf->rules_inline = 0;
 	 *     conf->rules_file = 0;
 	 *     conf->rules_remote = 0;
 	 */
 
-	cln = ngx_pool_cleanup_add(cf->pool, 0);
-	if (cln == NULL)
-	{
-		return NGX_CONF_ERROR;
-	}
-
-	cln->handler = ngx_http_coraza_cleanup_instance;
-	cln->data = conf;
-
 	conf->pool = cf->pool;
 
-	/* Create our CORAZA instance */
-	conf->waf = coraza_new_waf();
-	if (conf->waf == 0)
-	{
-		dd("failed to create the CORAZA instance");
-		return NGX_CONF_ERROR;
+	conf->rules = ngx_array_create(cf->pool, 4,
+								   sizeof(ngx_http_coraza_rule_entry_t));
+	if (conf->rules == NULL) {
+		return NULL;
 	}
 
-	/* Provide our connector information to LibCORAZA */
-	// coraza_set_connector_info(conf->waf, CORAZA_NGINX_WHOAMI);
-	coraza_set_log_cb(conf->waf, (coraza_log_cb) ngx_http_coraza_log);
+	conf->loc_confs = ngx_array_create(cf->pool, 8,
+										sizeof(ngx_http_coraza_conf_t *));
+	if (conf->loc_confs == NULL) {
+		return NULL;
+	}
 
-	dd("main conf created at: '%p', instance is: '%p'", conf, conf->waf);
+	/* No coraza_* calls here — library not loaded yet */
+
+	dd("main conf created at: '%p'", conf);
 
 	return conf;
 }
@@ -469,8 +440,11 @@ ngx_http_coraza_init_main_conf(ngx_conf_t *cf, void *conf)
 	ngx_http_coraza_main_conf_t *mmcf;
 	mmcf = (ngx_http_coraza_main_conf_t *)conf;
 
+	/* No coraza_* calls — WAFs are created in init_process after fork */
+
 	ngx_log_error(NGX_LOG_NOTICE, cf->log, 0,
-				  "rules loaded inline/local: %ui/%ui",
+				  "coraza: rules collected inline/local: %ui/%ui "
+				  "(WAFs will be created in worker processes)",
 				  mmcf->rules_inline,
 				  mmcf->rules_file);
 
@@ -480,7 +454,6 @@ ngx_http_coraza_init_main_conf(ngx_conf_t *cf, void *conf)
 static void *
 ngx_http_coraza_create_conf(ngx_conf_t *cf)
 {
-	ngx_pool_cleanup_t *cln;
 	ngx_http_coraza_conf_t *conf;
 
 	conf = (ngx_http_coraza_conf_t *)ngx_pcalloc(cf->pool,
@@ -489,36 +462,31 @@ ngx_http_coraza_create_conf(ngx_conf_t *cf)
 	if (conf == NULL)
 	{
 		dd("Failed to allocate space for CORAZA configuration");
-		return NGX_CONF_ERROR;
+		return NULL;
 	}
 
 	/*
 	 * set by ngx_pcalloc():
 	 *
 	 *     conf->enable = 0;
-	 *     conf->sanity_checks_enabled = 0;
-	 *     conf->rules_set = NULL;
+	 *     conf->waf = 0;
 	 *     conf->pool = NULL;
 	 *     conf->transaction_id = NULL;
+	 *     conf->has_rules = 0;
 	 */
 
 	conf->enable = NGX_CONF_UNSET;
-	conf->waf = coraza_new_waf();
+	conf->waf = 0;
 	conf->pool = cf->pool;
 	conf->transaction_id = NGX_CONF_UNSET_PTR;
-#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
-	conf->sanity_checks_enabled = NGX_CONF_UNSET;
-#endif
 
-	cln = ngx_pool_cleanup_add(cf->pool, 0);
-	if (cln == NULL)
-	{
-		dd("failed to create the CORAZA configuration cleanup");
-		return NGX_CONF_ERROR;
+	conf->rules = ngx_array_create(cf->pool, 4,
+								   sizeof(ngx_http_coraza_rule_entry_t));
+	if (conf->rules == NULL) {
+		return NULL;
 	}
 
-	cln->handler = ngx_http_coraza_cleanup_rules;
-	cln->data = conf;
+	/* No coraza_* calls or cleanup handlers — library not loaded yet */
 
 	dd("conf created at: '%p'", conf);
 
@@ -530,14 +498,15 @@ ngx_http_coraza_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 {
 	ngx_http_coraza_conf_t *p = parent;
 	ngx_http_coraza_conf_t *c = child;
+	ngx_http_coraza_main_conf_t *mmcf;
+	ngx_http_coraza_conf_t **lcp;
+
 #if defined(CORAZA_DDEBUG) && (CORAZA_DDEBUG)
 	ngx_http_core_loc_conf_t *clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
 	dd("merging loc config [%s] - parent: '%p' child: '%p'",
 		clcf->name.data, parent,
 		child);
 #endif
-	int rules;
-	char **error = NULL;
 
 	dd("                  state - parent: '%d' child: '%d'",
 	   (int)c->enable, (int)p->enable);
@@ -548,54 +517,281 @@ ngx_http_coraza_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 	ngx_conf_merge_value(c->sanity_checks_enabled, p->sanity_checks_enabled, 0);
 #endif
 
-#if defined(CORAZA_DDEBUG) && (CORAZA_DDEBUG)
-	dd("PARENT RULES");
-	coraza_rules_dump(p->rules_set);
-	dd("CHILD RULES");
-	coraza_rules_dump(c->rules_set);
-#endif
-	rules = coraza_rules_merge(c->waf, p->waf, error);
+	/*
+	 * Prepend parent rules to child rules — this produces the same rule
+	 * ordering as the old coraza_rules_merge() approach.
+	 */
+	if (p->rules->nelts > 0) {
+		if (c->rules->nelts > 0) {
+			/* Child has its own rules: prepend parent's rules before them */
+			ngx_array_t *merged;
+			ngx_uint_t total = p->rules->nelts + c->rules->nelts;
 
-	if (rules < 0)
-	{
-		return *error;
+			merged = ngx_array_create(cf->pool, total,
+									  sizeof(ngx_http_coraza_rule_entry_t));
+			if (merged == NULL) {
+				return NGX_CONF_ERROR;
+			}
+
+			ngx_http_coraza_rule_entry_t *dst;
+
+			dst = ngx_array_push_n(merged, p->rules->nelts);
+			if (dst == NULL) {
+				return NGX_CONF_ERROR;
+			}
+			ngx_memcpy(dst,
+					   p->rules->elts,
+					   p->rules->nelts * sizeof(ngx_http_coraza_rule_entry_t));
+
+			dst = ngx_array_push_n(merged, c->rules->nelts);
+			if (dst == NULL) {
+				return NGX_CONF_ERROR;
+			}
+			ngx_memcpy(dst,
+					   c->rules->elts,
+					   c->rules->nelts * sizeof(ngx_http_coraza_rule_entry_t));
+
+			c->rules = merged;
+			c->has_rules = 1;
+		} else {
+			/* Child has no own rules: share parent's rules pointer */
+			c->rules = p->rules;
+			if (p->has_rules) {
+				c->has_rules = 1;
+			}
+		}
 	}
 
-#if defined(CORAZA_DDEBUG) && (CORAZA_DDEBUG)
-	dd("NEW CHILD RULES");
-	coraza_rules_dump(c->rules_set);
-#endif
+	/* Track each loc_conf so init_process can iterate them */
+	mmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_coraza_module);
+	lcp = ngx_array_push(mmcf->loc_confs);
+	if (lcp == NULL) {
+		return NGX_CONF_ERROR;
+	}
+	*lcp = c;
+
 	return NGX_CONF_OK;
 }
 
-static void
-ngx_http_coraza_cleanup_instance(void *data)
+
+/* ------------------------------------------------------------------ */
+/* Helper: build a WAF from a rules array                              */
+/* ------------------------------------------------------------------ */
+
+static coraza_waf_t
+ngx_http_coraza_build_waf(ngx_array_t *rules, ngx_log_t *log)
 {
-	ngx_http_coraza_main_conf_t *mmcf;
+	ngx_http_coraza_rule_entry_t *entries;
+	coraza_waf_config_t config;
+	coraza_waf_t waf;
+	char *error = NULL;
+	char *cstr;
+	ngx_uint_t i;
 
-	mmcf = (ngx_http_coraza_main_conf_t *)data;
+	if (rules == NULL || rules->nelts == 0) {
+		return 0;
+	}
 
-	dd("deleting a main conf -- instance is: \"%p\"", mmcf->modsec);
+	config = coraza_new_waf_config();
+	if (config == 0) {
+		ngx_log_error(NGX_LOG_ERR, log, 0,
+					  "coraza: failed to create WAF config");
+		return 0;
+	}
 
-	// TODO
-	// msc_cleanup(mmcf->modsec);
+	entries = rules->elts;
+	for (i = 0; i < rules->nelts; i++) {
+		/* Build a null-terminated C string from the ngx_str_t */
+		cstr = malloc(entries[i].value.len + 1);
+		if (cstr == NULL) {
+			ngx_log_error(NGX_LOG_ERR, log, 0,
+						  "coraza: malloc failed for rule string");
+			coraza_free_waf_config(config);
+			return 0;
+		}
+		ngx_memcpy(cstr, entries[i].value.data, entries[i].value.len);
+		cstr[entries[i].value.len] = '\0';
 
-	// Casting to void so variable is not unused
-	(void)mmcf;
+		if (entries[i].type == NGX_CORAZA_RULE_INLINE) {
+			if (coraza_rules_add(config, cstr) < 0) {
+				ngx_log_error(NGX_LOG_ERR, log, 0,
+							  "coraza: failed to add inline rule: \"%s\"", cstr);
+				free(cstr);
+				coraza_free_waf_config(config);
+				return 0;
+			}
+		} else {
+			if (coraza_rules_add_file(config, cstr) < 0) {
+				ngx_log_error(NGX_LOG_ERR, log, 0,
+							  "coraza: failed to add rules file: \"%s\"", cstr);
+				free(cstr);
+				coraza_free_waf_config(config);
+				return 0;
+			}
+		}
+		free(cstr);
+	}
+
+	waf = coraza_new_waf(config, &error);
+	coraza_free_waf_config(config);
+
+	if (waf == 0) {
+		ngx_log_error(NGX_LOG_ERR, log, 0,
+					  "coraza: failed to create WAF: %s",
+					  error ? error : "unknown error");
+		return 0;
+	}
+
+	return waf;
 }
 
-static void
-ngx_http_coraza_cleanup_rules(void *data)
+
+/* ------------------------------------------------------------------ */
+/* init_process: called in each worker after fork                      */
+/* ------------------------------------------------------------------ */
+
+static ngx_int_t
+ngx_http_coraza_init_process(ngx_cycle_t *cycle)
 {
-	ngx_http_coraza_conf_t *mcf;
+	ngx_http_coraza_main_conf_t *mmcf;
+	ngx_http_coraza_conf_t **loc_confs;
+	ngx_uint_t i;
 
-	mcf = (ngx_http_coraza_conf_t *)data;
+	/* Step 1: load libcoraza.so — Go runtime initializes fresh here */
+	if (ngx_http_coraza_dl_open(cycle->log) != NGX_OK) {
+		return NGX_ERROR;
+	}
 
-	dd("deleting a loc conf -- RuleSet is: \"%p\"", mcf->rules_set);
-	// TODO
+	mmcf = ngx_http_cycle_get_module_main_conf(cycle, ngx_http_coraza_module);
+	if (mmcf == NULL) {
+		return NGX_OK;
+	}
 
-	// Casting to void so variable is not unused
-	(void)mcf;
+	/* Step 2: build main WAF (always create one — acts as fallback for
+	 * locations with coraza=on but no rules in the hierarchy) */
+	if (mmcf->rules->nelts > 0) {
+		mmcf->waf = ngx_http_coraza_build_waf(mmcf->rules, cycle->log);
+	} else {
+		/* Empty WAF — transactions pass through without rules */
+		coraza_waf_config_t cfg = coraza_new_waf_config();
+		if (cfg != 0) {
+			char *err = NULL;
+			mmcf->waf = coraza_new_waf(cfg, &err);
+			coraza_free_waf_config(cfg);
+		}
+	}
+	if (mmcf->waf == 0) {
+		ngx_log_error(NGX_LOG_ERR, cycle->log, 0,
+					  "coraza: failed to build main WAF in worker");
+		return NGX_ERROR;
+	}
+	ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0,
+				  "coraza: main WAF initialized with %d rules",
+				  coraza_rules_count(mmcf->waf));
+
+	/* Step 3: build WAF for each loc_conf */
+	loc_confs = mmcf->loc_confs->elts;
+	for (i = 0; i < mmcf->loc_confs->nelts; i++) {
+		ngx_http_coraza_conf_t *lcf = loc_confs[i];
+
+		if (!lcf->has_rules || lcf->rules->nelts == 0) {
+			continue;
+		}
+
+		/* If this loc_conf shares a rules pointer with main or another
+		 * loc_conf that we already built, reuse that WAF. */
+		if (lcf->rules == mmcf->rules && mmcf->waf != 0) {
+			lcf->waf = mmcf->waf;
+			continue;
+		}
+
+		/* Check if another loc_conf already built this exact rules array */
+		ngx_uint_t j;
+		ngx_int_t found = 0;
+		for (j = 0; j < i; j++) {
+			if (loc_confs[j]->rules == lcf->rules && loc_confs[j]->waf != 0) {
+				lcf->waf = loc_confs[j]->waf;
+				found = 1;
+				break;
+			}
+		}
+		if (found) {
+			continue;
+		}
+
+		lcf->waf = ngx_http_coraza_build_waf(lcf->rules, cycle->log);
+		if (lcf->waf == 0) {
+			ngx_log_error(NGX_LOG_ERR, cycle->log, 0,
+						  "coraza: failed to build loc WAF in worker");
+			return NGX_ERROR;
+		}
+		ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0,
+					  "coraza: loc WAF initialized with %d rules",
+					  coraza_rules_count(lcf->waf));
+	}
+
+	ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0,
+				  "coraza: WAFs initialized in worker process %P",
+				  ngx_pid);
+
+	return NGX_OK;
+}
+
+
+/* ------------------------------------------------------------------ */
+/* exit_process: called when a worker shuts down                       */
+/* ------------------------------------------------------------------ */
+
+static void
+ngx_http_coraza_exit_process(ngx_cycle_t *cycle)
+{
+	ngx_http_coraza_main_conf_t *mmcf;
+	ngx_http_coraza_conf_t **loc_confs;
+	ngx_uint_t i;
+
+	mmcf = ngx_http_cycle_get_module_main_conf(cycle, ngx_http_coraza_module);
+	if (mmcf == NULL) {
+		ngx_http_coraza_dl_close(cycle->log);
+		return;
+	}
+
+	/* Free loc_conf WAFs, skipping shared ones.
+	 * Walk the array twice: first pass frees unique WAFs,
+	 * second pass zeroes all pointers.  This avoids a double-free
+	 * bug where zeroing waf in the first pass defeats the dedup check
+	 * for later loc_confs that share the same handle. */
+	loc_confs = mmcf->loc_confs->elts;
+	for (i = 0; i < mmcf->loc_confs->nelts; i++) {
+		ngx_http_coraza_conf_t *lcf = loc_confs[i];
+
+		if (lcf->waf == 0 || lcf->waf == mmcf->waf) {
+			continue;
+		}
+
+		/* Check if an earlier loc_conf already freed this WAF */
+		ngx_uint_t j;
+		ngx_int_t shared = 0;
+		for (j = 0; j < i; j++) {
+			if (loc_confs[j]->waf == lcf->waf) {
+				shared = 1;
+				break;
+			}
+		}
+		if (!shared) {
+			coraza_free_waf(lcf->waf);
+		}
+	}
+	for (i = 0; i < mmcf->loc_confs->nelts; i++) {
+		loc_confs[i]->waf = 0;
+	}
+
+	/* Free main WAF */
+	if (mmcf->waf != 0) {
+		coraza_free_waf(mmcf->waf);
+		mmcf->waf = 0;
+	}
+
+	ngx_http_coraza_dl_close(cycle->log);
 }
 
 /* vi:set ft=c ts=4 sw=4 et fdm=marker: */

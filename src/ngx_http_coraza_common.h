@@ -48,6 +48,21 @@
 #define CORAZA_NGINX_WHOAMI "coraza-nginx v" \
     CORAZA_NGINX_VERSION
 
+
+/* Deferred rule storage — rules are collected as strings during config
+ * parsing (master process) and replayed after fork in init_process. */
+
+typedef enum {
+    NGX_CORAZA_RULE_INLINE,
+    NGX_CORAZA_RULE_FILE
+} ngx_http_coraza_rule_type_e;
+
+typedef struct {
+    ngx_http_coraza_rule_type_e  type;
+    ngx_str_t                    value;
+} ngx_http_coraza_rule_entry_t;
+
+
 typedef struct {
     ngx_str_t name;
     ngx_str_t value;
@@ -58,18 +73,25 @@ typedef struct {
     ngx_http_request_t *r;
     coraza_transaction_t coraza_transaction;
     coraza_intervention_t *delayed_intervention;
+    ngx_str_t transaction_id;
+
+    ngx_chain_t *pending_chain;
+    ngx_chain_t **pending_chain_last;
 
     unsigned waiting_more_body:1;
     unsigned body_requested:1;
     unsigned processed:1;
     unsigned logged:1;
     unsigned intervention_triggered:1;
+    unsigned headers_delayed:1;
 } ngx_http_coraza_ctx_t;
 
 
 typedef struct {
     void                      *pool;
     coraza_waf_t               waf;
+    ngx_array_t               *rules;       /* of ngx_http_coraza_rule_entry_t */
+    ngx_array_t               *loc_confs;   /* of ngx_http_coraza_conf_t * */
     ngx_uint_t                 rules_inline;
     ngx_uint_t                 rules_file;
     ngx_uint_t                 rules_remote;
@@ -78,10 +100,11 @@ typedef struct {
 
 typedef struct {
     void                      *pool;
-    /* RulesSet or Rules */
-    coraza_waf_t waf;
+    coraza_waf_t               waf;
+    ngx_array_t               *rules;       /* of ngx_http_coraza_rule_entry_t */
 
     ngx_flag_t                 enable;
+    ngx_flag_t                 has_rules;
 
     ngx_http_complex_value_t  *transaction_id;
 } ngx_http_coraza_conf_t;
@@ -99,8 +122,12 @@ typedef struct {
 extern ngx_module_t ngx_http_coraza_module;
 
 /* ngx_http_coraza_module.c */
-ngx_int_t ngx_http_coraza_process_intervention (coraza_transaction_t *transaction, ngx_http_request_t *r, ngx_int_t early_log);
+ngx_int_t ngx_http_coraza_process_intervention (coraza_transaction_t transaction, ngx_http_request_t *r, ngx_int_t early_log);
 ngx_http_coraza_ctx_t *ngx_http_coraza_create_ctx(ngx_http_request_t *r);
+
+/* ngx_http_coraza_dl.c */
+ngx_int_t ngx_http_coraza_dl_open(ngx_log_t *log);
+void ngx_http_coraza_dl_close(ngx_log_t *log);
 
 /* ngx_http_coraza_body_filter.c */
 ngx_int_t ngx_http_coraza_body_filter_init(void);
@@ -109,6 +136,7 @@ ngx_int_t ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in);
 /* ngx_http_coraza_header_filter.c */
 ngx_int_t ngx_http_coraza_header_filter_init(void);
 ngx_int_t ngx_http_coraza_header_filter(ngx_http_request_t *r);
+ngx_int_t ngx_http_coraza_forward_header(ngx_http_request_t *r);
 
 /* ngx_http_coraza_log.c */
 void ngx_http_coraza_log(void *log, const void* data);
@@ -121,6 +149,6 @@ ngx_int_t ngx_http_coraza_pre_access_handler(ngx_http_request_t *r);
 ngx_int_t ngx_http_coraza_rewrite_handler(ngx_http_request_t *r);
 
 /* ngx_http_coraza_utils.c */
-ngx_int_t ngx_str_to_char(ngx_str_t a, char *str, ngx_pool_t *p);
+ngx_int_t ngx_str_to_char(ngx_str_t a, char **str, ngx_pool_t *p);
 
 #endif /* _ngx_http_coraza_COMMON_H_INCLUDED_ */
