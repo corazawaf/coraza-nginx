@@ -1,0 +1,252 @@
+name: Package and Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write   # to upload release assets
+  id-token: write   # for cosign OIDC keyless signing
+
+jobs:
+  package:
+    name: Package for nginx ${{ matrix.nginx_version }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    env:
+      libcoraza_version: v1.0.0
+    strategy:
+      matrix:
+        nginx_version: ['1.24.0', '1.26.0']
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-22.04
+            deb_arch: amd64
+            rpm_arch: x86_64
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+            deb_arch: arm64
+            rpm_arch: aarch64
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # ratchet:actions/checkout@v6
+
+      # Grab nginx source, from cache if possible, or from web
+      - name: Grab nginx-${{ matrix.nginx_version }} cache
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # ratchet:actions/cache@v5
+        id: cache-nginx
+        with:
+          path: nginx-${{ matrix.nginx_version }}
+          key: nginx-${{ matrix.nginx_version }}
+      - name: Download nginx
+        if: steps.cache-nginx.outputs.cache-hit != 'true'
+        run: |
+          cd ${{ github.workspace }}
+          wget https://nginx.org/download/nginx-${{ matrix.nginx_version }}.tar.gz
+          tar -xzvf nginx-${{ matrix.nginx_version }}.tar.gz
+
+      # Grab libcoraza
+      - name: Grab libcoraza-${{ env.libcoraza_version }} cache
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # ratchet:actions/cache@v5
+        id: cache-libcoraza
+        with:
+          path: libcoraza-*
+          key: libcoraza-${{ env.libcoraza_version }}
+      - name: Download libcoraza
+        if: steps.cache-libcoraza.outputs.cache-hit != 'true'
+        run: |
+          cd ${{ github.workspace }}
+          wget https://github.com/corazawaf/libcoraza/archive/refs/tags/${{ env.libcoraza_version }}.zip
+          unzip -o ${{ env.libcoraza_version }}.zip
+
+      - name: Install build dependencies
+        run: |
+          sudo add-apt-repository universe
+          sudo apt-get -qq update
+          sudo apt-get -y -qq \
+          --fix-missing --no-install-recommends install \
+          gcc make ruby ruby-dev rubygems build-essential
+          sudo gem install --no-document fpm
+
+      - name: Set up Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # ratchet:actions/setup-go@v6
+        with:
+          go-version: ^1.21.x
+
+      - name: Configure environment
+        run: |
+          export LD_LIBRARY_PATH=/usr/local/lib
+          export LIBRARY_PATH=/usr/local/lib
+          export C_INCLUDE_PATH=/usr/local/include
+
+      # Build libcoraza
+      - name: Build libcoraza
+        run: |
+          cd libcoraza-*
+          ./build.sh
+          ./configure
+          make
+          sudo make install
+          sudo ldconfig
+
+      - name: Configure compilation of dynamic module
+        run: |
+          cd ${{ github.workspace }}/nginx-${{ matrix.nginx_version }}
+          ./configure \
+          --with-compat \
+          --add-dynamic-module=${{ github.workspace }}/ \
+          --with-cc-opt='-g -O2 -fstack-protector-strong -Wformat -Werror=format-security -Wno-unused-function -fPIC -Wdate-time -D_FORTIFY_SOURCE=2' \
+          --with-ld-opt='-Wl,-Bsymbolic-functions -Wl,-z,relro -Wl,-z,now -fPIC' \
+          --prefix=/etc/nginx \
+          --sbin-path=/usr/sbin/nginx \
+          --conf-path=/etc/nginx/nginx.conf \
+          --http-log-path=/var/log/nginx/access.log \
+          --error-log-path=/var/log/nginx/error.log \
+          --lock-path=/var/lock/nginx.lock \
+          --pid-path=/run/nginx.pid \
+          --modules-path=/usr/lib/nginx/modules \
+          --http-client-body-temp-path=/var/cache/nginx/client_temp \
+          --http-proxy-temp-path=/var/cache/nginx/proxy_temp \
+          --http-fastcgi-temp-path=/var/cache/nginx/fastcgi_temp \
+          --http-uwsgi-temp-path=/var/cache/nginx/uwsgi_temp \
+          --http-scgi-temp-path=/var/cache/nginx/scgi_temp \
+          --with-debug \
+          --with-threads \
+          --with-http_ssl_module \
+          --with-http_realip_module \
+          --with-http_auth_request_module \
+          --with-http_v2_module \
+          --with-http_sub_module
+
+      - name: Compile dynamic module
+        run: |
+          cd ${{ github.workspace }}/nginx-${{ matrix.nginx_version }}
+          make modules
+
+      - name: Create packages
+        run: |
+          # Strip leading 'v' from tag (e.g. v1.2.3 -> 1.2.3)
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+
+          # Populate staging directory
+          mkdir -p /tmp/pkg/usr/lib/nginx/modules
+          mkdir -p /tmp/pkg/usr/local/lib
+          cp ${{ github.workspace }}/nginx-${{ matrix.nginx_version }}/objs/ngx_http_coraza_module.so \
+             /tmp/pkg/usr/lib/nginx/modules/ngx_http_coraza_module.so
+          cp /usr/local/lib/libcoraza.so /tmp/pkg/usr/local/lib/libcoraza.so
+
+          PKGBASE="coraza-nginx_${VERSION}_nginx${{ matrix.nginx_version }}_${{ matrix.arch }}"
+
+          # Create .deb (Debian/Ubuntu)
+          fpm -s dir -t deb \
+            -n coraza-nginx \
+            -v "${VERSION}" \
+            --description "Coraza WAF nginx dynamic module" \
+            --url "https://github.com/corazawaf/coraza-nginx" \
+            --license "Apache-2.0" \
+            --architecture ${{ matrix.deb_arch }} \
+            --maintainer "Coraza <security@coraza.io>" \
+            --vendor "Coraza" \
+            -C /tmp/pkg \
+            --package "${PKGBASE}.deb" \
+            .
+
+          # Create .rpm (RHEL/CentOS/Rocky Linux/Fedora)
+          fpm -s dir -t rpm \
+            -n coraza-nginx \
+            -v "${VERSION}" \
+            --description "Coraza WAF nginx dynamic module" \
+            --url "https://github.com/corazawaf/coraza-nginx" \
+            --license "Apache-2.0" \
+            --architecture ${{ matrix.rpm_arch }} \
+            --maintainer "Coraza <security@coraza.io>" \
+            --vendor "Coraza" \
+            -C /tmp/pkg \
+            --package "${PKGBASE}.rpm" \
+            .
+
+          # Move packages to workspace for later steps
+          mv "${PKGBASE}.deb" "${{ github.workspace }}/"
+          mv "${PKGBASE}.rpm" "${{ github.workspace }}/"
+
+      - name: Upload packages as artifacts for install tests
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # ratchet:actions/upload-artifact@v6
+        with:
+          name: packages-nginx${{ matrix.nginx_version }}-${{ matrix.arch }}
+          path: |
+            ${{ github.workspace }}/coraza-nginx_*_nginx${{ matrix.nginx_version }}_${{ matrix.arch }}.deb
+            ${{ github.workspace }}/coraza-nginx_*_nginx${{ matrix.nginx_version }}_${{ matrix.arch }}.rpm
+          retention-days: 1
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # ratchet:sigstore/cosign-installer@v3.7.0
+
+      - name: Sign packages with cosign (keyless)
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+          PKGBASE="coraza-nginx_${VERSION}_nginx${{ matrix.nginx_version }}_${{ matrix.arch }}"
+
+          cosign sign-blob --yes \
+            --bundle "${PKGBASE}.deb.bundle" \
+            "${PKGBASE}.deb"
+
+          cosign sign-blob --yes \
+            --bundle "${PKGBASE}.rpm.bundle" \
+            "${PKGBASE}.rpm"
+
+      - name: Upload packages and signatures to release
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # ratchet:softprops/action-gh-release@v2.5.0
+        with:
+          files: |
+            coraza-nginx_*_nginx${{ matrix.nginx_version }}_${{ matrix.arch }}.deb
+            coraza-nginx_*_nginx${{ matrix.nginx_version }}_${{ matrix.arch }}.deb.bundle
+            coraza-nginx_*_nginx${{ matrix.nginx_version }}_${{ matrix.arch }}.rpm
+            coraza-nginx_*_nginx${{ matrix.nginx_version }}_${{ matrix.arch }}.rpm.bundle
+
+  install-test:
+    name: Install test (${{ matrix.pkg_type }}, nginx ${{ matrix.nginx_version }}, ${{ matrix.arch }})
+    needs: package
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        nginx_version: ['1.24.0', '1.26.0']
+        arch: [amd64, arm64]
+        pkg_type: [deb, rpm]
+        include:
+          - arch: amd64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+
+    steps:
+      - name: Download packages artifact
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # ratchet:actions/download-artifact@v6
+        with:
+          name: packages-nginx${{ matrix.nginx_version }}-${{ matrix.arch }}
+
+      - name: Test deb installation
+        if: matrix.pkg_type == 'deb'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends nginx
+          sudo dpkg -i coraza-nginx_*_nginx${{ matrix.nginx_version }}_${{ matrix.arch }}.deb
+          sudo ldconfig
+          test -f /usr/lib/nginx/modules/ngx_http_coraza_module.so
+          test -f /usr/local/lib/libcoraza.so
+
+      - name: Test rpm installation
+        if: matrix.pkg_type == 'rpm'
+        run: |
+          docker run --rm \
+            -v "$PWD:/packages:ro" \
+            rockylinux:9 \
+            bash -c "
+              dnf install -y nginx &&
+              rpm -ivh /packages/coraza-nginx_*_nginx${{ matrix.nginx_version }}_${{ matrix.arch }}.rpm &&
+              ldconfig &&
+              test -f /usr/lib/nginx/modules/ngx_http_coraza_module.so &&
+              test -f /usr/local/lib/libcoraza.so
+            "
