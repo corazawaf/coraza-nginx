@@ -446,8 +446,11 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
         if (r->headers_out.location) {
             /* Redirect: send status + Location through normal filter chain.
              * ngx_http_filter_finalize_request would generate a new error
-             * page with fresh headers, discarding our Location header. */
+             * page with fresh headers, discarding our Location header.
+             * Clear status_line so the core filter builds it from status
+             * (proxy sets status_line from upstream, e.g. "404 Not Found"). */
             r->headers_out.status = ret;
+            r->headers_out.status_line.len = 0;
             r->err_status = 0;
             r->header_only = 1;
             return ngx_http_next_header_filter(r);
