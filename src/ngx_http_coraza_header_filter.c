@@ -448,6 +448,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
              * ngx_http_filter_finalize_request would generate a new error
              * page with fresh headers, discarding our Location header. */
             r->headers_out.status = ret;
+            r->err_status = 0;
             r->header_only = 1;
             return ngx_http_next_header_filter(r);
         }
