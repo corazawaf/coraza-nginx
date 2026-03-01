@@ -443,6 +443,14 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     }
     if (ret > 0) {
         ctx->intervention_triggered = 1;
+        if (r->headers_out.location) {
+            /* Redirect: send status + Location through normal filter chain.
+             * ngx_http_filter_finalize_request would generate a new error
+             * page with fresh headers, discarding our Location header. */
+            r->headers_out.status = ret;
+            r->header_only = 1;
+            return ngx_http_next_header_filter(r);
+        }
         return ngx_http_filter_finalize_request(r, &ngx_http_coraza_module, ret);
     }
 
