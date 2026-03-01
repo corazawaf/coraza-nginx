@@ -82,6 +82,26 @@ ngx_http_coraza_process_intervention(coraza_transaction_t transaction, ngx_http_
 			coraza_free_intervention(intervention);
 			return NGX_ERROR;
 		}
+
+		if (intervention->data != NULL)
+		{
+			ngx_table_elt_t *h;
+			h = ngx_list_push(&r->headers_out.headers);
+			if (h != NULL)
+			{
+				size_t len = ngx_strlen(intervention->data);
+				h->hash = 1;
+				ngx_str_set(&h->key, "Location");
+				h->value.data = ngx_pnalloc(r->pool, len);
+				if (h->value.data != NULL)
+				{
+					ngx_memcpy(h->value.data, intervention->data, len);
+					h->value.len = len;
+					r->headers_out.location = h;
+				}
+			}
+		}
+
 		dd("intervention -- returning code: %d", intervention->status);
 		ngx_int_t status = intervention->status;
 		coraza_free_intervention(intervention);

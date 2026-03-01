@@ -13,7 +13,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       module_version: 1.26
-      libcoraza_version: v1.0.0
+      libcoraza_version: v1.1.0
     strategy:
       matrix:
         nginx_version: ['1.24.0']

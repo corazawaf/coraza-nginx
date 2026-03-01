@@ -129,18 +129,22 @@ $t->write_file("/phase4", "should not be moved/blocked, headers delivered before
 $t->write_file("/early-block", "should be moved/blocked before this.");
 $t->run();
 $t->todo_alerts();
-$t->plan(21);
+$t->plan(25);
 
 ###############################################################################
 
 
-# Redirect (302)
+# Redirect (302) — status code + Location header
 like(http_get('/phase1?what=redirect302'), qr/^HTTP.*302/, 'redirect 302 - phase 1');
+like(http_get('/phase1?what=redirect302'), qr/Location: http:\/\/www\.coraza\.io/, 'redirect 302 location header - phase 1');
 like(http_get('/phase2?what=redirect302'), qr/^HTTP.*302/, 'redirect 302 - phase 2');
+like(http_get('/phase2?what=redirect302'), qr/Location: http:\/\/www\.coraza\.io/, 'redirect 302 location header - phase 2');
 like(http_get('/phase3?what=redirect302'), qr/^HTTP.*302/, 'redirect 302 - phase 3');
+like(http_get('/phase3?what=redirect302'), qr/Location: http:\/\/www\.coraza\.io/, 'redirect 302 location header - phase 3');
 like(http_get('/phase4?what=redirect302'), qr/^HTTP.*302/, 'redirect 302 - phase 4');
+like(http_get('/phase4?what=redirect302'), qr/Location: http:\/\/www\.coraza\.io/, 'redirect 302 location header - phase 4');
 
-# Redirect (301)
+# Redirect (301) — status code + Location header
 like(http_get('/phase1?what=redirect301'), qr/^HTTP.*301/, 'redirect 301 - phase 1');
 like(http_get('/phase2?what=redirect301'), qr/^HTTP.*301/, 'redirect 301 - phase 2');
 like(http_get('/phase3?what=redirect301'), qr/^HTTP.*301/, 'redirect 301 - phase 3');
