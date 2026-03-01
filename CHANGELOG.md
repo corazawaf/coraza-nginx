@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.0](https://github.com/corazawaf/coraza-nginx/compare/v0.9.0...v0.10.0) (2026-03-01)
+
+
+### Features
+
+* add redirect support and bump libcoraza to v1.1.0 ([1642c13](https://github.com/corazawaf/coraza-nginx/commit/1642c13796d1b7bcdb95a49ff41341d44c849ea3))
+* add redirect support and bump libcoraza to v1.1.0 ([8779899](https://github.com/corazawaf/coraza-nginx/commit/8779899afadea413a2c72b7c6a68ebf4807cd23b))
+
 ## 0.9.0 (2026-02-28)
 
 
