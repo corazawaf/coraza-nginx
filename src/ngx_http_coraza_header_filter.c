@@ -453,6 +453,16 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
             r->headers_out.status_line.len = 0;
             r->err_status = 0;
             r->header_only = 1;
+
+            /* Clear entity headers from the original response to avoid
+             * protocol-inconsistent redirects (e.g. 3xx with Content-Length
+             * but no body). */
+            r->headers_out.content_length_n = -1;
+            if (r->headers_out.content_length) {
+                r->headers_out.content_length->hash = 0;
+                r->headers_out.content_length = NULL;
+            }
+
             return ngx_http_next_header_filter(r);
         }
         return ngx_http_filter_finalize_request(r, &ngx_http_coraza_module, ret);
