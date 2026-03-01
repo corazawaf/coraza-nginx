@@ -1,13 +1,3 @@
-⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️
-THIS MODULE IS NOT PRODUCTION READY
-⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️
-
-👉 YOU CANNOT CREATE ISSUES HERE, BUT YOU CAN CREATE PULL REQUESTS FIXING PROBLEMS 👈
-
-🙏 DO NOT CREATE PULL REQUESTS TO COMPLAIN ABOUT THINGS NOT WORKING. THIS IS EXPERIMENTAL AND NO WORK IS BEING DONE HERE. 
-
-👉YOU ARE WELCOME TO WORK ON IT AND SEND PULL REQUESTS! 👈
-
 [![Compile module](https://github.com/corazawaf/coraza-nginx/actions/workflows/build.yml/badge.svg)](https://github.com/corazawaf/coraza-nginx/actions/workflows/build.yml)
 
 # Coraza NGINX Connector
@@ -16,10 +6,21 @@ The coraza-nginx connector is the connection point between nginx and libcoraza. 
 
 # Compilation
 
-If you have any doubts, please read the [GitHub build Action](https://github.com/corazawaf/coraza-nginx/blob/master/.github/workflows/build.yml) for additional information.
+If you have any doubts, please read the [GitHub build Action](https://github.com/corazawaf/coraza-nginx/blob/main/.github/workflows/build.yml) for additional information.
 
-Before compile this software make sure that you have libcoraza installed.
+Before compiling this software make sure that you have libcoraza installed.
 You can download it from the [libcoraza git repository](https://github.com/corazawaf/libcoraza). For information pertaining to the compilation and installation of libcoraza please consult the documentation provided along with it.
+
+To build libcoraza from source (requires Go 1.21+):
+
+```
+cd /path/to/libcoraza
+./build.sh
+./configure
+make
+sudo make install
+sudo ldconfig
+```
 
 With libcoraza installed, you can proceed with the installation of the coraza-nginx connector, which follows the nginx third-party module installation procedure. From the nginx source directory:
 
@@ -39,11 +40,31 @@ needs to match the version of nginx you're compiling this for.
 Further information about nginx third-party add-ons support are available here:
 http://wiki.nginx.org/3rdPartyModules
 
+## Platform support
+
+The connector supports Linux, macOS and Windows. The platform-specific
+shared library extension (`.so` on Linux, `.dylib` on macOS, `.dll` on Windows)
+is detected automatically at compile time.
+
+## Runtime library loading
+
+libcoraza is loaded at runtime via `dlopen()` (or `LoadLibrary()` on Windows)
+in each nginx worker process after fork, rather than being linked at build time.
+This design is required because libcoraza is a Go shared library: when nginx
+forks worker processes, Go's runtime threads are lost and the workers would
+deadlock. By loading libcoraza in `init_process` (after fork), Go's runtime
+initializes fresh in each worker.
+
+As a result, `libcoraza.so` (or the platform equivalent) must be available in
+the dynamic linker search path at runtime (e.g. `/usr/local/lib`), but you do
+not need to pass `-lcoraza` to the nginx build. The `config` script already
+sets `-ldl` for you on Linux/macOS.
+
 
 # Usage
 
 coraza for nginx extends your nginx configuration directives.
-It adds four new directives and they are:
+It adds four new directives:
 
 coraza
 ------
@@ -73,27 +94,6 @@ server {
     location / {
         root /var/www/html;
         coraza_rules_file /etc/my_coraza_rules.conf;
-    }
-}
-```
-
-coraza_rules_remote
-------------------------
-**syntax:** *coraza_rules_remote &lt;key&gt; &lt;URL to rules&gt;*
-
-**context:** *http, server, location*
-
-**default:** *no*
-
-Specifies from where (on the internet) a coraza configuration file will be downloaded.
-It also specifies the key that will be used to authenticate to that server:
-
-```nginx
-server {
-    coraza on;
-    location / {
-        root /var/www/html;
-        coraza_rules_remote my-server-key https://my-own-server/rules/download;
     }
 }
 ```
@@ -173,6 +173,49 @@ using the same unique identificator.
 
 String can contain variables.
 
+## Configuration merging
+
+Rules defined at a higher-level context (`http`, `server`) are automatically
+inherited by all child contexts (`server`, `location`). When a child context
+defines its own rules, the parent's rules are prepended — the child rules are
+applied after the parent rules, allowing you to override or extend behavior per
+location.
+
+For example, the following configuration sets global rules at the `http` level
+and overrides body-inspection behaviour in a specific location:
+
+```nginx
+http {
+    coraza on;
+    coraza_rules '
+        SecRuleEngine On
+        SecRequestBodyAccess On
+        SecRequestBodyLimit 131072
+        SecRule REQUEST_BODY "@rx bad" "id:1,phase:2,deny,status:403"
+    ';
+
+    server {
+        listen 80;
+
+        location / {
+            # inherits the http-level rules above
+            proxy_pass http://backend;
+        }
+
+        location /upload {
+            # parent rules are prepended; this directive extends them
+            coraza_rules '
+                SecRequestBodyLimit 10485760
+            ';
+            proxy_pass http://backend;
+        }
+    }
+}
+```
+
+Locations that set `coraza off` will not process requests through the WAF,
+regardless of rules inherited from parent contexts.
+
 
 # Contributing
 
@@ -207,18 +250,22 @@ You may also take a look at recent bug reports and open issues to get an idea of
 
 ### Testing your patch
 
-Along with the manual testing, we strongly recommend that you to use the nginx test
-utility to make sure that you patch does not adversely affect the behavior or performance of nginx. 
+Along with the manual testing, we strongly recommend that you use the nginx test
+utility to make sure that your patch does not adversely affect the behavior or performance of nginx.
 
-The nginx tests are available on: http://hg.nginx.org/nginx-tests/ 
+The nginx tests are available on: http://hg.nginx.org/nginx-tests/
 
 To use those tests, make sure you have the Perl utility prove (part of Perl 5)
 and proceed with the following commands:
 
 ```
-$ cp /path/to/coraza-nginx/tests/* /path/to/nginx/test/repository
-$ cd /path/to/nginx/test/repository
-$ TEST_NGINX_BINARY=/path/to/your/nginx prove .
+$ wget http://hg.nginx.org/nginx-tests/archive/tip.tar.gz
+$ tar xzf tip.tar.gz
+$ cp /path/to/coraza-nginx/t/* nginx-tests-*/
+$ cd nginx-tests-*
+$ export TEST_NGINX_BINARY=/path/to/your/nginx
+$ export TEST_NGINX_GLOBALS='load_module "/path/to/ngx_http_coraza_module.so";'
+$ prove coraza*.t
 ```
 
 If you are facing problems getting your added functionality to pass all the nginx tests, feel free to contact us or the nginx mailing list at: http://nginx.org/en/support.html
