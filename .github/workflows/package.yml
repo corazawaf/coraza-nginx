@@ -172,7 +172,7 @@ jobs:
           mv "${PKGBASE}.rpm" "${{ github.workspace }}/"
 
       - name: Upload packages as artifacts for install tests
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # ratchet:actions/upload-artifact@v6
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: packages-nginx${{ matrix.nginx_version }}-${{ matrix.arch }}
           path: |
@@ -223,7 +223,7 @@ jobs:
 
     steps:
       - name: Download packages artifact
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # ratchet:actions/download-artifact@v6
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: packages-nginx${{ matrix.nginx_version }}-${{ matrix.arch }}
 
