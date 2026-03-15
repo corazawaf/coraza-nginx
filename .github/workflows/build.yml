@@ -23,11 +23,11 @@ jobs:
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       - name: "Checkout repo"
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # ratchet:actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       # Grab nginx source, from cache if possible, or from web
       - name: Grab nginx-${{ matrix.nginx_version }} cache
-        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # ratchet:actions/cache@v5
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         id: cache-nginx
         with:
           path: nginx-${{ matrix.nginx_version }}
@@ -41,7 +41,7 @@ jobs:
 
       # Grab libcoraza
       - name: Grab libcoraza-${{ env.libcoraza_version }} cache
-        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # ratchet:actions/cache@v5
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         id: cache-libcoraza
         with:
           path: libcoraza-*
@@ -63,7 +63,7 @@ jobs:
           gcc make
 
       - name: Set up Go
-        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # ratchet:actions/setup-go@v6
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
         with:
           go-version: ^1.21.x
 
