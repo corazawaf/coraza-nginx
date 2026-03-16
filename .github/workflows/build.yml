@@ -12,8 +12,8 @@ jobs:
     name: Compile on ${{ matrix.os }} for nginx ${{ matrix.nginx_version }}
     runs-on: ${{ matrix.os }}
     env:
-      module_version: 1.26
-      libcoraza_version: v1.1.0
+      # renovate: depName=libcoraza packageName=corazawaf/libcoraza datasource=github-releases
+      LIBCORAZA_VERSION: v1.1.0
     strategy:
       matrix:
         nginx_version: ['1.24.0']
@@ -40,18 +40,18 @@ jobs:
           tar -xzvf nginx-${{ matrix.nginx_version }}.tar.gz
 
       # Grab libcoraza
-      - name: Grab libcoraza-${{ env.libcoraza_version }} cache
+      - name: Grab libcoraza-${{ env.LIBCORAZA_VERSION }} cache
         uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         id: cache-libcoraza
         with:
           path: libcoraza-*
-          key: libcoraza-${{ env.libcoraza_version }}
+          key: libcoraza-${{ env.LIBCORAZA_VERSION }}
       - name: Download libcoraza
         if: steps.cache-libcoraza.outputs.cache-hit != 'true'
         run: |
           cd ${{ github.workspace }}
-          wget https://github.com/corazawaf/libcoraza/archive/refs/tags/${{ env.libcoraza_version }}.zip
-          unzip -o ${{ env.libcoraza_version }}.zip
+          wget https://github.com/corazawaf/libcoraza/archive/refs/tags/${{ env.LIBCORAZA_VERSION }}.zip
+          unzip -o ${{ env.LIBCORAZA_VERSION }}.zip
 
       # Grab prebuilts from apt
       - name: Install dependencies with apt
@@ -65,7 +65,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
         with:
-          go-version: ^1.21.x
+          go-version: ^1.25.x
 
       - name: Configure environment
         run: |
@@ -122,8 +122,8 @@ jobs:
 
       - name: Run tests
         run: |
-          wget http://hg.nginx.org/nginx-tests/archive/tip.tar.gz
-          tar xzf tip.tar.gz
+          curl -sSL https://github.com/nginx/nginx-tests/archive/refs/heads/master.zip -o nginx-tests.zip
+          unzip nginx-tests.zip
           cd nginx-tests-*
           cp ../t/* .
           export TEST_NGINX_BINARY=/usr/sbin/nginx
