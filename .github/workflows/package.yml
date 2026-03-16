@@ -4,12 +4,14 @@ on:
   release:
     types: [published]
 
-permissions:
-  contents: write   # to upload release assets
-  id-token: write   # for cosign OIDC keyless signing
+permissions: {}
 
 jobs:
   package:
+    permissions:
+      contents: write   # to upload release assets
+      id-token: write   # for cosign OIDC keyless signing
+
     name: Package for nginx ${{ matrix.nginx_version }} (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     env:
@@ -208,6 +210,8 @@ jobs:
             coraza-nginx_*_nginx${{ matrix.nginx_version }}_${{ matrix.arch }}.rpm.bundle
 
   install-test:
+    permissions:
+      contents: read
     name: Install test (${{ matrix.pkg_type }}, nginx ${{ matrix.nginx_version }}, ${{ matrix.arch }})
     needs: package
     runs-on: ${{ matrix.runner }}
