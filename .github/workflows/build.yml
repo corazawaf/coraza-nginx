@@ -12,7 +12,6 @@ jobs:
     name: Compile on ${{ matrix.os }} for nginx ${{ matrix.nginx_version }}
     runs-on: ${{ matrix.os }}
     env:
-      MODULE_VERSION: 1.26
       # renovate: depName=libcoraza packageName=corazawaf/libcoraza datasource=github-releases
       LIBCORAZA_VERSION: v1.1.0
     strategy:
