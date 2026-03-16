@@ -122,7 +122,7 @@ jobs:
 
       - name: Run tests
         run: |
-          curl -L https://github.com/nginx/nginx-tests/archive/refs/heads/master.zip -o nginx-tests.zip
+          curl -sSL https://github.com/nginx/nginx-tests/archive/refs/heads/master.zip -o nginx-tests.zip
           unzip nginx-tests.zip
           cd nginx-tests-*
           cp ../t/* .
