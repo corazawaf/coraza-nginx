@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/corazawaf/coraza-nginx/compare/v0.10.0...v0.10.1) (2026-03-16)
+
+
+### Bug Fixes
+
+* upgrade Go version and modify test download method ([ce3a1f7](https://github.com/corazawaf/coraza-nginx/commit/ce3a1f718001e42911242c93e2210322949b645c))
+
 ## [0.10.0](https://github.com/corazawaf/coraza-nginx/compare/v0.9.0...v0.10.0) (2026-03-01)
 
 
