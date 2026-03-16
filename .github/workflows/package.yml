@@ -13,7 +13,8 @@ jobs:
     name: Package for nginx ${{ matrix.nginx_version }} (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     env:
-      libcoraza_version: v1.0.0
+      # renovate: depName=libcoraza packageName=corazawaf/libcoraza datasource=github-releases
+      LIBCORAZA_VERSION: v1.1.0
     strategy:
       matrix:
         nginx_version: ['1.24.0', '1.26.0']
@@ -47,18 +48,18 @@ jobs:
           tar -xzvf nginx-${{ matrix.nginx_version }}.tar.gz
 
       # Grab libcoraza
-      - name: Grab libcoraza-${{ env.libcoraza_version }} cache
+      - name: Grab libcoraza-${{ env.LIBCORAZA_VERSION }} cache
         uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         id: cache-libcoraza
         with:
           path: libcoraza-*
-          key: libcoraza-${{ env.libcoraza_version }}
+          key: libcoraza-${{ env.LIBCORAZA_VERSION }}
       - name: Download libcoraza
         if: steps.cache-libcoraza.outputs.cache-hit != 'true'
         run: |
           cd ${{ github.workspace }}
-          wget https://github.com/corazawaf/libcoraza/archive/refs/tags/${{ env.libcoraza_version }}.zip
-          unzip -o ${{ env.libcoraza_version }}.zip
+          wget https://github.com/corazawaf/libcoraza/archive/refs/tags/${{ env.LIBCORAZA_VERSION }}.zip
+          unzip -o ${{ env.LIBCORAZA_VERSION }}.zip
 
       - name: Install build dependencies
         run: |
