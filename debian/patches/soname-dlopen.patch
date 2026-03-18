@@ -1,0 +1,20 @@
+Description: Use SONAME-versioned library name for dlopen
+ The Debian libcoraza1 package ships the shared library with a
+ versioned SONAME (libcoraza.so.1). The bare libcoraza.so symlink
+ is only in the -dev package. Adjust the dlopen extension to use
+ the SONAME major version.
+Author: Pierre Pomes <pierre.pomes@gmail.com>
+Forwarded: not-needed
+Last-Update: 2026-03-18
+---
+--- a/src/dynlib.h
++++ b/src/dynlib.h
+@@ -56,7 +56,7 @@
+ #ifdef __APPLE__
+ #define DYNLIB_EXT ".dylib"
+ #else
+-#define DYNLIB_EXT ".so"
++#define DYNLIB_EXT ".so.1"
+ #endif
+
+ static inline dynlib_t dynlib_open(const char *path)

@@ -1,0 +1,5 @@
+libnginx-mod-http-coraza (0.10.1-1) unstable; urgency=low
+
+  * Initial Debian packaging.
+
+ -- Pierre Pomes <pierre.pomes@gmail.com>  Wed, 18 Mar 2026 12:00:00 +0100
