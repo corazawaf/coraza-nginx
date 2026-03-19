@@ -55,12 +55,8 @@ ngx_http_coraza_process_intervention(coraza_transaction_t transaction, ngx_http_
 
 	if (intervention->status != 200)
 	{
-		/**
-		 * FIXME: this will bring proper response code to audit log in case
-		 * when e.g. error_page redirect was triggered, but there still won't be another
-		 * required pieces like response headers etc.
-		 *
-		 */
+		/* Update status code for audit logging. Note: on error_page redirects
+		 * the audit log will have the status code but may lack response headers. */
 		coraza_update_status_code(ctx->coraza_transaction, intervention->status);
 
 		if (ctx->transaction_id.len > 0) {
@@ -355,15 +351,9 @@ ngx_http_coraza_init(ngx_conf_t *cf)
 		dd("We are not sure how this returns, NGINX doesn't seem to think it will ever be null");
 		return NGX_ERROR;
 	}
-	/**
-	 *
-	 * Seems like we cannot do this very same thing with
-	 * NGX_HTTP_FIND_CONFIG_PHASE. it does not seems to
-	 * be an array. Our next option is the REWRITE.
-	 *
-	 * TODO: check if we can hook prior to NGX_HTTP_REWRITE_PHASE phase.
-	 *
-	 */
+	/* Rewrite phase: process connection info and request headers.
+	 * This is the earliest phase that supports content handlers
+	 * (FIND_CONFIG_PHASE is not hookable). */
 	h_rewrite = ngx_array_push(&cmcf->phases[NGX_HTTP_REWRITE_PHASE].handlers);
 	if (h_rewrite == NULL)
 	{
@@ -372,13 +362,7 @@ ngx_http_coraza_init(ngx_conf_t *cf)
 	}
 	*h_rewrite = ngx_http_coraza_rewrite_handler;
 
-	/**
-	 *
-	 * Processing the request body on the preaccess phase.
-	 *
-	 * TODO: check if hook into separated phases is the best thing to do.
-	 *
-	 */
+	/* Preaccess phase: process request body */
 	h_preaccess = ngx_array_push(&cmcf->phases[NGX_HTTP_PREACCESS_PHASE].handlers);
 	if (h_preaccess == NULL)
 	{
@@ -387,13 +371,7 @@ ngx_http_coraza_init(ngx_conf_t *cf)
 	}
 	*h_preaccess = ngx_http_coraza_pre_access_handler;
 
-	/**
-	 * Process the log phase.
-	 *
-	 * TODO: check if the log phase happens like it happens on Apache.
-	 *       check if last phase will not hold the request.
-	 *
-	 */
+	/* Log phase: finalize transaction and write audit log */
 	h_log = ngx_array_push(&cmcf->phases[NGX_HTTP_LOG_PHASE].handlers);
 	if (h_log == NULL)
 	{

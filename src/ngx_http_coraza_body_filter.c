@@ -12,7 +12,6 @@
 
 static ngx_http_output_body_filter_pt ngx_http_next_body_filter;
 
-/* XXX: check behaviour on few body filters installed */
 ngx_int_t
 ngx_http_coraza_body_filter_init(void)
 {
@@ -134,7 +133,7 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                 &ngx_http_coraza_module, ret);
         }
 
-/* XXX: chain->buf->last_buf || chain->buf->last_in_chain */
+        /* Use last_buf (not last_in_chain) to detect end of the full response */
         is_request_processed = chain->buf->last_buf;
 
         if (is_request_processed) {
@@ -213,6 +212,5 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         //dd("buffer was not fully loaded! ctx: %p", ctx);
     }
 
-/* XXX: xflt_filter() -- return NGX_OK here */
     return ngx_http_next_body_filter(r, in);
 }

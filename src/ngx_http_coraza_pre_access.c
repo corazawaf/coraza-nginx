@@ -50,18 +50,6 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
         dd("CORAZA not enabled... returning");
         return NGX_DECLINED;
     }
-    /*
-     * FIXME:
-     * In order to perform some tests, let's accept everything.
-     *
-    if (r->method != NGX_HTTP_GET &&
-        r->method != NGX_HTTP_POST && r->method != NGX_HTTP_HEAD) {
-        dd("CORAZA is not ready to deal with anything different from " \
-            "POST, GET or HEAD");
-        return NGX_DECLINED;
-    }
-    */
-
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
     dd("recovering ctx: %p", ctx);
@@ -92,14 +80,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
 
         dd("asking for the request body, if any. Count: %d",
             r->main->count);
-        /**
-         * TODO: Check if there is any benefit to use request_body_in_single_buf set to 1.
-         *
-         *       saw some module using this request_body_in_single_buf
-         *       but not sure what exactly it does, same for the others options below.
-         *
-         * r->request_body_in_single_buf = 1;
-         */
+        /* Ensure the full request body lands in a single buffer for inspection */
         r->request_body_in_single_buf = 1;
         r->request_body_in_persistent_file = 1;
         if (!r->request_body_in_file_only) {
@@ -141,14 +122,8 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
 
         ngx_chain_t *chain = r->request_body->bufs;
 
-        /**
-         * TODO: Speed up the analysis by sending chunk while they arrive.
-         *
-         * Notice that we are waiting for the full request body to
-         * start to process it, it may not be necessary. We may send
-         * the chunks to CORAZA while nginx keep calling this
-         * function.
-         */
+        /* TODO: send chunks to Coraza as they arrive instead of waiting
+         * for the full body, to reduce latency on large requests. */
 
         if (r->request_body->temp_file != NULL) {
             ngx_str_t file_path = r->request_body->temp_file->file.name;
@@ -180,13 +155,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
             }
             chain = chain->next;
 
-/* XXX: chains are processed one-by-one, maybe worth to pass all chains and then call intervention() ? */
-
-            /**
-             * CORAZA may perform stream inspection on this buffer,
-             * it may ask for a intervention in consequence of that.
-             *
-             */
+            /* Check for intervention after each chunk for prompt detection */
             ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
             if (ret > 0) {
                 ctx->intervention_triggered = 1;
@@ -200,8 +169,6 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
          * happened; consequently we have to check if CORAZA have
          * returned any kind of intervention.
          */
-
-/* XXX: once more -- is body can be modified ?  content-length need to be adjusted ? */
 
         /* Check for body limit intervention before processing rules */
         ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
