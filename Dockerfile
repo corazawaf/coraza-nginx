@@ -25,7 +25,7 @@ RUN set -eux; \
     mkdir -p /usr/local/include/coraza; \
     cp coraza/coraza.h /usr/local/include/coraza/
 
-FROM nginx:stable@sha256:810ad1346ec7fd3d0a246c178f2b82e73a43640c691774405adfd38a751ecce8 as ngx-coraza
+FROM nginx:stable@sha256:42e026ae5315aa0deec22fb00c364fc5ec8d9af1c4833ad5317e2a433e4de0df as ngx-coraza
 
 COPY --from=go-builder /usr/local/include/coraza /usr/local/include/coraza
 COPY --from=go-builder /usr/local/lib/libcoraza.a /usr/local/lib
@@ -63,7 +63,7 @@ RUN set -eux; \
     find objs/*.so -print; \
     cp objs/ngx_*.so /usr/lib/nginx/modules
     
-FROM nginx:stable@sha256:810ad1346ec7fd3d0a246c178f2b82e73a43640c691774405adfd38a751ecce8
+FROM nginx:stable@sha256:42e026ae5315aa0deec22fb00c364fc5ec8d9af1c4833ad5317e2a433e4de0df
 
 RUN sed -i -e "s|events {|load_module \"/usr/lib/nginx/modules/ngx_http_coraza_module.so\";\n\nevents {|" /etc/nginx/nginx.conf;
 
