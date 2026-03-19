@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.11.0](https://github.com/corazawaf/coraza-nginx/compare/v0.10.1...v0.11.0) (2026-03-19)
+
+
+### Features
+
+* add Debian packaging ([fd75748](https://github.com/corazawaf/coraza-nginx/commit/fd7574861ff81a295224dfcedb697eeb3f7ad405))
+* add Debian packaging ([e014c2c](https://github.com/corazawaf/coraza-nginx/commit/e014c2c8543b8bf7b338bca50db242c0e28fc449))
+
+
+### Bug Fixes
+
+* debug mode compilation errors (CORAZA_DDEBUG=1) ([20a0924](https://github.com/corazawaf/coraza-nginx/commit/20a0924142bfbeedb6aa249d7908c04ac1dcb9db))
+
 ## [0.10.1](https://github.com/corazawaf/coraza-nginx/compare/v0.10.0...v0.10.1) (2026-03-16)
 
 
