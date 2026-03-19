@@ -121,8 +121,8 @@ void ngx_http_coraza_cleanup(void *data)
 	ctx = (ngx_http_coraza_ctx_t *)data;
 
 	if (coraza_free_transaction(ctx->coraza_transaction) != NGX_OK) {
-		dd("cleanup -- transaction free failed: %d", res);
-	};
+		dd("cleanup -- transaction free failed");
+	}
 }
 
 ngx_inline ngx_http_coraza_ctx_t *
@@ -144,7 +144,7 @@ ngx_http_coraza_create_ctx(ngx_http_request_t *r)
 	mmcf = ngx_http_get_module_main_conf(r, ngx_http_coraza_module);
 	mcf = ngx_http_get_module_loc_conf(r, ngx_http_coraza_module);
 
-	dd("creating transaction with the following WAFs: loc='%p' -- main='%p'", mcf->waf, mmcf->waf);
+	dd("creating transaction with the following WAFs: loc='%lu' -- main='%lu'", mcf->waf, mmcf->waf);
 
 	/* Use location-specific WAF if available, otherwise fall back to main WAF */
 	coraza_waf_t waf = mcf->waf != 0 ? mcf->waf : mmcf->waf;
