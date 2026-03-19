@@ -337,7 +337,8 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     char *http_response_ver;
 
 
-/* XXX: if NOT_MODIFIED, do we need to process it at all?  see xslt_header_filter() */
+    /* 304 Not Modified responses are still processed for header inspection
+     * and audit logging; body inspection is naturally skipped (no body). */
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
@@ -351,21 +352,15 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
         return ngx_http_next_header_filter(r);
     }
 
-/* XXX: can it happen ?  already processed i mean */
-/* XXX: check behaviour on 'Coraza off' */
-
+    /* Skip if already processed (can happen with subrequests or error pages) */
     if (ctx && ctx->processed)
     {
-        /*
-         * FIXME: verify if this request is already processed.
-         */
         return ngx_http_next_header_filter(r);
     }
 
     /*
-     * Lets ask nginx to keep the response body in memory
-     *
-     * FIXME: I don't see a reason to keep it `1' when SecResponseBody is disabled.
+     * Keep the response body in memory for Coraza inspection.
+     * TODO: skip this when SecResponseBodyAccess is disabled.
      */
     r->filter_need_in_memory = 1;
 

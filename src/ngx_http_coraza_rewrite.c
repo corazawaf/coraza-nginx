@@ -56,13 +56,10 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
         }
 
-        /**
-         * FIXME: Check if it is possible to hook on nginx on a earlier phase.
-         *
-         * At this point we are doing an late connection process. Maybe
-         * we have to hook into NGX_HTTP_FIND_CONFIG_PHASE, it seems to be the
-         * erliest phase that nginx allow us to attach those kind of hooks.
-         *
+        /*
+         * The rewrite phase is the earliest phase where nginx allows
+         * content handlers to be registered (FIND_CONFIG_PHASE is not
+         * an array and cannot be hooked).
          */
         int client_port = ngx_inet_get_port(connection->sockaddr);
         int server_port = ngx_inet_get_port(connection->local_sockaddr);
@@ -82,9 +79,9 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
         } 
 
-        /* FIXME: addr_text here is an nginx str that might be a path if
-         * this is a unix socket. Because of this, using the socket 
-         * structure might be better
+        /* TODO: when using a unix domain socket, addr_text contains a file
+         * path instead of an IP address. We should detect AF_UNIX and handle
+         * it differently (e.g. pass "unix" as the address).
          */
         ret = coraza_process_connection(ctx->coraza_transaction,
                                         client_addr,
@@ -94,15 +91,6 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
         if (ret != 1){
             dd("Was not able to extract connection information.");
         }
-        /**
-         *
-         * FIXME: Check how we can finalize a request without crash nginx.
-         *
-         * I don't think nginx is expecting to finalize a request at that
-         * point as it seems that it clean the ngx_http_request_t information
-         * and try to use it later.
-         *
-         */
         dd("Processing intervention with the connection information filled in");
         ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 1);
         if (ret > 0) {
