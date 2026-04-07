@@ -61,28 +61,39 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
          * content handlers to be registered (FIND_CONFIG_PHASE is not
          * an array and cannot be hooked).
          */
-        int client_port = ngx_inet_get_port(connection->sockaddr);
-        int server_port = ngx_inet_get_port(connection->local_sockaddr);
-        
-        u_char addr[NGX_SOCKADDR_STRLEN];
-        ngx_server_addr.len = NGX_SOCKADDR_STRLEN;
-        ngx_server_addr.data = addr;
-        if (ngx_connection_local_sockaddr(r->connection, &ngx_server_addr, 0) != NGX_OK) {
+        int client_port = 0;
+        int server_port = 0;
+
+        /* For unix domain sockets, pass a conventional address/port instead
+         * of the socket file path so rules and audit logs see sane values. */
+        if (connection->sockaddr->sa_family == AF_UNIX) {
+            client_addr = "unix";
+        } else {
+            client_port = ngx_inet_get_port(connection->sockaddr);
+            if (ngx_str_to_char(addr_text, &client_addr, r->pool) != NGX_OK) {
+                return NGX_HTTP_INTERNAL_SERVER_ERROR;
+            }
+        }
+
+        if (ngx_connection_local_sockaddr(r->connection, NULL, 0) != NGX_OK) {
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
         }
 
-        if (ngx_str_to_char(addr_text, &client_addr, r->pool) != NGX_OK) {
-            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        if (connection->local_sockaddr->sa_family == AF_UNIX) {
+            server_addr = "unix";
+        } else {
+            u_char addr[NGX_SOCKADDR_STRLEN];
+            ngx_server_addr.len = NGX_SOCKADDR_STRLEN;
+            ngx_server_addr.data = addr;
+            if (ngx_connection_local_sockaddr(r->connection, &ngx_server_addr, 0) != NGX_OK) {
+                return NGX_HTTP_INTERNAL_SERVER_ERROR;
+            }
+            server_port = ngx_inet_get_port(connection->local_sockaddr);
+            if (ngx_str_to_char(ngx_server_addr, &server_addr, r->pool) != NGX_OK) {
+                return NGX_HTTP_INTERNAL_SERVER_ERROR;
+            }
         }
 
-        if (ngx_str_to_char(ngx_server_addr, &server_addr, r->pool) != NGX_OK) {
-            return NGX_HTTP_INTERNAL_SERVER_ERROR;
-        } 
-
-        /* TODO: when using a unix domain socket, addr_text contains a file
-         * path instead of an IP address. We should detect AF_UNIX and handle
-         * it differently (e.g. pass "unix" as the address).
-         */
         ret = coraza_process_connection(ctx->coraza_transaction,
                                         client_addr,
                                         client_port,
