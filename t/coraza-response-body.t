@@ -51,16 +51,36 @@ http {
                 SecRule RESPONSE_BODY "@rx BAD BODY" "id:11,phase:4,deny,log,status:403"
             ';
         }
+
+        location /body_access_off {
+            default_type application/octet-stream;
+            coraza_rules '
+                SecRuleEngine On
+                SecResponseBodyAccess Off
+            ';
+        }
     }
 }
 EOF
 
 $t->write_file("/body1", "BAD BODY");
+
+# Create a ~100 KB file to verify that large responses are served without
+# hanging when SecResponseBodyAccess is Off.  Prior to the fix the module
+# would forward every byte through the Go FFI bridge even when body
+# inspection was disabled, blocking the nginx worker for large responses.
+my $large_body = "X" x (100 * 1024);
+$t->write_file("/body_access_off", $large_body);
+
 $t->run();
 $t->todo_alerts();
-$t->plan(1);
+$t->plan(3);
 
 ###############################################################################
 
 like(http_get('/body1'), qr/^HTTP.*403/, 'response body (block)');
+
+my $r = http_get('/body_access_off');
+like($r, qr/^HTTP.*200/, 'large response with SecResponseBodyAccess Off returns 200');
+like($r, qr/\Q$large_body\E/, 'large response body delivered intact');
 
