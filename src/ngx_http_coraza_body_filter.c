@@ -156,7 +156,8 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                         ctx->headers_delayed = 0;
                         return ret;
                     }
-                    return ret;
+                    return ngx_http_filter_finalize_request(r,
+                        &ngx_http_coraza_module, ret);
                 }
                 else if (ret < 0) {
                     if (ctx->headers_delayed) {
