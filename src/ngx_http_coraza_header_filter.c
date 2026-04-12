@@ -506,15 +506,16 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * (SecResponseBodyAccess Off or Content-Type mismatch): in that case
      * there is no phase-4 buffering and the response must not be held back.
      */
-    if (!r->header_only && !r->error_page && r == r->main
-        && ctx->response_body_processable)
+    if (!r->header_only && !r->error_page && r == r->main)
     {
         /*
-         * Body inspection is active: keep response body in memory so
-         * that the copy filter can hand the bytes to Coraza, then delay
-         * sending the headers until after phase 4 completes.
+         * Delay sending headers until phase 4 completes so that
+         * phase 4 rules can still return a clean error page.
+         * Only force body into memory when body inspection is needed.
          */
-        r->filter_need_in_memory = 1;
+        if (ctx->response_body_processable) {
+            r->filter_need_in_memory = 1;
+        }
         ctx->headers_delayed = 1;
         ctx->pending_chain = NULL;
         ctx->pending_chain_last = &ctx->pending_chain;

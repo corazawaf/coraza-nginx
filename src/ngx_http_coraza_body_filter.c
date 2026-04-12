@@ -119,6 +119,12 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
          * we skip the Go FFI call entirely, preventing the large-response
          * hang described in the issue.
          */
+        /*
+         * Only forward body data to the Coraza engine when body inspection
+         * is enabled for this transaction. Skip the Go FFI call when
+         * SecResponseBodyAccess is Off or the Content-Type does not match
+         * SecResponseBodyMimeType.
+         */
         if (ctx->response_body_processable) {
             u_char *data;
             size_t  len;
@@ -144,30 +150,37 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                 return ngx_http_filter_finalize_request(r,
                     &ngx_http_coraza_module, ret);
             }
+        }
 
-            if (is_request_processed) {
+        /*
+         * Always call coraza_process_response_body() on the last buffer,
+         * even when body inspection is disabled. This triggers phase 4
+         * rule evaluation which can match on non-body variables (ARGS,
+         * TX, etc.).
+         */
+        if (is_request_processed) {
+            int ret;
 
-                coraza_process_response_body(ctx->coraza_transaction);
+            coraza_process_response_body(ctx->coraza_transaction);
 
-                ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
-                if (ret > 0) {
-                    if (ctx->headers_delayed) {
-                        ctx->intervention_triggered = 1;
-                        ctx->headers_delayed = 0;
-                        return ret;
-                    }
-                    return ngx_http_filter_finalize_request(r,
-                        &ngx_http_coraza_module, ret);
+            ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
+            if (ret > 0) {
+                if (ctx->headers_delayed) {
+                    ctx->intervention_triggered = 1;
+                    ctx->headers_delayed = 0;
+                    return ret;
                 }
-                else if (ret < 0) {
-                    if (ctx->headers_delayed) {
-                        ctx->intervention_triggered = 1;
-                        ctx->headers_delayed = 0;
-                        return NGX_HTTP_INTERNAL_SERVER_ERROR;
-                    }
-                    return ngx_http_filter_finalize_request(r,
-                        &ngx_http_coraza_module, NGX_HTTP_INTERNAL_SERVER_ERROR);
+                return ngx_http_filter_finalize_request(r,
+                    &ngx_http_coraza_module, ret);
+            }
+            else if (ret < 0) {
+                if (ctx->headers_delayed) {
+                    ctx->intervention_triggered = 1;
+                    ctx->headers_delayed = 0;
+                    return NGX_HTTP_INTERNAL_SERVER_ERROR;
                 }
+                return ngx_http_filter_finalize_request(r,
+                    &ngx_http_coraza_module, NGX_HTTP_INTERNAL_SERVER_ERROR);
             }
         }
 
