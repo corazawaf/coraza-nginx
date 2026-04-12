@@ -106,11 +106,6 @@ static dynlib_t dl_handle;
         }                                                              \
     } while (0)
 
-/* Optional symbol — sets pointer to NULL if not found, no error */
-#define DL_OPT_SYM(ptr, name)                                          \
-    do {                                                               \
-        *(void **)(&ptr) = dynlib_sym(dl_handle, #name);              \
-    } while (0)
 
 /* ------------------------------------------------------------------ */
 /* Public: load libcoraza.so and resolve every symbol                  */
@@ -160,9 +155,8 @@ ngx_http_coraza_dl_open(ngx_log_t *log)
     DL_SYM(dl_update_status_code,       coraza_update_status_code);
     DL_SYM(dl_add_get_args,             coraza_add_get_args);
 
-    /* Optional — present in libcoraza 1.4+.  Absence is not an error. */
-    DL_OPT_SYM(dl_is_response_body_processable,
-               coraza_is_response_body_processable);
+    DL_SYM(dl_is_response_body_processable,
+           coraza_is_response_body_processable);
 
     ngx_log_error(NGX_LOG_NOTICE, log, 0,
                   "coraza: %s loaded via dynlib_open",
@@ -346,16 +340,10 @@ int coraza_add_get_args(coraza_transaction_t t, char *name,
  * SecResponseBodyMimeType).  Must be called after
  * coraza_process_response_headers().
  *
- * When the underlying libcoraza does not export this symbol (< 1.4) the
- * function conservatively returns 1 so the existing buffering behaviour
- * is preserved.
+ * Requires libcoraza >= 1.4.0.
  */
 int
 ngx_http_coraza_is_response_body_processable(coraza_transaction_t t)
 {
-    if (dl_is_response_body_processable == NULL) {
-        /* Older libcoraza: assume body may need inspection */
-        return 1;
-    }
     return dl_is_response_body_processable(t);
 }
