@@ -84,6 +84,7 @@ typedef struct {
     unsigned logged:1;
     unsigned intervention_triggered:1;
     unsigned headers_delayed:1;
+    unsigned response_body_processable:1; /* body inspection needed for this tx */
 } ngx_http_coraza_ctx_t;
 
 
@@ -128,6 +129,7 @@ ngx_http_coraza_ctx_t *ngx_http_coraza_create_ctx(ngx_http_request_t *r);
 /* ngx_http_coraza_dl.c */
 ngx_int_t ngx_http_coraza_dl_open(ngx_log_t *log);
 void ngx_http_coraza_dl_close(ngx_log_t *log);
+int ngx_http_coraza_is_response_body_processable(coraza_transaction_t t);
 
 /* ngx_http_coraza_body_filter.c */
 ngx_int_t ngx_http_coraza_body_filter_init(void);

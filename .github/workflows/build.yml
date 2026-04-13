@@ -22,7 +22,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       # renovate: depName=libcoraza packageName=corazawaf/libcoraza datasource=github-releases
-      LIBCORAZA_VERSION: v1.1.0
+      LIBCORAZA_VERSION: v1.4.0
     strategy:
       matrix:
         nginx_version: ['1.24.0']

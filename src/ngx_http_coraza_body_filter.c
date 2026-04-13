@@ -108,35 +108,58 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     int is_request_processed = 0;
     for (chain = in; chain != NULL; chain = chain->next)
     {
-        u_char *data;
-        size_t len;
-        int ret;
-
-        if (ngx_http_coraza_read_body_data(r, chain->buf, &data, &len)
-            != NGX_OK)
-        {
-            return NGX_ERROR;
-        }
-
-        if (len > 0) {
-            coraza_append_response_body(ctx->coraza_transaction, data, len);
-        }
-
-        ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
-        if (ret > 0) {
-            if (ctx->headers_delayed) {
-                ctx->intervention_triggered = 1;
-                ctx->headers_delayed = 0;
-                return ret;
-            }
-            return ngx_http_filter_finalize_request(r,
-                &ngx_http_coraza_module, ret);
-        }
-
         /* Use last_buf (not last_in_chain) to detect end of the full response */
         is_request_processed = chain->buf->last_buf;
 
+        /*
+         * Only read and forward body data to the Coraza engine when body
+         * inspection is actually enabled for this transaction.  When
+         * SecResponseBodyAccess is Off (or the Content-Type does not match
+         * SecResponseBodyMimeType) ctx->response_body_processable is 0 and
+         * we skip the Go FFI call entirely, preventing the large-response
+         * hang described in the issue.
+         */
+        /*
+         * Only forward body data to the Coraza engine when body inspection
+         * is enabled for this transaction. Skip the Go FFI call when
+         * SecResponseBodyAccess is Off or the Content-Type does not match
+         * SecResponseBodyMimeType.
+         */
+        if (ctx->response_body_processable) {
+            u_char *data;
+            size_t  len;
+            int     ret;
+
+            if (ngx_http_coraza_read_body_data(r, chain->buf, &data, &len)
+                != NGX_OK)
+            {
+                return NGX_ERROR;
+            }
+
+            if (len > 0) {
+                coraza_append_response_body(ctx->coraza_transaction, data, len);
+            }
+
+            ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
+            if (ret > 0) {
+                if (ctx->headers_delayed) {
+                    ctx->intervention_triggered = 1;
+                    ctx->headers_delayed = 0;
+                    return ret;
+                }
+                return ngx_http_filter_finalize_request(r,
+                    &ngx_http_coraza_module, ret);
+            }
+        }
+
+        /*
+         * Always call coraza_process_response_body() on the last buffer,
+         * even when body inspection is disabled. This triggers phase 4
+         * rule evaluation which can match on non-body variables (ARGS,
+         * TX, etc.).
+         */
         if (is_request_processed) {
+            int ret;
 
             coraza_process_response_body(ctx->coraza_transaction);
 
@@ -147,7 +170,8 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                     ctx->headers_delayed = 0;
                     return ret;
                 }
-                return ret;
+                return ngx_http_filter_finalize_request(r,
+                    &ngx_http_coraza_module, ret);
             }
             else if (ret < 0) {
                 if (ctx->headers_delayed) {
@@ -158,6 +182,71 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                 return ngx_http_filter_finalize_request(r,
                     &ngx_http_coraza_module, NGX_HTTP_INTERNAL_SERVER_ERROR);
             }
+        }
+
+        /*
+         * When body inspection is active and this is not the last buffer,
+         * accumulate a pool-backed copy so that nginx can safely recycle
+         * the original upstream/proxy buffer before we eventually flush the
+         * accumulated chain.  Marking the original buffer consumed
+         * (pos == last for memory buffers, file_pos == file_last for file
+         * buffers) signals to nginx that it is free to reuse the buffer,
+         * preventing the proxy-buffer starvation deadlock that caused large
+         * responses to hang.
+         */
+        if (ctx->headers_delayed && !is_request_processed) {
+            ngx_chain_t *cl;
+            ngx_buf_t   *b;
+            u_char      *data;
+            size_t       len;
+
+            if (ngx_http_coraza_read_body_data(r, chain->buf, &data, &len)
+                != NGX_OK)
+            {
+                return NGX_ERROR;
+            }
+
+            b = ngx_calloc_buf(r->pool);
+            if (b == NULL) {
+                return NGX_ERROR;
+            }
+
+            if (len > 0) {
+                /*
+                 * Always make a pool copy: in-memory buffers may point into
+                 * nginx's single reusable upstream buffer (u->buffer) which
+                 * nginx will overwrite once we mark it consumed.
+                 */
+                u_char *copy = ngx_pnalloc(r->pool, len);
+                if (copy == NULL) {
+                    return NGX_ERROR;
+                }
+                ngx_memcpy(copy, data, len);
+                b->pos    = copy;
+                b->last   = copy + len;
+                b->memory = 1;
+            }
+
+            b->last_buf      = 0;  /* intermediate -- last_buf will be on the
+                                      final buffer forwarded when phase 4 ends */
+            b->last_in_chain = chain->buf->last_in_chain;
+            b->flush         = chain->buf->flush;
+
+            /* Mark original buffer consumed so nginx may reuse it */
+            if (ngx_buf_in_memory(chain->buf)) {
+                chain->buf->pos = chain->buf->last;
+            } else if (chain->buf->in_file) {
+                chain->buf->file_pos = chain->buf->file_last;
+            }
+
+            cl = ngx_alloc_chain_link(r->pool);
+            if (cl == NULL) {
+                return NGX_ERROR;
+            }
+            cl->buf  = b;
+            cl->next = NULL;
+            *ctx->pending_chain_last = cl;
+            ctx->pending_chain_last  = &cl->next;
         }
     }
 
@@ -177,7 +266,12 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                 return NGX_ERROR;
             }
 
-            /* Combine pending chain (previous calls) with current input */
+            /*
+             * pending_chain holds pool copies of all previously accumulated
+             * buffers (with last_buf=0).  Append the current input chain
+             * (which contains the final last_buf=1 buffer) so the downstream
+             * receives a complete, ordered chain.
+             */
             if (ctx->pending_chain) {
                 *ctx->pending_chain_last = in;
                 out = ctx->pending_chain;
@@ -189,21 +283,7 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
             return ngx_http_next_body_filter(r, out);
         }
 
-        /* Not the last buffer yet — accumulate chain links */
-        for (chain = in; chain != NULL; chain = chain->next) {
-            ngx_chain_t *cl;
-
-            cl = ngx_alloc_chain_link(r->pool);
-            if (cl == NULL) {
-                return NGX_ERROR;
-            }
-
-            cl->buf = chain->buf;
-            cl->next = NULL;
-            *ctx->pending_chain_last = cl;
-            ctx->pending_chain_last = &cl->next;
-        }
-
+        /* Not the last buffer yet — all chunks were accumulated above */
         return NGX_OK;
     }
 

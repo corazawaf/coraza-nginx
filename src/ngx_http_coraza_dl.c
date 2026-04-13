@@ -46,6 +46,12 @@ typedef int                  (*fn_coraza_process_logging)(coraza_transaction_t);
 typedef int                  (*fn_coraza_update_status_code)(coraza_transaction_t, int);
 typedef int                  (*fn_coraza_add_get_args)(coraza_transaction_t, char *, char *);
 
+/* Optional — present in libcoraza 1.4+.  Returns 1 if the response body
+ * should be inspected (SecResponseBodyAccess On and Content-Type matches
+ * SecResponseBodyMimeType).  Must be called after
+ * coraza_process_response_headers(). */
+typedef int                  (*fn_coraza_is_response_body_processable)(coraza_transaction_t);
+
 /* ------------------------------------------------------------------ */
 /* Static function pointers — set once by ngx_http_coraza_dl_open()   */
 /* ------------------------------------------------------------------ */
@@ -78,6 +84,9 @@ static fn_coraza_process_logging         dl_process_logging;
 static fn_coraza_update_status_code      dl_update_status_code;
 static fn_coraza_add_get_args            dl_add_get_args;
 
+/* Optional — NULL when using libcoraza < 1.4 */
+static fn_coraza_is_response_body_processable dl_is_response_body_processable;
+
 static dynlib_t dl_handle;
 
 /* ------------------------------------------------------------------ */
@@ -96,6 +105,7 @@ static dynlib_t dl_handle;
             return NGX_ERROR;                                          \
         }                                                              \
     } while (0)
+
 
 /* ------------------------------------------------------------------ */
 /* Public: load libcoraza.so and resolve every symbol                  */
@@ -144,6 +154,9 @@ ngx_http_coraza_dl_open(ngx_log_t *log)
     DL_SYM(dl_process_logging,          coraza_process_logging);
     DL_SYM(dl_update_status_code,       coraza_update_status_code);
     DL_SYM(dl_add_get_args,             coraza_add_get_args);
+
+    DL_SYM(dl_is_response_body_processable,
+           coraza_is_response_body_processable);
 
     ngx_log_error(NGX_LOG_NOTICE, log, 0,
                   "coraza: %s loaded via dynlib_open",
@@ -316,4 +329,21 @@ int coraza_add_get_args(coraza_transaction_t t, char *name,
                         char *value)
 {
     return dl_add_get_args(t, name, value);
+}
+
+/*
+ * ngx_http_coraza_is_response_body_processable — wrapper around the
+ * optional coraza_is_response_body_processable symbol.
+ *
+ * Returns 1 if the response body should be inspected for this transaction
+ * (i.e. SecResponseBodyAccess is On and the Content-Type matches
+ * SecResponseBodyMimeType).  Must be called after
+ * coraza_process_response_headers().
+ *
+ * Requires libcoraza >= 1.4.0.
+ */
+int
+ngx_http_coraza_is_response_body_processable(coraza_transaction_t t)
+{
+    return dl_is_response_body_processable(t);
 }

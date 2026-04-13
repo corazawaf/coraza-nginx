@@ -358,12 +358,6 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
         return ngx_http_next_header_filter(r);
     }
 
-    /*
-     * Keep the response body in memory for Coraza inspection.
-     * TODO: skip this when SecResponseBodyAccess is disabled.
-     */
-    r->filter_need_in_memory = 1;
-
     ctx->processed = 1;
     /*
      *
@@ -432,6 +426,22 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
 #endif
 
     coraza_process_response_headers(ctx->coraza_transaction, status, http_response_ver);
+
+    /*
+     * Determine whether response-body inspection is needed for this
+     * transaction.  coraza_process_response_headers() must have been called
+     * first so the library can evaluate SecResponseBodyAccess and the
+     * Content-Type against SecResponseBodyMimeType.
+     *
+     * With libcoraza 1.4+ the library answers this directly:
+     *   - SecResponseBodyAccess Off  → 0 (no inspection needed)
+     *   - Content-Type not in SecResponseBodyMimeType → 0
+     *   - Otherwise → 1
+     * With older libcoraza the helper always returns 1 (conservative).
+     */
+    ctx->response_body_processable =
+        ngx_http_coraza_is_response_body_processable(ctx->coraza_transaction);
+
     ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
     if (r->error_page) {
         return ngx_http_next_header_filter(r);
@@ -492,8 +502,20 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      *
      * We skip the delay for HEAD requests (no body to inspect), error pages
      * (already an error response), and subrequests (handled independently).
+     * We also skip the delay when body inspection is not needed
+     * (SecResponseBodyAccess Off or Content-Type mismatch): in that case
+     * there is no phase-4 buffering and the response must not be held back.
      */
-    if (!r->header_only && !r->error_page && r == r->main) {
+    if (!r->header_only && !r->error_page && r == r->main)
+    {
+        /*
+         * Delay sending headers until phase 4 completes so that
+         * phase 4 rules can still return a clean error page.
+         * Only force body into memory when body inspection is needed.
+         */
+        if (ctx->response_body_processable) {
+            r->filter_need_in_memory = 1;
+        }
         ctx->headers_delayed = 1;
         ctx->pending_chain = NULL;
         ctx->pending_chain_last = &ctx->pending_chain;
