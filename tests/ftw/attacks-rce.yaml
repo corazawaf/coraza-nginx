@@ -5,13 +5,13 @@ meta:
 
 rule_id: 932100
 tests:
-  - test_title: "GET RCE: /etc/passwd"
+  - test_title: "GET RCE: command injection"
     stages:
       - input:
           headers:
             Host: "localhost"
           method: "GET"
-          uri: "/?cmd=/etc/passwd"
+          uri: "/?cmd=;cat%20/etc/passwd"
         output:
           status: 403
 
