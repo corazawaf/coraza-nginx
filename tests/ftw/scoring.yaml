@@ -1,0 +1,56 @@
+---
+meta:
+  author: "coraza"
+  description: "Anomaly scoring tests"
+
+rule_id: 20199
+tests:
+  - test_title: "Absolute scoring: score=1 passes"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+          method: "GET"
+          uri: "/scoring-absolute?what=badarg1"
+        output:
+          status: 200
+
+  - test_title: "Absolute scoring: score=2 blocks"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+          method: "GET"
+          uri: "/scoring-absolute?what=badarg2"
+        output:
+          status: 403
+
+  - test_title: "Iterative scoring: 1 arg passes"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+          method: "GET"
+          uri: "/scoring-iterative?arg1=badarg1"
+        output:
+          status: 200
+
+  - test_title: "Iterative scoring: 2 args passes"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+          method: "GET"
+          uri: "/scoring-iterative?arg1=badarg1&arg2=badarg2"
+        output:
+          status: 200
+
+  - test_title: "Iterative scoring: 3 args blocks"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+          method: "GET"
+          uri: "/scoring-iterative?arg1=badarg1&arg2=badarg2&arg3=badarg3"
+        output:
+          status: 403

@@ -1,0 +1,64 @@
+---
+meta:
+  author: "coraza"
+  description: "Remote Code Execution (RCE) detection across HTTP methods"
+
+rule_id: 932100
+tests:
+  - test_title: "GET RCE: /etc/passwd"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+          method: "GET"
+          uri: "/?cmd=/etc/passwd"
+        output:
+          status: 403
+
+  - test_title: "POST RCE: shell command"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+            Content-Type: "application/x-www-form-urlencoded"
+          method: "POST"
+          uri: "/"
+          data: "cmd=;cat /etc/passwd"
+        output:
+          status: 403
+
+  - test_title: "POST RCE: pipe command"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+            Content-Type: "application/x-www-form-urlencoded"
+          method: "POST"
+          uri: "/"
+          data: "cmd=|ls -la"
+        output:
+          status: 403
+
+  - test_title: "PUT RCE: shell command"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+            Content-Type: "application/x-www-form-urlencoded"
+          method: "PUT"
+          uri: "/"
+          data: "cmd=;cat /etc/passwd"
+        output:
+          status: 403
+
+  - test_title: "DELETE RCE: shell command"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+            Content-Type: "application/x-www-form-urlencoded"
+          method: "DELETE"
+          uri: "/"
+          data: "cmd=;cat /etc/passwd"
+        output:
+          status: 403

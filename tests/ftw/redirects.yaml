@@ -1,0 +1,46 @@
+---
+meta:
+  author: "coraza"
+  description: "Redirect and block status code tests"
+
+rule_id: 20701
+tests:
+  - test_title: "Redirect 302"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+          method: "GET"
+          uri: "/redirect-302?target=redirect"
+        output:
+          status: 302
+
+  - test_title: "Redirect 301"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+          method: "GET"
+          uri: "/redirect-301?target=redirect"
+        output:
+          status: 301
+
+  - test_title: "Block 401"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+          method: "GET"
+          uri: "/deny-401?action=block"
+        output:
+          status: 401
+
+  - test_title: "Redirect: no match passes"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+          method: "GET"
+          uri: "/redirect-302?target=safe"
+        output:
+          status: 200

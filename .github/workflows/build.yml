@@ -139,6 +139,66 @@ jobs:
           export TEST_NGINX_GLOBALS="load_module \"/usr/lib/nginx/modules/ngx_http_coraza_module.so\";"
           prove coraza*.t
 
+      - name: Install go-ftw
+        run: go install github.com/coreruleset/go-ftw@latest
+
+      - name: Setup CRS and run go-ftw tests
+        run: |
+          # Download CRS
+          CRS_VERSION="4.25.0"
+          curl -sSL "https://github.com/coreruleset/coreruleset/archive/refs/tags/v${CRS_VERSION}.tar.gz" -o /tmp/crs.tar.gz
+          sudo mkdir -p /opt/coraza/owasp-crs /opt/coraza/config /opt/coraza/config.d /opt/coraza/plugins /opt/coraza/rules /opt/coraza/rules.d /opt/coraza/overrides
+          sudo tar xzf /tmp/crs.tar.gz -C /tmp
+          sudo cp -r /tmp/coreruleset-${CRS_VERSION}/rules /opt/coraza/owasp-crs/
+          sudo cp -r /tmp/coreruleset-${CRS_VERSION}/plugins /opt/coraza/owasp-crs/
+          sudo cp /tmp/coreruleset-${CRS_VERSION}/crs-setup.conf.example /opt/coraza/config/crs-setup.conf
+
+          # Create coraza config
+          sudo tee /opt/coraza/config/coraza.conf > /dev/null <<'CONF'
+          SecRuleEngine On
+          SecRequestBodyAccess On
+          SecResponseBodyAccess Off
+          SecAuditEngine Off
+          CONF
+
+          # Create rules include chain
+          sudo tee /opt/coraza/config/coraza-rules.conf > /dev/null <<'CONF'
+          Include /opt/coraza/config/coraza.conf
+          Include /opt/coraza/config.d/*.conf
+          Include /opt/coraza/config/crs-setup.conf
+          Include /opt/coraza/owasp-crs/plugins/*-config.conf
+          Include /opt/coraza/owasp-crs/plugins/*-before.conf
+          Include /opt/coraza/owasp-crs/rules/*.conf
+          Include /opt/coraza/owasp-crs/plugins/*-after.conf
+          Include /opt/coraza/plugins/*-config.conf
+          Include /opt/coraza/plugins/*-before.conf
+          Include /opt/coraza/plugins/*-after.conf
+          Include /opt/coraza/rules/*.conf
+          Include /opt/coraza/rules.d/*.conf
+          Include /opt/coraza/overrides/*.conf
+          CONF
+
+          # Install nginx test config and create directories
+          sudo cp tests/ftw/nginx-test.conf /etc/nginx/nginx.conf
+          sudo mkdir -p /var/cache/nginx/client_temp /var/log/nginx /tmp/empty
+          echo "OK" | sudo tee /tmp/empty/index.html > /dev/null
+
+          # Start nginx
+          sudo /usr/sbin/nginx
+          sleep 2
+
+          # Run go-ftw
+          cat > /tmp/.ftw.yaml <<'EOF'
+          testoverride:
+            input:
+              dest_addr: "127.0.0.1"
+              port: 80
+          EOF
+          ~/go/bin/go-ftw run --cloud --config /tmp/.ftw.yaml -d tests/ftw/
+
+          # Stop nginx
+          sudo /usr/sbin/nginx -s stop
+
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:

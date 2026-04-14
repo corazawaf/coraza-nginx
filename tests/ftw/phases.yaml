@@ -1,0 +1,74 @@
+---
+meta:
+  author: "coraza"
+  description: "Phase 1 and 2 rule evaluation"
+
+rule_id: 20001
+tests:
+  - test_title: "Phase 1: block 403"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+          method: "GET"
+          uri: "/phase1?action=block403"
+        output:
+          status: 403
+
+  - test_title: "Phase 1: normal passes"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+          method: "GET"
+          uri: "/phase1?action=safe"
+        output:
+          status: 200
+
+  - test_title: "Phase 2: deny on body"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+            Content-Type: "application/x-www-form-urlencoded"
+          method: "POST"
+          uri: "/phase2"
+          data: "PHASE2ATTACK"
+        output:
+          status: 403
+
+  - test_title: "Phase 2: clean body passes"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+            Content-Type: "application/x-www-form-urlencoded"
+          method: "POST"
+          uri: "/phase2"
+          data: "cleandata"
+        output:
+          status: 200
+
+  - test_title: "Phase 2: PUT deny on body"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+            Content-Type: "application/x-www-form-urlencoded"
+          method: "PUT"
+          uri: "/phase2"
+          data: "PHASE2ATTACK"
+        output:
+          status: 403
+
+  - test_title: "Phase 2: DELETE deny on body"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+            Content-Type: "application/x-www-form-urlencoded"
+          method: "DELETE"
+          uri: "/phase2"
+          data: "PHASE2ATTACK"
+        output:
+          status: 403

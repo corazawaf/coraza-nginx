@@ -1,0 +1,48 @@
+---
+meta:
+  author: "coraza"
+  description: "Config merging and override tests"
+
+rule_id: 20010
+tests:
+  - test_title: "Engine off: SQLi passes"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+          method: "GET"
+          uri: "/merge-engine-off?id=1%20OR%201%3D1"
+        output:
+          status: 200
+
+  - test_title: "Body access off: POST SQLi passes"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+            Content-Type: "application/x-www-form-urlencoded"
+          method: "POST"
+          uri: "/merge-bodyaccess-off/"
+          data: "id=1 OR 1=1"
+        output:
+          status: 200
+
+  - test_title: "Inherited location: local rule blocks"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+          method: "GET"
+          uri: "/merge-inherited?localonly=yes"
+        output:
+          status: 403
+
+  - test_title: "Inherited location: CRS still active"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+          method: "GET"
+          uri: "/merge-inherited?id=1%20OR%201%3D1"
+        output:
+          status: 403
