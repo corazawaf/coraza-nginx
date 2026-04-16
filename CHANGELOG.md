@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.11.0](https://github.com/corazawaf/coraza-nginx/compare/v0.10.1...v0.11.0) (2026-04-16)
+
+
+### Features
+
+* add Debian packaging ([fd75748](https://github.com/corazawaf/coraza-nginx/commit/fd7574861ff81a295224dfcedb697eeb3f7ad405))
+* add Debian packaging ([e014c2c](https://github.com/corazawaf/coraza-nginx/commit/e014c2c8543b8bf7b338bca50db242c0e28fc449))
+* add go-ftw e2e tests ([f343fcd](https://github.com/corazawaf/coraza-nginx/commit/f343fcd1c04358f00157e683f8e3d87b0a5e698c))
+* add go-ftw e2e tests ([6381b71](https://github.com/corazawaf/coraza-nginx/commit/6381b7145d570cb2f5dc4700db6cb07007ab5456)), closes [#33](https://github.com/corazawaf/coraza-nginx/issues/33)
+* handle unix domain sockets in connection info ([8b101be](https://github.com/corazawaf/coraza-nginx/commit/8b101be69cd9abf1b57cd3b158ae3d3d0bcacbfa))
+* handle unix domain sockets in connection info ([a6b9175](https://github.com/corazawaf/coraza-nginx/commit/a6b9175893975fc1ac0950c6ea5e115390ad341d))
+
+
+### Bug Fixes
+
+* address review feedback on go-ftw CI step ([9a7525e](https://github.com/corazawaf/coraza-nginx/commit/9a7525e7aa2f4cdc722569e267082e86bdf7bfd7))
+* always run phase 4 rules even when body inspection is disabled ([d3fe533](https://github.com/corazawaf/coraza-nginx/commit/d3fe533285f5b34861ca1f16a2c2d5daf9bae5fd))
+* debug mode compilation errors (CORAZA_DDEBUG=1) ([20a0924](https://github.com/corazawaf/coraza-nginx/commit/20a0924142bfbeedb6aa249d7908c04ac1dcb9db))
+* match pidfile path with nginx-test.conf (/tmp/nginx.pid) ([3643cfe](https://github.com/corazawaf/coraza-nginx/commit/3643cfea134e6696f762ed31525a71c0ebf7ad63))
+* require coraza_is_response_body_processable (libcoraza &gt;= 1.4.0) ([d8c121f](https://github.com/corazawaf/coraza-nginx/commit/d8c121f4f2daf88a2ca3e54b8e335861a7d1bcd3))
+* skip response body inspection when SecResponseBodyAccess is Off ([c118201](https://github.com/corazawaf/coraza-nginx/commit/c1182015e422f22ab0dbb4b49aa353e91e287ae3))
+* stop routing response bodies through Go FFI when body inspection is disabled ([9d5c083](https://github.com/corazawaf/coraza-nginx/commit/9d5c08385b2e9b876ae71edd1d402cbf422f5047))
+* use command injection payload for GET RCE test, add 405 fallback to all locations ([c2dab85](https://github.com/corazawaf/coraza-nginx/commit/c2dab8557ed95200bb74dc1c261841fb25bb061a))
+
 ## [0.10.1](https://github.com/corazawaf/coraza-nginx/compare/v0.10.0...v0.10.1) (2026-03-16)
 
 
