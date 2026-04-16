@@ -139,6 +139,70 @@ jobs:
           export TEST_NGINX_GLOBALS="load_module \"/usr/lib/nginx/modules/ngx_http_coraza_module.so\";"
           prove coraza*.t
 
+      - name: Install go-ftw
+        run: |
+          # renovate: depName=coreruleset/go-ftw datasource=github-releases
+          go install github.com/coreruleset/go-ftw/v2@v2.1.0
+
+      - name: Setup CRS and run go-ftw tests
+        run: |
+          # Create directories owned by runner (avoids sudo for file operations)
+          sudo mkdir -p /opt/coraza /var/cache/nginx/client_temp /var/log/nginx
+          sudo chown -R $(id -u):$(id -g) /opt/coraza /var/cache/nginx /var/log/nginx
+          mkdir -p /opt/coraza/{owasp-crs,config,config.d,plugins,rules,rules.d,overrides} /tmp/empty
+
+          # Download and install CRS
+          # renovate: depName=coreruleset/coreruleset datasource=github-releases
+          CRS_VERSION="4.25.0"
+          curl -sSL "https://github.com/coreruleset/coreruleset/archive/refs/tags/v${CRS_VERSION}.tar.gz" -o /tmp/crs.tar.gz
+          tar xzf /tmp/crs.tar.gz -C /tmp
+          cp -r /tmp/coreruleset-${CRS_VERSION}/rules /opt/coraza/owasp-crs/
+          cp -r /tmp/coreruleset-${CRS_VERSION}/plugins /opt/coraza/owasp-crs/
+          cp /tmp/coreruleset-${CRS_VERSION}/crs-setup.conf.example /opt/coraza/config/crs-setup.conf
+
+          # Create coraza config
+          printf '%s\n' \
+            'SecRuleEngine On' \
+            'SecRequestBodyAccess On' \
+            'SecResponseBodyAccess Off' \
+            'SecAuditEngine Off' \
+            > /opt/coraza/config/coraza.conf
+
+          # Create rules include chain
+          printf '%s\n' \
+            'Include /opt/coraza/config/coraza.conf' \
+            'Include /opt/coraza/config.d/*.conf' \
+            'Include /opt/coraza/config/crs-setup.conf' \
+            'Include /opt/coraza/owasp-crs/plugins/*-config.conf' \
+            'Include /opt/coraza/owasp-crs/plugins/*-before.conf' \
+            'Include /opt/coraza/owasp-crs/rules/*.conf' \
+            'Include /opt/coraza/owasp-crs/plugins/*-after.conf' \
+            'Include /opt/coraza/plugins/*-config.conf' \
+            'Include /opt/coraza/plugins/*-before.conf' \
+            'Include /opt/coraza/plugins/*-after.conf' \
+            'Include /opt/coraza/rules/*.conf' \
+            'Include /opt/coraza/rules.d/*.conf' \
+            'Include /opt/coraza/overrides/*.conf' \
+            > /opt/coraza/config/coraza-rules.conf
+
+          # Install nginx test config
+          sudo cp tests/ftw/nginx-test.conf /etc/nginx/nginx.conf
+          echo "OK" > /tmp/empty/index.html
+
+          # Start nginx (needs root for port 80) and wait for pidfile
+          sudo /usr/sbin/nginx
+          for i in $(seq 1 10); do
+            if [ -f /tmp/nginx.pid ]; then break; fi
+            sleep 1
+          done
+
+          # Run go-ftw
+          printf 'testoverride:\n  input:\n    dest_addr: "127.0.0.1"\n    port: 80\n' > /tmp/.ftw.yaml
+          ~/go/bin/go-ftw run --cloud --config /tmp/.ftw.yaml -d tests/ftw/
+
+          # Stop nginx
+          sudo /usr/sbin/nginx -s stop
+
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:

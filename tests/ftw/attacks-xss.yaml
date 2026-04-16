@@ -1,0 +1,74 @@
+---
+meta:
+  author: "coraza"
+  description: "Cross-Site Scripting (XSS) detection across HTTP methods"
+
+rule_id: 941100
+tests:
+  - test_title: "GET XSS: script tag"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+          method: "GET"
+          uri: "/?q=%3Cscript%3Ealert(1)%3C/script%3E"
+        output:
+          status: 403
+
+  - test_title: "GET XSS: img onerror"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+          method: "GET"
+          uri: "/?q=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E"
+        output:
+          status: 403
+
+  - test_title: "POST XSS: script tag"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+            Content-Type: "application/x-www-form-urlencoded"
+          method: "POST"
+          uri: "/"
+          data: "q=<script>alert(1)</script>"
+        output:
+          status: 403
+
+  - test_title: "POST XSS: img onerror"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+            Content-Type: "application/x-www-form-urlencoded"
+          method: "POST"
+          uri: "/"
+          data: "q=<img src=x onerror=alert(1)>"
+        output:
+          status: 403
+
+  - test_title: "PUT XSS: script tag"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+            Content-Type: "application/x-www-form-urlencoded"
+          method: "PUT"
+          uri: "/"
+          data: "q=<script>alert(1)</script>"
+        output:
+          status: 403
+
+  - test_title: "DELETE XSS: script tag"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+            Content-Type: "application/x-www-form-urlencoded"
+          method: "DELETE"
+          uri: "/"
+          data: "q=<script>alert(1)</script>"
+        output:
+          status: 403

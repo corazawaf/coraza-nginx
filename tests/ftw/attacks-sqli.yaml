@@ -1,0 +1,120 @@
+---
+meta:
+  author: "coraza"
+  description: "SQL Injection detection across HTTP methods"
+
+rule_id: 942100
+tests:
+  - test_title: "GET SQLi: OR 1=1"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+          method: "GET"
+          uri: "/?id=1%20OR%201%3D1"
+        output:
+          status: 403
+
+  - test_title: "GET SQLi: UNION SELECT"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+          method: "GET"
+          uri: "/?id=1%20UNION%20SELECT%201,2,3"
+        output:
+          status: 403
+
+  - test_title: "GET normal request passes"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+          method: "GET"
+          uri: "/"
+        output:
+          status: 200
+
+  - test_title: "POST SQLi: OR 1=1"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+            Content-Type: "application/x-www-form-urlencoded"
+          method: "POST"
+          uri: "/"
+          data: "id=1 OR 1=1"
+        output:
+          status: 403
+
+  - test_title: "POST SQLi: UNION SELECT"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+            Content-Type: "application/x-www-form-urlencoded"
+          method: "POST"
+          uri: "/"
+          data: "id=1 UNION SELECT 1,2,3"
+        output:
+          status: 403
+
+  - test_title: "POST SQLi: DROP TABLE"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+            Content-Type: "application/x-www-form-urlencoded"
+          method: "POST"
+          uri: "/"
+          data: "q=1;DROP TABLE users"
+        output:
+          status: 403
+
+  - test_title: "POST normal form passes"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+            Content-Type: "application/x-www-form-urlencoded"
+          method: "POST"
+          uri: "/"
+          data: "name=john&age=30"
+        output:
+          status: 200
+
+  - test_title: "POST normal JSON passes"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+            Content-Type: "application/json"
+          method: "POST"
+          uri: "/"
+          data: '{"user":"john","action":"login"}'
+        output:
+          status: 200
+
+  - test_title: "PUT SQLi: OR 1=1"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+            Content-Type: "application/x-www-form-urlencoded"
+          method: "PUT"
+          uri: "/"
+          data: "id=1 OR 1=1"
+        output:
+          status: 403
+
+  - test_title: "DELETE SQLi: OR 1=1"
+    stages:
+      - input:
+          headers:
+            Host: "localhost"
+            Content-Type: "application/x-www-form-urlencoded"
+          method: "DELETE"
+          uri: "/"
+          data: "id=1 OR 1=1"
+        output:
+          status: 403
