@@ -140,15 +140,18 @@ jobs:
           prove coraza*.t
 
       - name: Install go-ftw
-        run: go install github.com/coreruleset/go-ftw@latest
+        run: |
+          # renovate: depName=coreruleset/go-ftw datasource=github-releases
+          go install github.com/coreruleset/go-ftw/v2@v2.1.0
 
       - name: Setup CRS and run go-ftw tests
         run: |
           # Download CRS
+          # renovate: depName=coreruleset/coreruleset datasource=github-releases
           CRS_VERSION="4.25.0"
           curl -sSL "https://github.com/coreruleset/coreruleset/archive/refs/tags/v${CRS_VERSION}.tar.gz" -o /tmp/crs.tar.gz
           sudo mkdir -p /opt/coraza/owasp-crs /opt/coraza/config /opt/coraza/config.d /opt/coraza/plugins /opt/coraza/rules /opt/coraza/rules.d /opt/coraza/overrides
-          sudo tar xzf /tmp/crs.tar.gz -C /tmp
+          tar xzf /tmp/crs.tar.gz -C /tmp
           sudo cp -r /tmp/coreruleset-${CRS_VERSION}/rules /opt/coraza/owasp-crs/
           sudo cp -r /tmp/coreruleset-${CRS_VERSION}/plugins /opt/coraza/owasp-crs/
           sudo cp /tmp/coreruleset-${CRS_VERSION}/crs-setup.conf.example /opt/coraza/config/crs-setup.conf
@@ -183,9 +186,12 @@ jobs:
           sudo mkdir -p /var/cache/nginx/client_temp /var/log/nginx /tmp/empty
           echo "OK" | sudo tee /tmp/empty/index.html > /dev/null
 
-          # Start nginx
+          # Start nginx and wait for it
           sudo /usr/sbin/nginx
-          sleep 2
+          for i in $(seq 1 10); do
+            if [ -f /etc/nginx/logs/nginx.pid ]; then break; fi
+            sleep 1
+          done
 
           # Run go-ftw
           cat > /tmp/.ftw.yaml <<'EOF'
