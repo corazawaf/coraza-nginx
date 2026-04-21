@@ -1,0 +1,26 @@
+testoverride:
+  input:
+    dest_addr: "127.0.0.1"
+    port: 80
+  ignore:
+    # Imported from coraza upstream testing + nginx-specific
+    920100-4: 'Invalid uri, coraza not reached'
+    920100-5: 'Invalid uri, coraza not reached'
+    920100-8: 'Colon in path, nginx allows it unlike Apache'
+    920270-4: 'Rule works but test expects status 400'
+    920290-1: 'Rule works but test expects status 400'
+    920430-5: 'Test has expect_error'
+    920430-8: 'HTTP/3.0 not supported'
+    921250-1: 'Expected to match $Version in cookies, failing also in upstream'
+    921250-2: 'Expected to match $Version in cookies, failing also in upstream'
+    933120-2: 'To be investigated: match_regex value might be ModSec specific'
+    920274-1: ''
+    920280-3: ''
+    920290-4: 'test related to empty host header'
+    920430-3: 'expect_error: true'
+    920430-9: ''
+    920610-2: ''
+    920620-1: ''
+    922130-1: ''
+    922130-2: ''
+    922130-7: ''

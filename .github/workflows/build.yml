@@ -196,9 +196,12 @@ jobs:
             sleep 1
           done
 
-          # Run go-ftw
+          # Run custom go-ftw tests
           printf 'testoverride:\n  input:\n    dest_addr: "127.0.0.1"\n    port: 80\n' > /tmp/.ftw.yaml
           ~/go/bin/go-ftw run --cloud --config /tmp/.ftw.yaml -d tests/ftw/
+
+          # Run full CRS regression tests
+          ~/go/bin/go-ftw run --cloud --config tests/ftw-crs.yml -d /tmp/coreruleset-${CRS_VERSION}/tests/regression/tests/ --exclude "^920"
 
           # Stop nginx
           sudo /usr/sbin/nginx -s stop
