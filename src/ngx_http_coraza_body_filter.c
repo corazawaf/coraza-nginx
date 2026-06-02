@@ -112,18 +112,11 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         is_request_processed = chain->buf->last_buf;
 
         /*
-         * Only read and forward body data to the Coraza engine when body
-         * inspection is actually enabled for this transaction.  When
-         * SecResponseBodyAccess is Off (or the Content-Type does not match
-         * SecResponseBodyMimeType) ctx->response_body_processable is 0 and
-         * we skip the Go FFI call entirely, preventing the large-response
-         * hang described in the issue.
-         */
-        /*
          * Only forward body data to the Coraza engine when body inspection
-         * is enabled for this transaction. Skip the Go FFI call when
-         * SecResponseBodyAccess is Off or the Content-Type does not match
-         * SecResponseBodyMimeType.
+         * is actually enabled for this transaction.  When SecResponseBodyAccess
+         * is Off (or the Content-Type does not match SecResponseBodyMimeType)
+         * ctx->response_body_processable is 0 and we skip the Go FFI call
+         * entirely, preventing the large-response hang.
          */
         if (ctx->response_body_processable) {
             u_char *data;
@@ -185,65 +178,74 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         }
 
         /*
-         * When body inspection is active and this is not the last buffer,
-         * accumulate a pool-backed copy so that nginx can safely recycle
-         * the original upstream/proxy buffer before we eventually flush the
-         * accumulated chain.  Marking the original buffer consumed
-         * (pos == last for memory buffers, file_pos == file_last for file
-         * buffers) signals to nginx that it is free to reuse the buffer,
-         * preventing the proxy-buffer starvation deadlock that caused large
-         * responses to hang.
+         * When response headers are being delayed (waiting for phase 4),
+         * move every buffer into pending_chain so the flush logic below
+         * is uniform: pending_chain IS the complete chain to forward, and
+         * `in` is never appended.
+         *
+         *   - Intermediate buffers (last_buf=0) are deep-copied into the
+         *     request pool and the original is marked consumed (pos=last).
+         *     This lets nginx recycle proxy/upstream buffers while we wait
+         *     for the last buffer, avoiding the large-response hang.
+         *
+         *   - The final buffer (last_buf=1) is appended as a passthrough
+         *     chain link (no copy needed -- the flush below forwards it
+         *     synchronously, so the original storage is still valid).
          */
-        if (ctx->headers_delayed && !is_request_processed) {
-            ngx_chain_t *cl;
-            ngx_buf_t   *b;
-            u_char      *data;
-            size_t       len;
-
-            if (ngx_http_coraza_read_body_data(r, chain->buf, &data, &len)
-                != NGX_OK)
-            {
-                return NGX_ERROR;
-            }
-
-            b = ngx_calloc_buf(r->pool);
-            if (b == NULL) {
-                return NGX_ERROR;
-            }
-
-            if (len > 0) {
-                /*
-                 * Always make a pool copy: in-memory buffers may point into
-                 * nginx's single reusable upstream buffer (u->buffer) which
-                 * nginx will overwrite once we mark it consumed.
-                 */
-                u_char *copy = ngx_pnalloc(r->pool, len);
-                if (copy == NULL) {
-                    return NGX_ERROR;
-                }
-                ngx_memcpy(copy, data, len);
-                b->pos    = copy;
-                b->last   = copy + len;
-                b->memory = 1;
-            }
-
-            b->last_buf      = 0;  /* intermediate -- last_buf will be on the
-                                      final buffer forwarded when phase 4 ends */
-            b->last_in_chain = chain->buf->last_in_chain;
-            b->flush         = chain->buf->flush;
-
-            /* Mark original buffer consumed so nginx may reuse it */
-            if (ngx_buf_in_memory(chain->buf)) {
-                chain->buf->pos = chain->buf->last;
-            } else if (chain->buf->in_file) {
-                chain->buf->file_pos = chain->buf->file_last;
-            }
-
-            cl = ngx_alloc_chain_link(r->pool);
+        if (ctx->headers_delayed) {
+            ngx_chain_t *cl = ngx_alloc_chain_link(r->pool);
             if (cl == NULL) {
                 return NGX_ERROR;
             }
-            cl->buf  = b;
+
+            if (is_request_processed) {
+                cl->buf = chain->buf;
+            } else {
+                ngx_buf_t *b;
+                u_char    *data;
+                size_t     len;
+
+                if (ngx_http_coraza_read_body_data(r, chain->buf, &data, &len)
+                    != NGX_OK)
+                {
+                    return NGX_ERROR;
+                }
+
+                b = ngx_calloc_buf(r->pool);
+                if (b == NULL) {
+                    return NGX_ERROR;
+                }
+
+                if (len > 0) {
+                    /*
+                     * Always make a pool copy: in-memory buffers may point
+                     * into nginx's single reusable upstream buffer (u->buffer)
+                     * which nginx will overwrite once we mark it consumed.
+                     */
+                    u_char *copy = ngx_pnalloc(r->pool, len);
+                    if (copy == NULL) {
+                        return NGX_ERROR;
+                    }
+                    ngx_memcpy(copy, data, len);
+                    b->pos    = copy;
+                    b->last   = copy + len;
+                    b->memory = 1;
+                }
+
+                b->last_buf      = 0;
+                b->last_in_chain = chain->buf->last_in_chain;
+                b->flush         = chain->buf->flush;
+
+                /* Mark original buffer consumed so nginx may reuse it. */
+                if (ngx_buf_in_memory(chain->buf)) {
+                    chain->buf->pos = chain->buf->last;
+                } else if (chain->buf->in_file) {
+                    chain->buf->file_pos = chain->buf->file_last;
+                }
+
+                cl->buf = b;
+            }
+
             cl->next = NULL;
             *ctx->pending_chain_last = cl;
             ctx->pending_chain_last  = &cl->next;
@@ -253,10 +255,12 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     if (ctx->headers_delayed) {
         if (is_request_processed) {
             /*
-             * Phase 4 completed with no intervention.  Now forward the
-             * delayed response headers followed by the accumulated body.
+             * Phase 4 completed with no intervention.  Forward the delayed
+             * response headers, then the accumulated chain.  pending_chain
+             * is guaranteed non-NULL here: every iteration of the loop above
+             * appended to it (either a copy or a passthrough link).
              */
-            ngx_int_t rc;
+            ngx_int_t    rc;
             ngx_chain_t *out;
 
             ctx->headers_delayed = 0;
@@ -266,24 +270,12 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                 return NGX_ERROR;
             }
 
-            /*
-             * pending_chain holds pool copies of all previously accumulated
-             * buffers (with last_buf=0).  Append the current input chain
-             * (which contains the final last_buf=1 buffer) so the downstream
-             * receives a complete, ordered chain.
-             */
-            if (ctx->pending_chain) {
-                *ctx->pending_chain_last = in;
-                out = ctx->pending_chain;
-                ctx->pending_chain = NULL;
-            } else {
-                out = in;
-            }
-
+            out = ctx->pending_chain;
+            ctx->pending_chain = NULL;
             return ngx_http_next_body_filter(r, out);
         }
 
-        /* Not the last buffer yet — all chunks were accumulated above */
+        /* Not the last buffer yet -- all chunks were accumulated above. */
         return NGX_OK;
     }
 
