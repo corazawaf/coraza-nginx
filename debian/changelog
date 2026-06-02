@@ -1,3 +1,19 @@
+libnginx-mod-http-coraza (0.11.1-1) unstable; urgency=low
+
+  * New upstream release 0.11.1.
+  * Fix empty/multi-buffer response handling (return 301/404).
+
+ -- Pierre Pomes <pierre.pomes@gmail.com>  Tue, 02 Jun 2026 12:00:00 +0000
+
+libnginx-mod-http-coraza (0.11.0-1) unstable; urgency=low
+
+  * New upstream release 0.11.0.
+  * Fix large response hang when SecResponseBodyAccess is Off.
+  * Handle unix domain sockets in connection info.
+  * Require coraza_is_response_body_processable (libcoraza >= 1.4.0).
+
+ -- Pierre Pomes <pierre.pomes@gmail.com>  Thu, 16 Apr 2026 19:11:54 +0000
+
 libnginx-mod-http-coraza (0.10.1-1) unstable; urgency=low
 
   * Initial Debian packaging.

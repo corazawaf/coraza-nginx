@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.1](https://github.com/corazawaf/coraza-nginx/compare/v0.11.0...v0.11.1) (2026-06-02)
+
+
+### Bug Fixes
+
+* forward empty/multi-buffer responses (return 301/404) ([16cdc41](https://github.com/corazawaf/coraza-nginx/commit/16cdc41555a8da948df55bec92903a67be038deb))
+* forward empty/multi-buffer responses correctly ([6e424f1](https://github.com/corazawaf/coraza-nginx/commit/6e424f18e392881ad9af56249331cee93269a9a1))
+
 ## [0.11.0](https://github.com/corazawaf/coraza-nginx/compare/v0.10.1...v0.11.0) (2026-04-16)
 
 
