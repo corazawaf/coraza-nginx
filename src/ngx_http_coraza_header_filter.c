@@ -136,7 +136,7 @@ ngx_http_coraza_resolv_header_content_length(ngx_http_request_t *r, ngx_str_t na
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
-    if (r->headers_out.content_length_n > 0)
+    if (r->headers_out.content_length_n >= 0)
     {
         ngx_sprintf((u_char *)buf, "%O%Z", r->headers_out.content_length_n);
         value.data = (unsigned char *)buf;
