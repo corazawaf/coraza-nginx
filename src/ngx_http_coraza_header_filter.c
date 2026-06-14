@@ -506,16 +506,21 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * (SecResponseBodyAccess Off or Content-Type mismatch): in that case
      * there is no phase-4 buffering and the response must not be held back.
      */
-    if (!r->header_only && !r->error_page && r == r->main)
+    if (!r->header_only && !r->error_page && r == r->main
+        && ctx->response_body_processable)
     {
         /*
          * Delay sending headers until phase 4 completes so that
          * phase 4 rules can still return a clean error page.
-         * Only force body into memory when body inspection is needed.
+         *
+         * Only do this when body inspection is actually needed.  When it is
+         * not (SecResponseBodyAccess Off or Content-Type mismatch) the body
+         * filter does no phase-4 buffering, so holding the headers back would
+         * accumulate the entire response in the request pool before forwarding
+         * anything -- unbounded worker memory on large responses and broken
+         * streaming/SSE.  In that case forward the headers immediately.
          */
-        if (ctx->response_body_processable) {
-            r->filter_need_in_memory = 1;
-        }
+        r->filter_need_in_memory = 1;
         ctx->headers_delayed = 1;
         ctx->pending_chain = NULL;
         ctx->pending_chain_last = &ctx->pending_chain;

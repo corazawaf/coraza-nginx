@@ -59,6 +59,20 @@ http {
                 SecResponseBodyAccess Off
             ';
         }
+
+        # Streaming (unknown-length) response with body inspection Off.
+        # SSI processing makes nginx emit the response without a
+        # Content-Length (content_length_n == -1).  The connector must
+        # forward the response headers immediately instead of holding them
+        # back and accumulating the whole body in the request pool.
+        location /stream_access_off {
+            default_type text/html;
+            ssi on;
+            coraza_rules '
+                SecRuleEngine On
+                SecResponseBodyAccess Off
+            ';
+        }
     }
 }
 EOF
@@ -72,9 +86,18 @@ $t->write_file("/body1", "BAD BODY");
 my $large_body = "X" x (100 * 1024);
 $t->write_file("/body_access_off", $large_body);
 
+# Unknown-length streaming body (SSI -> no Content-Length).  Exercises the
+# "delay skipped when body inspection is not needed" path: with the fix the
+# headers are forwarded immediately; without it the connector delayed the
+# headers and buffered the entire response in the request pool.
+my $stream_marker = "STREAMEND";
+my $stream_body = ("Y" x (100 * 1024)) . $stream_marker;
+$t->write_file("/stream_access_off",
+	'<!--# echo var="uri" -->' . $stream_body);
+
 $t->run();
 $t->todo_alerts();
-$t->plan(3);
+$t->plan(5);
 
 ###############################################################################
 
@@ -83,4 +106,17 @@ like(http_get('/body1'), qr/^HTTP.*403/, 'response body (block)');
 my $r = http_get('/body_access_off');
 like($r, qr/^HTTP.*200/, 'large response with SecResponseBodyAccess Off returns 200');
 like($r, qr/\Q$large_body\E/, 'large response body delivered intact');
+
+# HTTP/1.1 so the unknown-length SSI response is streamed (chunked) rather
+# than buffered into a Content-Length by the HTTP/1.0 path.
+my $s = http(<<EOF);
+GET /stream_access_off HTTP/1.1
+Host: localhost
+Connection: close
+
+EOF
+like($s, qr/^HTTP.*200/,
+	'streaming (no Content-Length) response with Access Off returns 200');
+like($s, qr/\Q$stream_marker\E/,
+	'streaming response body delivered intact end-to-end');
 
