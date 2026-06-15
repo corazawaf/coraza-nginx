@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.11.2](https://github.com/corazawaf/coraza-nginx/compare/v0.11.1...v0.11.2) (2026-06-15)
+
+
+### Bug Fixes
+
+* **header_filter:** pass Content-Length: 0 to the WAF for inspection ([50e6030](https://github.com/corazawaf/coraza-nginx/commit/50e6030133057c3c91e12e45fa29021dfcab2970))
+* **header_filter:** pass Content-Length: 0 to the WAF for inspection ([bcda3f9](https://github.com/corazawaf/coraza-nginx/commit/bcda3f9d0bb64c598f74a04a3349919fc0b8e4eb))
+* **module:** do not allocate an unused cleanup data buffer per request ([3fb3f53](https://github.com/corazawaf/coraza-nginx/commit/3fb3f5352ca441abaf247069314c19f7b60145c4))
+
 ## [0.11.1](https://github.com/corazawaf/coraza-nginx/compare/v0.11.0...v0.11.1) (2026-06-02)
 
 

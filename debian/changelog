@@ -1,3 +1,11 @@
+libnginx-mod-http-coraza (0.11.2-1) unstable; urgency=low
+
+  * New upstream release 0.11.2.
+  * header_filter: pass Content-Length: 0 to the WAF for inspection.
+  * module: do not allocate an unused cleanup data buffer per request.
+
+ -- Pierre Pomes <pierre.pomes@gmail.com>  Mon, 15 Jun 2026 12:00:00 +0000
+
 libnginx-mod-http-coraza (0.11.1-1) unstable; urgency=low
 
   * New upstream release 0.11.1.
