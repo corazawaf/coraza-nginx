@@ -175,7 +175,7 @@ ngx_http_coraza_create_ctx(ngx_http_request_t *r)
 
 	ngx_http_set_ctx(r, ctx, ngx_http_coraza_module);
 
-	cln = ngx_pool_cleanup_add(r->pool, sizeof(ngx_http_coraza_ctx_t));
+	cln = ngx_pool_cleanup_add(r->pool, 0);
 	if (cln == NULL)
 	{
 		dd("failed to create the CORAZA context cleanup");
