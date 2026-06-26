@@ -505,8 +505,15 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * We also skip the delay when body inspection is not needed
      * (SecResponseBodyAccess Off or Content-Type mismatch): in that case
      * there is no phase-4 buffering and the response must not be held back.
+     *
+     * We also skip 101 Switching Protocols: an upgraded connection (e.g.
+     * WebSocket) becomes a raw bidirectional tunnel with no HTTP response
+     * body, so the body filter never sees a last_buf to trigger the flush.
+     * Delaying the 101 would hold the handshake forever and the upgrade
+     * would never complete.
      */
-    if (!r->header_only && !r->error_page && r == r->main)
+    if (!r->header_only && !r->error_page && r == r->main
+        && r->headers_out.status != NGX_HTTP_SWITCHING_PROTOCOLS)
     {
         /*
          * Delay sending headers until phase 4 completes so that
