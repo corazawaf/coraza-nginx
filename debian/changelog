@@ -1,3 +1,11 @@
+libnginx-mod-http-coraza (0.11.3-1) unstable; urgency=low
+
+  * New upstream release 0.11.3.
+  * header_filter: pass through 101 Switching Protocols so WebSocket
+    upgrades work with the WAF enabled.
+
+ -- Pierre Pomes <pierre.pomes@gmail.com>  Fri, 26 Jun 2026 12:00:00 +0000
+
 libnginx-mod-http-coraza (0.11.2-1) unstable; urgency=low
 
   * New upstream release 0.11.2.

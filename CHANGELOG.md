@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.3](https://github.com/corazawaf/coraza-nginx/compare/v0.11.2...v0.11.3) (2026-06-26)
+
+
+### Bug Fixes
+
+* don't delay 101 Switching Protocols, breaks websocket upgrades ([3c5ce85](https://github.com/corazawaf/coraza-nginx/commit/3c5ce85dce9823a61d4f50b9ce187e4fc7f18677))
+* pass through 101 Switching Protocols (WebSocket upgrades) ([2c61d19](https://github.com/corazawaf/coraza-nginx/commit/2c61d19483d20cb054efeef5ad2ea0465fbb609f))
+
 ## [0.11.2](https://github.com/corazawaf/coraza-nginx/compare/v0.11.1...v0.11.2) (2026-06-15)
 
 
