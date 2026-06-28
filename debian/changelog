@@ -1,3 +1,10 @@
+libnginx-mod-http-coraza (0.11.4-1) unstable; urgency=low
+
+  * New upstream release 0.11.4.
+  * Skip deleted (hash == 0) headers when collecting them for Coraza.
+
+ -- Pierre Pomes <pierre.pomes@gmail.com>  Sun, 28 Jun 2026 12:00:00 +0000
+
 libnginx-mod-http-coraza (0.11.3-1) unstable; urgency=low
 
   * New upstream release 0.11.3.
