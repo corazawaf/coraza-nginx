@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.4](https://github.com/corazawaf/coraza-nginx/compare/v0.11.3...v0.11.4) (2026-06-28)
+
+
+### Bug Fixes
+
+* skip deleted (hash == 0) headers when collecting them for coraza ([bca1f6d](https://github.com/corazawaf/coraza-nginx/commit/bca1f6de77dddbf73349a52e31bb6c50913bf256))
+
 ## [0.11.3](https://github.com/corazawaf/coraza-nginx/compare/v0.11.2...v0.11.3) (2026-06-26)
 
 
