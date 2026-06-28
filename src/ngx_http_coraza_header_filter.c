@@ -393,6 +393,12 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
             i = 0;
         }
 
+        /* skip deleted headers (hash == 0): their key/value pointers may be
+         * stale, like nginx does in its own header filter */
+        if (data[i].hash == 0) {
+            continue;
+        }
+
 #if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
         ngx_http_coraza_store_ctx_header(r, &data[i].key, &data[i].value);
 #endif
