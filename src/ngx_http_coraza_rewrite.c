@@ -164,6 +164,12 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
                 i = 0;
             }
 
+            /* skip deleted headers (hash == 0): their key/value pointers
+             * may be stale */
+            if (data[i].hash == 0) {
+                continue;
+            }
+
             /**
              * By using u_char (utf8_t) I believe nginx is hoping to deal
              * with utf8 strings.
