@@ -4,6 +4,19 @@
 
 The coraza-nginx connector is the connection point between nginx and libcoraza. The module simply serves as a layer of communication between nginx and Coraza.
 
+# Install from PPA (Ubuntu)
+
+Prebuilt packages are available from a Launchpad PPA:
+https://launchpad.net/~pierrepomes/+archive/ubuntu/coraza-nginx
+
+```shell
+sudo add-apt-repository ppa:pierrepomes/coraza-nginx
+sudo apt update
+sudo apt install libnginx-mod-http-coraza
+```
+
+This pulls in libcoraza automatically. Built for Ubuntu 24.04 (noble), 25.10 (questing), 26.04 (resolute) and 26.10 (stonking). Jammy (22.04) is not supported — its nginx packaging doesn't ship the `nginx-dev` / `dh-sequence-nginx` bits needed to build a dynamic module.
+
 # Compilation
 
 If you have any doubts, please read the [GitHub build Action](https://github.com/corazawaf/coraza-nginx/blob/main/.github/workflows/build.yml) for additional information.
