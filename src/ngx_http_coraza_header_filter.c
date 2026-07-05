@@ -78,10 +78,10 @@ ngx_http_coraza_resolv_header_server(ngx_http_request_t *r, ngx_str_t name, off_
     if (r->headers_out.server == NULL) {
         if (clcf->server_tokens) {
             value.data = (u_char *)ngx_http_server_full_string;
-            value.len = sizeof(ngx_http_server_full_string);
+            value.len = sizeof(ngx_http_server_full_string) - 1;
         } else {
             value.data = (u_char *)ngx_http_server_string;
-            value.len = sizeof(ngx_http_server_string);
+            value.len = sizeof(ngx_http_server_string) - 1;
         }
     } else {
         ngx_table_elt_t *h = r->headers_out.server;
