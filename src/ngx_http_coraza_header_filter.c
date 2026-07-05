@@ -506,8 +506,10 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * page because the original 200 headers have not yet been sent to the
      * client.
      *
-     * We skip the delay for HEAD requests (no body to inspect), error pages
-     * (already an error response), and subrequests (handled independently).
+     * We skip the delay for HEAD requests (no body to inspect; nginx's final
+     * header filter sets r->header_only for HEAD, but check r->method
+     * explicitly so a delayed HEAD can never stall), error pages (already an
+     * error response), and subrequests (handled independently).
      * We also skip the delay when body inspection is not needed
      * (SecResponseBodyAccess Off or Content-Type mismatch): in that case
      * there is no phase-4 buffering and the response must not be held back.
@@ -518,7 +520,8 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * Delaying the 101 would hold the handshake forever and the upgrade
      * would never complete.
      */
-    if (!r->header_only && !r->error_page && r == r->main
+    if (r->method != NGX_HTTP_HEAD && !r->header_only && !r->error_page
+        && r == r->main
         && r->headers_out.status != NGX_HTTP_SWITCHING_PROTOCOLS)
     {
         /*
