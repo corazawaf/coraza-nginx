@@ -142,6 +142,13 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                 }
                 return ngx_http_filter_finalize_request(r,
                     &ngx_http_coraza_module, ret);
+            } else if (ret < 0) {
+                ctx->intervention_triggered = 1;
+                if (ctx->headers_delayed) {
+                    ctx->headers_delayed = 0;
+                    return NGX_HTTP_INTERNAL_SERVER_ERROR;
+                }
+                return NGX_ERROR;
             }
         }
 
@@ -232,6 +239,8 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                     b->memory = 1;
                 }
 
+                ctx->pending_bytes += len;
+
                 b->last_buf      = 0;
                 b->last_in_chain = chain->buf->last_in_chain;
                 b->flush         = chain->buf->flush;
@@ -275,7 +284,43 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
             return ngx_http_next_body_filter(r, out);
         }
 
-        /* Not the last buffer yet -- all chunks were accumulated above. */
+        /*
+         * Not the last buffer yet.  If we have buffered more than the cap,
+         * stop delaying: flush the delayed headers plus everything accumulated
+         * so far and let the remainder stream through.  This bounds worker
+         * memory on large or open-ended (streaming, e.g. SSE / long-poll)
+         * responses, whose delayed-header buffering would otherwise grow
+         * without limit in r->pool waiting for a last_buf that may never come.
+         *
+         * Trade-off: once the headers are on the wire a phase-4 rule can no
+         * longer produce a clean error page for this (oversized) response — an
+         * intervention past this point degrades to a connection reset.  We
+         * accept that to prevent an OOM/DoS on unbounded responses.
+         */
+        if (ctx->pending_bytes > NGX_HTTP_CORAZA_MAX_DELAYED_BODY) {
+            ngx_int_t    rc;
+            ngx_chain_t *out;
+
+            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                "coraza: delayed response body exceeded %uz bytes; flushing "
+                "headers early, phase-4 body blocking is no longer clean for "
+                "this response",
+                (size_t) NGX_HTTP_CORAZA_MAX_DELAYED_BODY);
+
+            ctx->headers_delayed = 0;
+
+            rc = ngx_http_coraza_forward_header(r);
+            if (rc != NGX_OK) {
+                return rc;
+            }
+
+            out = ctx->pending_chain;
+            ctx->pending_chain = NULL;
+            ctx->pending_chain_last = &ctx->pending_chain;
+            return ngx_http_next_body_filter(r, out);
+        }
+
+        /* Under the cap -- keep accumulating until last_buf. */
         return NGX_OK;
     }
 
