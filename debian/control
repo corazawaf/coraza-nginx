@@ -11,7 +11,7 @@ Rules-Requires-Root: no
 
 Package: libnginx-mod-http-coraza
 Architecture: any
-Depends: ${misc:Depends}, ${shlibs:Depends}, libcoraza1
+Depends: ${misc:Depends}, ${shlibs:Depends}, libcoraza1 (>= 1.4.0)
 Description: Coraza WAF connector module for nginx
  Coraza is an open-source Web Application Firewall (WAF) engine.
  This module integrates the Coraza WAF with the nginx web server,
