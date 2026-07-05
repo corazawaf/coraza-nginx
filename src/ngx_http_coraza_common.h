@@ -106,6 +106,7 @@ typedef struct {
 
     ngx_flag_t                 enable;
     ngx_flag_t                 has_rules;
+    ngx_flag_t                 delay_response_headers;
 
     ngx_http_complex_value_t  *transaction_id;
 } ngx_http_coraza_conf_t;
