@@ -25,15 +25,7 @@
  * #define CORAZA_DDEBUG 1
  */
 
-/*
- * Setting CORAZA_SANITY_CHECKS will help you in the debug process. By
- * defining CORAZA_SANITY_CHECKS a set of functions will be executed in
- * order to make sure the well behavior of CORAZA, letting you know (via
- * debug_logs) if something unexpected happens.
- *
- * If performance is not a concern, it is safe to keep it set.
- *
- */
+/* Kept as a no-op compatibility macro for old local debug builds. */
 #ifndef CORAZA_SANITY_CHECKS
 #define CORAZA_SANITY_CHECKS 0
 #endif
