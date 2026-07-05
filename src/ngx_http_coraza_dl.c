@@ -166,18 +166,16 @@ ngx_http_coraza_dl_open(ngx_log_t *log)
 }
 
 /* ------------------------------------------------------------------ */
-/* Public: unload libcoraza.so                                         */
+/* Public: keep libcoraza.so loaded until the process exits            */
 /* ------------------------------------------------------------------ */
 
 void
 ngx_http_coraza_dl_close(ngx_log_t *log)
 {
     if (dl_handle != NULL) {
-        dynlib_close(dl_handle);
-        dl_handle = NULL;
-        ngx_log_error(NGX_LOG_NOTICE, log, 0,
-                      "coraza: %s unloaded",
-                      CORAZA_DYNLIB_BASENAME DYNLIB_EXT);
+        ngx_log_debug1(NGX_LOG_DEBUG_CORE, log, 0,
+                       "coraza: %s left loaded for process lifetime",
+                       CORAZA_DYNLIB_BASENAME DYNLIB_EXT);
     }
 }
 
