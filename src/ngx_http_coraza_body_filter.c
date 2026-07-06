@@ -129,6 +129,17 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                 return NGX_ERROR;
             }
 
+            /*
+             * coraza_append_response_body takes an int length; guard the
+             * size_t -> int narrowing so a >INT_MAX buffer cannot wrap to a
+             * bogus length and skip inspection. Fail closed.
+             */
+            if (len > INT_MAX) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                    "coraza: response body chunk too large to inspect");
+                return NGX_ERROR;
+            }
+
             if (len > 0) {
                 coraza_append_response_body(ctx->coraza_transaction, data, len);
             }
