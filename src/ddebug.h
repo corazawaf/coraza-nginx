@@ -43,7 +43,7 @@
 #   if (NGX_HAVE_VARIADIC_MACROS)
 
 #       define dd(...) fprintf(stderr, "coraza *** %s: ", __func__); \
-            fprintf(stderr, __VA_ARGS__); \
+            fprintf(stderr, __VA_ARGS__); /* flawfinder: ignore - debug-only (CORAZA_DDEBUG), literal fmt at call sites */ \
             fprintf(stderr, " at %s line %d.\n", __FILE__, __LINE__)
 
 #   else

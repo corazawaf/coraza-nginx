@@ -23,6 +23,9 @@ jobs:
     env:
       # renovate: depName=libcoraza packageName=corazawaf/libcoraza datasource=github-releases
       LIBCORAZA_VERSION: v1.4.0
+      # ccache object cache (compiled .o reuse across runs) — see cache step below.
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
     strategy:
       matrix:
         nginx_version: ['1.24.0']
@@ -62,6 +65,28 @@ jobs:
           wget https://github.com/corazawaf/libcoraza/archive/refs/tags/${{ env.LIBCORAZA_VERSION }}.zip
           unzip -o ${{ env.LIBCORAZA_VERSION }}.zip
 
+      # ccache object cache: reuse compiled .o across runs (keyed per nginx
+      # version, restore-fallback to the newest prior cache).
+      - name: ccache cache
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-build-${{ matrix.os }}-nginx${{ matrix.nginx_version }}-${{ github.sha }}
+          restore-keys: |
+            ccache-build-${{ matrix.os }}-nginx${{ matrix.nginx_version }}-
+            ccache-build-${{ matrix.os }}-
+
+      # Go build/module cache for the cgo libcoraza build.
+      - name: Go build cache
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: gobuild-build-${{ matrix.os }}-${{ env.LIBCORAZA_VERSION }}
+          restore-keys: |
+            gobuild-build-${{ matrix.os }}-
+
       # Grab prebuilts from apt
       - name: Install dependencies with apt
         run: |
@@ -69,27 +94,24 @@ jobs:
           sudo apt-get -qq update
           sudo apt-get -y -qq \
           --fix-missing --no-install-recommends install \
-          gcc make
+          gcc make ccache eatmydata
+          # Route gcc/cc through ccache for every later step.
+          echo /usr/lib/ccache >> "$GITHUB_PATH"
 
       - name: Set up Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: ^1.25.x
 
-      - name: Configure environment
-        run: |
-          export LD_LIBRARY_PATH=/usr/local/lib
-          export LIBRARY_PATH=/usr/local/lib
-          export C_INCLUDE_PATH=/usr/local/include
-
-      # Build libcoraza
+      # Build libcoraza (installs to /usr/local/lib; ldconfig registers it —
+      # no LD_LIBRARY_PATH/C_INCLUDE_PATH exports needed, cf. ci-fast).
       - name: Build libcoraza
         run: |
           cd libcoraza-*
           ./build.sh
           ./configure
-          make
-          sudo make install
+          eatmydata make
+          sudo eatmydata make install
           sudo ldconfig
 
 
@@ -125,9 +147,9 @@ jobs:
       - name: Compile dynamic module and install nginx
         run: |
           cd ${{ github.workspace }}/nginx-${{ matrix.nginx_version }}
-          make modules
-          make
-          sudo make install
+          eatmydata make modules
+          eatmydata make
+          sudo eatmydata make install
 
       - name: Run tests
         run: |
