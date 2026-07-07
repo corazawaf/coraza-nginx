@@ -131,18 +131,6 @@ jobs:
           path: ${{ github.workspace }}/fuzz/corpus-min
           retention-days: 30
 
-      - name: Notify Discord on failure
-        if: failure() && github.event_name == 'schedule'
-        env:
-          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-          DISCORD_CHANNEL_BUILDS: ${{ secrets.DISCORD_CHANNEL_BUILDS }}
-        run: |
-          [ -n "$DISCORD_BOT_TOKEN" ] || exit 0
-          curl -fsS -X POST -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
-            -H "Content-Type: application/json" \
-            "https://discord.com/api/v10/channels/$DISCORD_CHANNEL_BUILDS/messages" \
-            -d "{\"content\":\"🔴 ${{ github.repository }} — CI Deep / fuzz FAILED. ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" || true
-
   memcheck:
     name: Valgrind Memcheck soak (${{ matrix.server }}/${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
@@ -267,17 +255,6 @@ jobs:
           USE_VALGRIND: "1"
         run: |
           bash tools/soak.sh "$SERVER_BIN" 300 4
-      - name: Notify Discord on failure
-        if: failure() && github.event_name == 'schedule'
-        env:
-          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-          DISCORD_CHANNEL_BUILDS: ${{ secrets.DISCORD_CHANNEL_BUILDS }}
-        run: |
-          [ -n "$DISCORD_BOT_TOKEN" ] || exit 0
-          curl -fsS -X POST -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
-            -H "Content-Type: application/json" \
-            "https://discord.com/api/v10/channels/$DISCORD_CHANNEL_BUILDS/messages" \
-            -d "{\"content\":\"🔴 ${{ github.repository }} — CI Deep / memcheck FAILED. ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" || true
 
   helgrind:
     name: Valgrind Helgrind soak (${{ matrix.server }}/${{ matrix.arch }})
@@ -400,17 +377,6 @@ jobs:
           USE_HELGRIND: "1"
         run: |
           bash tools/soak.sh "$SERVER_BIN" 300 4
-      - name: Notify Discord on failure
-        if: failure() && github.event_name == 'schedule'
-        env:
-          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-          DISCORD_CHANNEL_BUILDS: ${{ secrets.DISCORD_CHANNEL_BUILDS }}
-        run: |
-          [ -n "$DISCORD_BOT_TOKEN" ] || exit 0
-          curl -fsS -X POST -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
-            -H "Content-Type: application/json" \
-            "https://discord.com/api/v10/channels/$DISCORD_CHANNEL_BUILDS/messages" \
-            -d "{\"content\":\"🔴 ${{ github.repository }} — CI Deep / helgrind FAILED. ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" || true
 
   scanners:
     name: Security scanners
