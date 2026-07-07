@@ -26,7 +26,7 @@ unlike($dl, qr/Optional.*coraza_is_response_body_processable/s,
 unlike($dl, qr/libcoraza\s*<\s*1\.4/,
 	'loader comments do not advertise pre-1.4 compatibility');
 
-like($dl, qr/DL_SYM\(dl_is_response_body_processable,\s*\n\s*coraza_is_response_body_processable\)/,
+like($dl, qr/DL_SYM\(dl_is_response_body_processable,\s*coraza_is_response_body_processable\)/s,
 	'response-body helper is resolved as a required symbol');
 
 done_testing();
