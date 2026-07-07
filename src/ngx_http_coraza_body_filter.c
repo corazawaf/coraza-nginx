@@ -12,6 +12,26 @@
 
 static ngx_http_output_body_filter_pt ngx_http_next_body_filter;
 
+/*
+ * Length of the body data ngx_http_coraza_read_body_data would return,
+ * without performing the read/allocation -- lets callers reject an
+ * oversized chunk before paying for it.
+ */
+static size_t
+ngx_http_coraza_body_chunk_len(ngx_buf_t *buf)
+{
+    if (ngx_buf_in_memory(buf)) {
+        return buf->last - buf->pos;
+    }
+
+    if (buf->in_file && buf->file) {
+        return buf->file_last - buf->file_pos;
+    }
+
+    return 0;
+}
+
+
 ngx_int_t
 ngx_http_coraza_body_filter_init(void)
 {
@@ -123,20 +143,24 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
             size_t  len;
             int     ret;
 
-            if (ngx_http_coraza_read_body_data(r, chain->buf, &data, &len)
-                != NGX_OK)
-            {
-                return NGX_ERROR;
-            }
-
             /*
              * coraza_append_response_body takes an int length; guard the
              * size_t -> int narrowing so a >INT_MAX buffer cannot wrap to a
-             * bogus length and skip inspection. Fail closed.
+             * bogus length and skip inspection. Fail closed. Checked against
+             * the buffer's own bounds before the read/allocation below, so
+             * an oversized on-disk chunk is rejected without paying for the
+             * file read first.
              */
-            if (len > INT_MAX) {
+            if (ngx_http_coraza_body_chunk_len(chain->buf) > INT_MAX) {
                 ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                     "coraza: response body chunk too large to inspect");
+                ctx->intervention_triggered = 1;
+                return NGX_ERROR;
+            }
+
+            if (ngx_http_coraza_read_body_data(r, chain->buf, &data, &len)
+                != NGX_OK)
+            {
                 return NGX_ERROR;
             }
 
