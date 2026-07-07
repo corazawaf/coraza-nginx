@@ -68,6 +68,12 @@ static ngx_int_t
 ngx_http_coraza_add_response_header(ngx_http_request_t *r,
     ngx_http_coraza_ctx_t *ctx, ngx_str_t *name, ngx_str_t *value)
 {
+    if (ctx == NULL) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "coraza: missing context while adding response header \"%V\"", name);
+        return NGX_ERROR;
+    }
+
     if (coraza_add_response_header(ctx->coraza_transaction,
         (char *) name->data,
         name->len,
