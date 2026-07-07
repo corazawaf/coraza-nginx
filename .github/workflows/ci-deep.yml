@@ -63,12 +63,12 @@ jobs:
       CCACHE_MAXSIZE: 200M
     steps:
       - name: Checkout module
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
       - name: ccache cache
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-cideep-fuzz-${{ github.sha }}
@@ -117,7 +117,7 @@ jobs:
 
       - name: Upload crash artifacts
         if: failure()
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fuzz-deep-crashes
           path: ${{ github.workspace }}/fuzz/crash-*
@@ -125,7 +125,7 @@ jobs:
 
       - name: Upload minimized corpus
         if: success()
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fuzz-corpus
           path: ${{ github.workspace }}/fuzz/corpus-min
@@ -150,20 +150,20 @@ jobs:
             runner: ubuntu-24.04-arm
     steps:
       - name: Checkout module
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       # ccache + Go + source caches (key includes github.job so memcheck and
       # helgrind get distinct caches; both distinguished by server+arch).
       - name: ccache cache
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-${{ github.sha }}
           restore-keys: |
             ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-
       - name: Go build cache
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/go-build
@@ -172,7 +172,7 @@ jobs:
           restore-keys: |
             gobuild-cideep-${{ matrix.arch }}-
       - name: Server source cache
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ${{ github.workspace }}/nginx-${{ env.NGINX_VERSION }}.tar.gz
@@ -186,7 +186,7 @@ jobs:
             valgrind wget zlib1g-dev unzip ccache eatmydata
           echo /usr/lib/ccache >> "$GITHUB_PATH"
       - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: ^1.25.x
       - name: Build + install libcoraza
@@ -272,20 +272,20 @@ jobs:
             runner: ubuntu-24.04-arm
     steps:
       - name: Checkout module
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       # ccache + Go + source caches (key includes github.job so memcheck and
       # helgrind get distinct caches; both distinguished by server+arch).
       - name: ccache cache
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-${{ github.sha }}
           restore-keys: |
             ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-
       - name: Go build cache
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/go-build
@@ -294,7 +294,7 @@ jobs:
           restore-keys: |
             gobuild-cideep-${{ matrix.arch }}-
       - name: Server source cache
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ${{ github.workspace }}/nginx-${{ env.NGINX_VERSION }}.tar.gz
@@ -308,7 +308,7 @@ jobs:
             valgrind wget zlib1g-dev unzip ccache eatmydata
           echo /usr/lib/ccache >> "$GITHUB_PATH"
       - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: ^1.25.x
       - name: Build + install libcoraza
@@ -384,7 +384,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout module
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       # NOTE: this job deliberately does NOT use ccache — the clang-tidy gate
@@ -392,7 +392,7 @@ jobs:
       # short-circuit compilation and leave the compile DB empty/stale. Go +
       # source caching are safe and still applied.
       - name: Go build cache
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/go-build
@@ -401,7 +401,7 @@ jobs:
           restore-keys: |
             gobuild-cideep-scanners-
       - name: nginx source cache
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/nginx-${{ env.NGINX_VERSION }}.tar.gz
           key: nginx-src-${{ env.NGINX_VERSION }}
@@ -411,7 +411,7 @@ jobs:
           sudo apt-get install -y flawfinder clang-tidy bear python3 python3-pip gcc make eatmydata
           pip3 install --quiet semgrep
       - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: ^1.25.x
       # Real compile DB requires libcoraza's coraza.h + a genuine module compile.
@@ -463,7 +463,7 @@ jobs:
             "$GITHUB_WORKSPACE/src/" 2>&1 | tee semgrep.log
       - name: Upload reports
         if: always()
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: security-reports
           path: |
