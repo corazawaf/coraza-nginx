@@ -148,7 +148,8 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                     ctx->headers_delayed = 0;
                     return NGX_HTTP_INTERNAL_SERVER_ERROR;
                 }
-                return NGX_ERROR;
+                return ngx_http_filter_finalize_request(r,
+                    &ngx_http_coraza_module, NGX_HTTP_INTERNAL_SERVER_ERROR);
             }
         }
 
