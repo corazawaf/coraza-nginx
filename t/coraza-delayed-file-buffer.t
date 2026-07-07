@@ -29,7 +29,7 @@ my $src = slurp("$root/src/ngx_http_coraza_body_filter.c");
 my $t = Test::Nginx->new()->has(qw/http/)->plan(8);
 
 like($src,
-    qr/!\s*ctx->response_body_processable\s*&&\s*!\s*ngx_buf_in_memory\(chain->buf\)\s*&&\s*chain->buf->in_file\s*&&\s*!\s*chain->buf->temp_file.*?\*b\s*=\s*\*chain->buf/s,
+    qr/!\s*ctx->response_body_processable\s*&&\s*!\s*ngx_buf_in_memory\(chain->buf\)\s*&&\s*chain->buf->in_file\s*&&\s*chain->buf->file\s*!=\s*NULL\s*&&\s*!\s*chain->buf->temp_file.*?\*b\s*=\s*\*chain->buf/s,
     'uninspected non-temp file-backed delayed buffers are cloned without body copy');
 
 like($src,
