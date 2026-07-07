@@ -57,7 +57,12 @@ sub compile_ok {
 		"$root/$source",
 	);
 
-	my $ok = system(@cmd) == 0;
+	# Redirect stderr to stdout and capture so a failing -Werror compile
+	# surfaces the actual diagnostics in CI instead of just pass/fail.
+	my $shell = join ' ', map { quotemeta } @cmd;
+	my $output = `$shell 2>&1`;
+	my $ok = $? == 0;
+	diag($output) unless $ok;
 	ok($ok, "$source compiles with CORAZA_SANITY_CHECKS=1");
 }
 
