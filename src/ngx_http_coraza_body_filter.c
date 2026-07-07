@@ -59,7 +59,7 @@ ngx_http_coraza_read_body_data(ngx_http_request_t *r, ngx_buf_t *buf,
     }
 
     if (buf->in_file && buf->file) {
-        size_t len = buf->file_last - buf->file_pos;
+        size_t len = ngx_http_coraza_body_chunk_len(buf);
         if (len == 0) {
             *out_data = NULL;
             *out_len = 0;
