@@ -16,7 +16,8 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   # renovate: depName=libcoraza packageName=corazawaf/libcoraza datasource=github-releases
   LIBCORAZA_VERSION: v1.4.0
-  NGINX_VERSION: "1.30.0"
+  NGINX_VERSION: "1.30.3"
+  NGINX_SHA256: "e5823dc6f45610993def93ebf6cfce68264af4958c77e874b7d20f3709001b8f"
 
 on:
   push:
@@ -153,6 +154,7 @@ jobs:
           test -f "nginx-${NGINX_VERSION}.tar.gz" || \
             wget -q -O "nginx-${NGINX_VERSION}.tar.gz" \
               "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
+          echo "${NGINX_SHA256}  nginx-${NGINX_VERSION}.tar.gz" | sha256sum -c -
           tar -xzf "nginx-${NGINX_VERSION}.tar.gz"
           cd "nginx-${NGINX_VERSION}"
           # ASan errors are fatal (real heap bugs / UAF — the point of the
@@ -252,6 +254,7 @@ jobs:
           test -f "nginx-${NGINX_VERSION}.tar.gz" || \
             wget -q -O "nginx-${NGINX_VERSION}.tar.gz" \
               "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
+          echo "${NGINX_SHA256}  nginx-${NGINX_VERSION}.tar.gz" | sha256sum -c -
           tar -xzf "nginx-${NGINX_VERSION}.tar.gz"
           cd "nginx-${NGINX_VERSION}"
           ./configure --with-compat --with-http_ssl_module --with-http_v2_module \

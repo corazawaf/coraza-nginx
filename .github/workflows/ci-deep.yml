@@ -18,7 +18,8 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   # renovate: depName=libcoraza packageName=corazawaf/libcoraza datasource=github-releases
   LIBCORAZA_VERSION: v1.4.0
-  NGINX_VERSION: "1.30.0"
+  NGINX_VERSION: "1.30.3"
+  NGINX_SHA256: "e5823dc6f45610993def93ebf6cfce68264af4958c77e874b7d20f3709001b8f"
   # renovate: depName=angie datasource=github-tags packageName=webserver-llc/angie
   ANGIE_VERSION: Angie-1.11.8
 
@@ -218,6 +219,7 @@ jobs:
             nginx)
               test -f "nginx-${NGINX_VERSION}.tar.gz" || wget -q -O "nginx-${NGINX_VERSION}.tar.gz" \
                 "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
+              echo "${NGINX_SHA256}  nginx-${NGINX_VERSION}.tar.gz" | sha256sum -c -
               tar -xzf "nginx-${NGINX_VERSION}.tar.gz"
               cd "nginx-${NGINX_VERSION}"
               ;;
@@ -340,6 +342,7 @@ jobs:
             nginx)
               test -f "nginx-${NGINX_VERSION}.tar.gz" || wget -q -O "nginx-${NGINX_VERSION}.tar.gz" \
                 "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
+              echo "${NGINX_SHA256}  nginx-${NGINX_VERSION}.tar.gz" | sha256sum -c -
               tar -xzf "nginx-${NGINX_VERSION}.tar.gz"
               cd "nginx-${NGINX_VERSION}"
               ;;
@@ -434,6 +437,7 @@ jobs:
           test -f "nginx-${NGINX_VERSION}.tar.gz" || \
             wget -q -O "nginx-${NGINX_VERSION}.tar.gz" \
               "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
+          echo "${NGINX_SHA256}  nginx-${NGINX_VERSION}.tar.gz" | sha256sum -c -
           tar -xzf "nginx-${NGINX_VERSION}.tar.gz"
           cd "nginx-${NGINX_VERSION}"
           CC=gcc ./configure --with-compat --with-debug \
