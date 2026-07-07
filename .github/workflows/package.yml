@@ -65,24 +65,12 @@ jobs:
           wget https://github.com/corazawaf/libcoraza/archive/refs/tags/${{ env.LIBCORAZA_VERSION }}.zip
           unzip -o ${{ env.LIBCORAZA_VERSION }}.zip
 
-      # ccache object cache + Go build cache (keyed per nginx version + arch).
-      - name: ccache cache
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
-        with:
-          path: ${{ github.workspace }}/.ccache
-          key: ccache-package-${{ matrix.arch }}-nginx${{ matrix.nginx_version }}-${{ github.sha }}
-          restore-keys: |
-            ccache-package-${{ matrix.arch }}-nginx${{ matrix.nginx_version }}-
-            ccache-package-${{ matrix.arch }}-
-      - name: Go build cache
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: gobuild-package-${{ matrix.arch }}-${{ env.LIBCORAZA_VERSION }}
-          restore-keys: |
-            gobuild-package-${{ matrix.arch }}-
+      # NB: no ccache / Go build-cache restore in this job. It runs only on
+      # release:published with contents:write + id-token:write and emits
+      # cosign-signed artifacts. Restoring a build cache that a lower-trust PR
+      # run could have poisoned would let attacker-controlled objects be
+      # compiled/linked into a signed release (zizmor cache-poisoning). Build
+      # caches live in the ci-*/build workflows only; the release build is cold.
 
       - name: Install build dependencies
         run: |
@@ -98,6 +86,7 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: ^1.25.x
+          cache: false   # release job: don't restore a PR-poisonable module cache
 
       # Build libcoraza
       - name: Build libcoraza
