@@ -491,10 +491,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
                 r->headers_out.etag->hash = 0;
                 r->headers_out.etag = NULL;
             }
-            if (r->headers_out.accept_ranges) {
-                r->headers_out.accept_ranges->hash = 0;
-                r->headers_out.accept_ranges = NULL;
-            }
+            ngx_http_clear_accept_ranges(r);
 
             return ngx_http_next_header_filter(r);
         }
