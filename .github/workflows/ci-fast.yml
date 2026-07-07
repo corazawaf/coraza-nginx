@@ -36,7 +36,7 @@ permissions:
 jobs:
   fuzz-regression:
     name: Fuzz regression (120s)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -80,7 +80,7 @@ jobs:
 
   sanitizer-lite:
     name: Sanitizer lite (60s soak)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -190,7 +190,7 @@ jobs:
 
   config-lint:
     name: Config lint (nginx -t)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
