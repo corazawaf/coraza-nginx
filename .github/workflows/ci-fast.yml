@@ -16,7 +16,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   # renovate: depName=libcoraza packageName=corazawaf/libcoraza datasource=github-releases
   LIBCORAZA_VERSION: v1.4.0
-  NGINX_VERSION: "1.28.0"
+  NGINX_VERSION: "1.30.0"
 
 on:
   push:
