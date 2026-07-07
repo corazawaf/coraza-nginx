@@ -208,6 +208,7 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                 if (!ctx->response_body_processable
                     && !ngx_buf_in_memory(chain->buf)
                     && chain->buf->in_file
+                    && chain->buf->file != NULL
                     && !chain->buf->temp_file)
                 {
                     /*
