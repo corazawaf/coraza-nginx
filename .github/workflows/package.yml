@@ -17,11 +17,13 @@ jobs:
     env:
       # renovate: depName=libcoraza packageName=corazawaf/libcoraza datasource=github-releases
       LIBCORAZA_VERSION: v1.4.0
+      # sha256 of nginx-1.30.3.tar.gz from nginx.org — update together with the matrix
+      NGINX_SHA256: "e5823dc6f45610993def93ebf6cfce68264af4958c77e874b7d20f3709001b8f"
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 500M
     strategy:
       matrix:
-        nginx_version: ['1.24.0', '1.26.0']
+        nginx_version: ['1.30.3']
         arch: [amd64, arm64]
         include:
           - arch: amd64
@@ -49,6 +51,7 @@ jobs:
         run: |
           cd ${{ github.workspace }}
           wget https://nginx.org/download/nginx-${{ matrix.nginx_version }}.tar.gz
+          echo "${NGINX_SHA256}  nginx-${{ matrix.nginx_version }}.tar.gz" | sha256sum -c -
           tar -xzvf nginx-${{ matrix.nginx_version }}.tar.gz
 
       # Grab libcoraza
@@ -222,7 +225,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        nginx_version: ['1.24.0', '1.26.0']
+        nginx_version: ['1.30.3']
         arch: [amd64, arm64]
         pkg_type: [deb, rpm]
         include:
