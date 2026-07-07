@@ -34,7 +34,7 @@ http {
     %%TEST_GLOBALS_HTTP%%
 
     server {
-        listen       127.0.0.1:8080;
+        listen       127.0.0.1:%%PORT_8080%%;
         server_name  localhost;
         server_tokens off;
 
@@ -56,15 +56,43 @@ http {
             ';
         }
     }
+
+    server {
+        listen       127.0.0.1:%%PORT_8081%%;
+        server_name  localhost;
+        server_tokens on;
+
+        coraza on;
+
+        # server_tokens on -> synthetic Server header uses the NGINX_VER
+        # fallback ("nginx/<version>"). Same NUL-truncation fix must apply.
+        location /server_ver_pass {
+            default_type text/plain;
+            coraza_rules '
+                SecRuleEngine On
+                SecRule RESPONSE_HEADERS:Server "!@beginsWith nginx/" "id:63,phase:3,deny,log,status:403"
+            ';
+        }
+
+        location /server_ver_block {
+            default_type text/plain;
+            coraza_rules '
+                SecRuleEngine On
+                SecRule RESPONSE_HEADERS:Server "@beginsWith nginx/" "id:64,phase:3,deny,log,status:403"
+            ';
+        }
+    }
 }
 EOF
 
 $t->write_file("/server_exact_pass", "server header must not include NUL");
 $t->write_file("/server_exact_block", "server header matched");
+$t->write_file("/server_ver_pass", "server header must not include NUL");
+$t->write_file("/server_ver_block", "server header matched");
 
 $t->run();
 $t->todo_alerts();
-$t->plan(2);
+$t->plan(4);
 
 ###############################################################################
 
@@ -73,3 +101,12 @@ like(http_get('/server_exact_pass'), qr/^HTTP.*200/,
 
 like(http_get('/server_exact_block'), qr/^HTTP.*403/,
 	'exact synthetic Server header can be matched');
+
+# server_tokens on lives on the second server (port 8081); target it explicitly.
+my $peer8081 = '127.0.0.1:' . port(8081);
+
+like(http_get('/server_ver_pass', PeerAddr => $peer8081), qr/^HTTP.*200/,
+	'synthetic Server header uses nginx/<ver> fallback with server_tokens on');
+
+like(http_get('/server_ver_block', PeerAddr => $peer8081), qr/^HTTP.*403/,
+	'nginx/<ver> synthetic Server header can be matched');
