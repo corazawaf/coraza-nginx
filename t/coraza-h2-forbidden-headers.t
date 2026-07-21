@@ -4,18 +4,24 @@
 #
 # The connector synthesizes a Connection response header (and, when
 # keepalive_timeout carries a header timeout, a Keep-Alive header) and feeds it
-# to the WAF for inspection.  HTTP/2 forbids these connection-specific header
-# fields (RFC 9113 §8.2.2) and nginx never emits them on an h2 stream, so they
-# must NOT be synthesized for the WAF either -- otherwise a rule on
-# RESPONSE_HEADERS:Connection false-positives on every HTTP/2 response.
+# to the WAF for inspection.  HTTP/2 (RFC 9113 §8.2.2) and HTTP/3 (RFC 9114
+# §4.2) both forbid these connection-specific header fields, and nginx never
+# emits them on an h2 stream or an h3 request, so they must NOT be synthesized
+# for the WAF either -- otherwise a rule on RESPONSE_HEADERS:Connection
+# false-positives on every HTTP/2 and HTTP/3 response.
+#
+# The guard is a version check (r->http_version >= NGX_HTTP_VERSION_20), which
+# covers h2 and h3 alike -- r->stream is h2-only and NULL for h3.  This test
+# exercises the h1-vs-h2 boundary; h3 shares the identical code path and is not
+# separately scaffolded here (the harness has no QUIC/TLS setup).
 #
 # The same location is reachable over HTTP/1.1 (port 8080) and HTTP/2
 # (port 8081).  A phase-3 deny rule keyed on the synthetic Connection header
 # must fire over h1 (the header is present) but not over h2 (the header must be
 # absent from the WAF's view).  Connection is always synthesized, so it
-# exercises the h2 guard directly; the same early return also suppresses the
-# Keep-Alive synthesis.
-# See src/ngx_http_coraza_header_filter.c (resolv_header_connection h2 guard).
+# exercises the version guard directly; the same early return also suppresses
+# the Keep-Alive synthesis.
+# See src/ngx_http_coraza_header_filter.c (resolv_header_connection version guard).
 
 ###############################################################################
 

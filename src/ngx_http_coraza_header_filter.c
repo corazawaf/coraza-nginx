@@ -222,19 +222,19 @@ ngx_http_coraza_resolv_header_connection(ngx_http_request_t *r, ngx_str_t name, 
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
-#if (NGX_HTTP_V2)
-    if (r->stream) {
+    if (r->http_version >= NGX_HTTP_VERSION_20) {
         /*
-         * HTTP/2 carries no Connection or Keep-Alive header: RFC 9113 §8.2.2
-         * forbids these connection-specific header fields and nginx never
-         * emits them on an h2 stream.  Synthesizing a phantom
-         * Connection/Keep-Alive here would make the WAF inspect a header the
-         * client never receives -- e.g. a rule on RESPONSE_HEADERS:Connection
-         * would false-positive on every HTTP/2 response.
+         * HTTP/2 (RFC 9113 §8.2.2) and HTTP/3 (RFC 9114 §4.2) both forbid the
+         * connection-specific header fields Connection and Keep-Alive, and
+         * nginx never emits them on an h2 stream or an h3 request.  Synthesizing
+         * a phantom Connection/Keep-Alive here would make the WAF inspect a
+         * header the client never receives -- e.g. a rule on
+         * RESPONSE_HEADERS:Connection would false-positive on every HTTP/2 and
+         * HTTP/3 response.  A version check (rather than r->stream, which is
+         * h2-only and NULL for h3) covers both protocols.
          */
         return NGX_OK;
     }
-#endif
 
     if (r->headers_out.status == NGX_HTTP_SWITCHING_PROTOCOLS) {
         connection = "upgrade";
