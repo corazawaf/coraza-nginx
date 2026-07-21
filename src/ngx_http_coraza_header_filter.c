@@ -15,6 +15,8 @@
 
 static ngx_http_output_header_filter_pt ngx_http_next_header_filter;
 
+static ngx_int_t ngx_http_coraza_add_response_header(ngx_http_request_t *r,
+    ngx_http_coraza_ctx_t *ctx, ngx_str_t *name, ngx_str_t *value);
 static ngx_int_t ngx_http_coraza_resolv_header_server(ngx_http_request_t *r, ngx_str_t name, off_t offset);
 static ngx_int_t ngx_http_coraza_resolv_header_date(ngx_http_request_t *r, ngx_str_t name, off_t offset);
 static ngx_int_t ngx_http_coraza_resolv_header_content_length(ngx_http_request_t *r, ngx_str_t name, off_t offset);
@@ -63,6 +65,31 @@ ngx_http_coraza_header_out_t ngx_http_coraza_headers_out[] = {
 
 
 static ngx_int_t
+ngx_http_coraza_add_response_header(ngx_http_request_t *r,
+    ngx_http_coraza_ctx_t *ctx, ngx_str_t *name, ngx_str_t *value)
+{
+    if (ctx == NULL) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "coraza: missing context while adding response header \"%V\"", name);
+        return NGX_ERROR;
+    }
+
+    if (coraza_add_response_header(ctx->coraza_transaction,
+        (char *) name->data,
+        name->len,
+        (char *) value->data,
+        value->len) < 0)
+    {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "coraza: failed to add response header \"%V\"", name);
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
 ngx_http_coraza_resolv_header_server(ngx_http_request_t *r, ngx_str_t name, off_t offset)
 {
     static char ngx_http_server_full_string[] = NGINX_VER;
@@ -90,11 +117,7 @@ ngx_http_coraza_resolv_header_server(ngx_http_request_t *r, ngx_str_t name, off_
     }
 
 
-    return coraza_add_response_header(ctx->coraza_transaction,
-        (char *) name.data,
-        name.len,
-        (char *) value.data,
-        value.len);
+    return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
 }
 
 
@@ -119,11 +142,7 @@ ngx_http_coraza_resolv_header_date(ngx_http_request_t *r, ngx_str_t name, off_t 
     ngx_http_coraza_store_ctx_header(r, &name, &date);
 #endif
 
-    return coraza_add_response_header(ctx->coraza_transaction,
-        (char *) name.data,
-        name.len,
-        (char *) date.data,
-        date.len);
+    return ngx_http_coraza_add_response_header(r, ctx, &name, &date);
 }
 
 
@@ -145,14 +164,10 @@ ngx_http_coraza_resolv_header_content_length(ngx_http_request_t *r, ngx_str_t na
 #if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
         ngx_http_coraza_store_ctx_header(r, &name, &value);
 #endif
-        return coraza_add_response_header(ctx->coraza_transaction,
-            (char *) name.data,
-            name.len,
-            (char *) value.data,
-            value.len);
+        return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
     }
 
-    return 1;
+    return NGX_OK;
 }
 
 
@@ -170,14 +185,11 @@ ngx_http_coraza_resolv_header_content_type(ngx_http_request_t *r, ngx_str_t name
         ngx_http_coraza_store_ctx_header(r, &name, &r->headers_out.content_type);
 #endif
 
-        return coraza_add_response_header(ctx->coraza_transaction,
-            (char *) name.data,
-            name.len,
-            (char *) r->headers_out.content_type.data,
-            r->headers_out.content_type.len);
+        return ngx_http_coraza_add_response_header(r, ctx, &name,
+            &r->headers_out.content_type);
     }
 
-    return 1;
+    return NGX_OK;
 }
 
 
@@ -191,7 +203,7 @@ ngx_http_coraza_resolv_header_last_modified(ngx_http_request_t *r, ngx_str_t nam
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
     if (r->headers_out.last_modified_time == -1) {
-        return 1;
+        return NGX_OK;
     }
 
     p = ngx_http_time(buf, r->headers_out.last_modified_time);
@@ -203,11 +215,7 @@ ngx_http_coraza_resolv_header_last_modified(ngx_http_request_t *r, ngx_str_t nam
     ngx_http_coraza_store_ctx_header(r, &name, &value);
 #endif
 
-    return coraza_add_response_header(ctx->coraza_transaction,
-        (char *) name.data,
-        name.len,
-        (char *) value.data,
-        value.len);
+    return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
 }
 
 
@@ -239,11 +247,11 @@ ngx_http_coraza_resolv_header_connection(ngx_http_request_t *r, ngx_str_t name, 
             ngx_http_coraza_store_ctx_header(r, &name2, &value);
 #endif
 
-            coraza_add_response_header(ctx->coraza_transaction,
-                (char *) name2.data,
-                name2.len,
-                (char *) value.data,
-                value.len);
+            if (ngx_http_coraza_add_response_header(r, ctx, &name2, &value)
+                != NGX_OK)
+            {
+                return NGX_ERROR;
+            }
         }
     } else {
         connection = "close";
@@ -256,11 +264,7 @@ ngx_http_coraza_resolv_header_connection(ngx_http_request_t *r, ngx_str_t name, 
     ngx_http_coraza_store_ctx_header(r, &name, &value);
 #endif
 
-    return coraza_add_response_header(ctx->coraza_transaction,
-        (char *) name.data,
-        name.len,
-        (char *) value.data,
-        value.len);
+    return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
 }
 
 static ngx_int_t
@@ -277,14 +281,10 @@ ngx_http_coraza_resolv_header_transfer_encoding(ngx_http_request_t *r, ngx_str_t
         ngx_http_coraza_store_ctx_header(r, &name, &value);
 #endif
 
-        return coraza_add_response_header(ctx->coraza_transaction,
-            (char *) name.data,
-            name.len,
-            (char *) value.data,
-            value.len);
+        return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
     }
 
-    return 1;
+    return NGX_OK;
 }
 
 static ngx_int_t
@@ -304,15 +304,11 @@ ngx_http_coraza_resolv_header_vary(ngx_http_request_t *r, ngx_str_t name, off_t 
         ngx_http_coraza_store_ctx_header(r, &name, &value);
 #endif
 
-        return coraza_add_response_header(ctx->coraza_transaction,
-            (char *) name.data,
-            name.len,
-            (char *) value.data,
-            value.len);
+        return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
     }
 #endif
 
-    return 1;
+    return NGX_OK;
 }
 
 ngx_int_t
@@ -333,6 +329,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     ngx_table_elt_t *data = part->elts;
     ngx_uint_t i = 0;
     int ret = 0;
+    ngx_int_t rc;
     ngx_uint_t status;
     char *http_response_ver;
 
@@ -375,9 +372,12 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     for (i = 0; ngx_http_coraza_headers_out[i].name.len; i++)
     {
 
-                ngx_http_coraza_headers_out[i].resolver(r,
-                    ngx_http_coraza_headers_out[i].name,
-                    ngx_http_coraza_headers_out[i].offset);
+        rc = ngx_http_coraza_headers_out[i].resolver(r,
+            ngx_http_coraza_headers_out[i].name,
+            ngx_http_coraza_headers_out[i].offset);
+        if (rc != NGX_OK) {
+            return rc;
+        }
     }
 
     for (i = 0 ;; i++)
@@ -406,11 +406,11 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
         /*
          * Doing this ugly cast here, explanation on the request_header
          */
-        coraza_add_response_header(ctx->coraza_transaction,
-            (char *) data[i].key.data,
-            data[i].key.len,
-            (char *) data[i].value.data,
-            data[i].value.len);
+        rc = ngx_http_coraza_add_response_header(r, ctx, &data[i].key,
+            &data[i].value);
+        if (rc != NGX_OK) {
+            return rc;
+        }
     }
 
     /* prepare extra paramters for msc_process_response_headers() */
