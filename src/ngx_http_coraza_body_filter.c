@@ -248,38 +248,68 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                 u_char    *data;
                 size_t     len;
 
-                if (ngx_http_coraza_read_body_data(r, chain->buf, &data, &len)
-                    != NGX_OK)
+                if (!ctx->response_body_processable
+                    && !ngx_buf_in_memory(chain->buf)
+                    && chain->buf->in_file
+                    && chain->buf->file != NULL
+                    && !chain->buf->temp_file)
                 {
-                    return NGX_ERROR;
-                }
-
-                b = ngx_calloc_buf(r->pool);
-                if (b == NULL) {
-                    return NGX_ERROR;
-                }
-
-                if (len > 0) {
                     /*
-                     * Always make a pool copy: in-memory buffers may point
-                     * into nginx's single reusable upstream buffer (u->buffer)
-                     * which nginx will overwrite once we mark it consumed.
+                     * No body inspection will read these bytes.  Pure
+                     * non-temp file-backed buffers can be replayed by
+                     * preserving the stable file range instead of reading it
+                     * into r->pool.  Upstream temp files keep the copy path
+                     * because their lifetime is controlled by upstream.
                      */
-                    u_char *copy = ngx_pnalloc(r->pool, len);
-                    if (copy == NULL) {
+                    b = ngx_calloc_buf(r->pool);
+                    if (b == NULL) {
                         return NGX_ERROR;
                     }
-                    ngx_memcpy(copy, data, len);
-                    b->pos    = copy;
-                    b->last   = copy + len;
-                    b->memory = 1;
+
+                    *b = *chain->buf;
+                    b->last_buf = 0;
+
+                    /*
+                     * The cloned file buffer references the on-disk range
+                     * rather than copying it into r->pool, so it does not add
+                     * to the delayed-body memory the cap bounds -- leave
+                     * pending_bytes untouched here.
+                     */
+
+                } else {
+                    if (ngx_http_coraza_read_body_data(r, chain->buf, &data, &len)
+                        != NGX_OK)
+                    {
+                        return NGX_ERROR;
+                    }
+
+                    b = ngx_calloc_buf(r->pool);
+                    if (b == NULL) {
+                        return NGX_ERROR;
+                    }
+
+                    if (len > 0) {
+                        /*
+                         * Always make a pool copy: in-memory buffers may point
+                         * into nginx's single reusable upstream buffer (u->buffer)
+                         * which nginx will overwrite once we mark it consumed.
+                         */
+                        u_char *copy = ngx_pnalloc(r->pool, len);
+                        if (copy == NULL) {
+                            return NGX_ERROR;
+                        }
+                        ngx_memcpy(copy, data, len);
+                        b->pos    = copy;
+                        b->last   = copy + len;
+                        b->memory = 1;
+                    }
+
+                    ctx->pending_bytes += len;
+
+                    b->last_buf      = 0;
+                    b->last_in_chain = chain->buf->last_in_chain;
+                    b->flush         = chain->buf->flush;
                 }
-
-                ctx->pending_bytes += len;
-
-                b->last_buf      = 0;
-                b->last_in_chain = chain->buf->last_in_chain;
-                b->flush         = chain->buf->flush;
 
                 /* Mark original buffer consumed so nginx may reuse it. */
                 if (ngx_buf_in_memory(chain->buf)) {
