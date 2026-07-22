@@ -230,6 +230,20 @@ ngx_http_coraza_resolv_header_connection(ngx_http_request_t *r, ngx_str_t name, 
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
+    if (r->http_version >= NGX_HTTP_VERSION_20) {
+        /*
+         * HTTP/2 (RFC 9113 §8.2.2) and HTTP/3 (RFC 9114 §4.2) both forbid the
+         * connection-specific header fields Connection and Keep-Alive, and
+         * nginx never emits them on an h2 stream or an h3 request.  Synthesizing
+         * a phantom Connection/Keep-Alive here would make the WAF inspect a
+         * header the client never receives -- e.g. a rule on
+         * RESPONSE_HEADERS:Connection would false-positive on every HTTP/2 and
+         * HTTP/3 response.  A version check (rather than r->stream, which is
+         * h2-only and NULL for h3) covers both protocols.
+         */
+        return NGX_OK;
+    }
+
     if (r->headers_out.status == NGX_HTTP_SWITCHING_PROTOCOLS) {
         connection = "upgrade";
     } else if (r->keepalive) {
@@ -465,14 +479,33 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
             r->err_status = 0;
             r->header_only = 1;
 
-            /* Clear entity headers from the original response to avoid
-             * protocol-inconsistent redirects (e.g. 3xx with Content-Length
-             * but no body). */
+            /* Clear entity/representation headers carried over from the
+             * original response so the synthesized 3xx redirect is not
+             * protocol-inconsistent (RFC 9110 §15.4 / §8.3-8.8): a body-less
+             * redirect must not advertise Content-Length, Content-Type,
+             * Content-Encoding, Last-Modified, ETag or Accept-Ranges that
+             * describe the representation we are discarding. */
             r->headers_out.content_length_n = -1;
             if (r->headers_out.content_length) {
                 r->headers_out.content_length->hash = 0;
                 r->headers_out.content_length = NULL;
             }
+            ngx_str_null(&r->headers_out.content_type);
+            r->headers_out.content_type_len = 0;
+            r->headers_out.last_modified_time = -1;
+            if (r->headers_out.last_modified) {
+                r->headers_out.last_modified->hash = 0;
+                r->headers_out.last_modified = NULL;
+            }
+            if (r->headers_out.content_encoding) {
+                r->headers_out.content_encoding->hash = 0;
+                r->headers_out.content_encoding = NULL;
+            }
+            if (r->headers_out.etag) {
+                r->headers_out.etag->hash = 0;
+                r->headers_out.etag = NULL;
+            }
+            ngx_http_clear_accept_ranges(r);
 
             return ngx_http_next_header_filter(r);
         }

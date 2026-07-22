@@ -77,6 +77,7 @@ typedef struct {
 
     ngx_chain_t *pending_chain;
     ngx_chain_t **pending_chain_last;
+    size_t       pending_bytes;   /* bytes buffered while headers are delayed */
 
     unsigned waiting_more_body:1;
     unsigned body_requested:1;
@@ -118,6 +119,21 @@ typedef struct {
     ngx_uint_t offset;
     ngx_http_coraza_resolv_header_pt resolver;
 } ngx_http_coraza_header_out_t;
+
+
+/*
+ * Upper bound on how many response-body bytes the connector will buffer in the
+ * request pool while it delays response headers for phase-4 inspection.  Once
+ * the accumulated body passes this cap the delayed headers and everything
+ * buffered so far are flushed and the remainder streams through, so a large or
+ * open-ended (streaming) response cannot grow worker memory without limit.
+ * Coraza's own SecResponseBodyLimit governs how much it actually inspects; this
+ * only bounds the connector's delayed-header buffering.  Override at build time
+ * with -DNGX_HTTP_CORAZA_MAX_DELAYED_BODY=<bytes>.
+ */
+#ifndef NGX_HTTP_CORAZA_MAX_DELAYED_BODY
+#define NGX_HTTP_CORAZA_MAX_DELAYED_BODY (1024 * 1024)
+#endif
 
 
 extern ngx_module_t ngx_http_coraza_module;
