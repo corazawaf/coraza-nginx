@@ -179,6 +179,19 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
              */
 
             dd("Adding request header: %.*s with value %.*s", (int)data[i].key.len, data[i].key.data, (int) data[i].value.len, data[i].value.data);
+
+            /*
+             * coraza_add_request_header takes int lengths; guard the
+             * size_t -> int narrowing so an oversized header cannot wrap to
+             * a bogus length and slip past inspection. Fail closed.
+             */
+            if (data[i].key.len > INT_MAX || data[i].value.len > INT_MAX) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                    "coraza: request header too long to inspect");
+                ctx->intervention_triggered = 1;
+                return NGX_HTTP_INTERNAL_SERVER_ERROR;
+            }
+
             coraza_add_request_header(ctx->coraza_transaction,
                                       (char *)data[i].key.data,
                                       (int)data[i].key.len,

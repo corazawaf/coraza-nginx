@@ -18,19 +18,15 @@
 ngx_int_t
 ngx_str_to_char(ngx_str_t a, char **str, ngx_pool_t *p)
 {
-    if (a.len == 0)
-    {
-        *str = NULL;
-        return NGX_OK;
-    }
-
     *str = ngx_pnalloc(p, a.len + 1);
     if (*str == NULL)
     {
         dd("failed to allocate memory to convert ngx_string to C string");
         return NGX_ERROR;
     }
-    ngx_memcpy(*str, a.data, a.len);
+    if (a.len > 0) {
+        ngx_memcpy(*str, a.data, a.len);
+    }
     (*str)[a.len] = '\0';
 
     return NGX_OK;
