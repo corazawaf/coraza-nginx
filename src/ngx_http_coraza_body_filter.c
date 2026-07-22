@@ -359,9 +359,18 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
             ctx->headers_delayed = 0;
 
+            /*
+             * Short-circuit only on NGX_ERROR.  forward_header() can return
+             * NGX_AGAIN (write filter buffered the headers but couldn't flush
+             * them yet); bailing here would leave pending_chain unsent and
+             * truncate the body.  Fall through and hand it to the body filter,
+             * whose return value carries the NGX_AGAIN up so the retry flushes
+             * headers and body together (same contract as the end-of-body
+             * flush above).
+             */
             rc = ngx_http_coraza_forward_header(r);
-            if (rc != NGX_OK) {
-                return rc;
+            if (rc == NGX_ERROR) {
+                return NGX_ERROR;
             }
 
             out = ctx->pending_chain;
