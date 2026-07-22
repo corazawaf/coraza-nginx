@@ -44,7 +44,7 @@ typedef int                  (*fn_coraza_process_response_headers)(coraza_transa
 typedef int                  (*fn_coraza_process_logging)(coraza_transaction_t);
 typedef int                  (*fn_coraza_update_status_code)(coraza_transaction_t, int);
 
-/* Optional — present in libcoraza 1.4+.  Returns 1 if the response body
+/* Present in libcoraza 1.4+.  Returns 1 if the response body
  * should be inspected (SecResponseBodyAccess On and Content-Type matches
  * SecResponseBodyMimeType).  Must be called after
  * coraza_process_response_headers(). */
@@ -80,7 +80,6 @@ static fn_coraza_process_response_headers dl_process_response_headers;
 static fn_coraza_process_logging         dl_process_logging;
 static fn_coraza_update_status_code      dl_update_status_code;
 
-/* Optional — NULL when using libcoraza < 1.4 */
 static fn_coraza_is_response_body_processable dl_is_response_body_processable;
 
 static dynlib_t dl_handle;
@@ -316,7 +315,7 @@ int coraza_update_status_code(coraza_transaction_t t, int code)
 
 /*
  * ngx_http_coraza_is_response_body_processable — wrapper around the
- * optional coraza_is_response_body_processable symbol.
+ * coraza_is_response_body_processable symbol.
  *
  * Returns 1 if the response body should be inspected for this transaction
  * (i.e. SecResponseBodyAccess is On and the Content-Type matches
