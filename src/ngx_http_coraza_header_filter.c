@@ -479,14 +479,33 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
             r->err_status = 0;
             r->header_only = 1;
 
-            /* Clear entity headers from the original response to avoid
-             * protocol-inconsistent redirects (e.g. 3xx with Content-Length
-             * but no body). */
+            /* Clear entity/representation headers carried over from the
+             * original response so the synthesized 3xx redirect is not
+             * protocol-inconsistent (RFC 9110 §15.4 / §8.3-8.8): a body-less
+             * redirect must not advertise Content-Length, Content-Type,
+             * Content-Encoding, Last-Modified, ETag or Accept-Ranges that
+             * describe the representation we are discarding. */
             r->headers_out.content_length_n = -1;
             if (r->headers_out.content_length) {
                 r->headers_out.content_length->hash = 0;
                 r->headers_out.content_length = NULL;
             }
+            ngx_str_null(&r->headers_out.content_type);
+            r->headers_out.content_type_len = 0;
+            r->headers_out.last_modified_time = -1;
+            if (r->headers_out.last_modified) {
+                r->headers_out.last_modified->hash = 0;
+                r->headers_out.last_modified = NULL;
+            }
+            if (r->headers_out.content_encoding) {
+                r->headers_out.content_encoding->hash = 0;
+                r->headers_out.content_encoding = NULL;
+            }
+            if (r->headers_out.etag) {
+                r->headers_out.etag->hash = 0;
+                r->headers_out.etag = NULL;
+            }
+            ngx_http_clear_accept_ranges(r);
 
             return ngx_http_next_header_filter(r);
         }
