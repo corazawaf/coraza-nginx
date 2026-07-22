@@ -146,9 +146,21 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
         while (chain && !already_inspected)
         {
             u_char *data = chain->buf->pos;
+            size_t  blen = (size_t) (chain->buf->last - data);
 
-            coraza_append_request_body(ctx->coraza_transaction, data,
-                chain->buf->last - data);
+            /*
+             * coraza_append_request_body takes an int length; guard the
+             * narrowing so a >INT_MAX chunk cannot wrap negative and have
+             * the engine inspect the wrong span. Fail closed.
+             */
+            if (blen > INT_MAX) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                    "coraza: request body chunk too large to inspect");
+                ctx->intervention_triggered = 1;
+                return NGX_HTTP_INTERNAL_SERVER_ERROR;
+            }
+
+            coraza_append_request_body(ctx->coraza_transaction, data, blen);
 
             if (chain->buf->last_buf) {
                 break;
