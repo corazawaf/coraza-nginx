@@ -305,6 +305,20 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                 return NGX_ERROR;
             }
 
+            /*
+             * forward_header() bottoms out in the write filter, which returns
+             * NGX_AGAIN (not just NGX_OK) whenever the headers can't be fully
+             * flushed -- e.g. a full socket buffer, or limit_rate throttling
+             * via c->write->delayed even on an empty socket.  We must NOT bail
+             * on that NGX_AGAIN: the buffered body has not entered r->out yet
+             * (the write filter only buffered the headers it was handed).  On
+             * the write retry nginx calls ngx_http_output_filter(r, NULL), so
+             * this body filter would run with in == NULL and headers_delayed
+             * already 0, fall straight through, and pending_chain would be
+             * orphaned -- headers sent, body truncated.  Hand pending_chain to
+             * the body filter unconditionally; its return value carries the
+             * NGX_AGAIN up so the retry flushes headers and body together.
+             */
             out = ctx->pending_chain;
             ctx->pending_chain = NULL;
             return ngx_http_next_body_filter(r, out);
