@@ -518,10 +518,6 @@ ngx_http_coraza_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 
 	ngx_conf_merge_value(c->enable, p->enable, 0);
 	ngx_conf_merge_ptr_value(c->transaction_id, p->transaction_id, NULL);
-#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
-	ngx_conf_merge_value(c->sanity_checks_enabled, p->sanity_checks_enabled, 0);
-#endif
-
 	/*
 	 * Prepend parent rules to child rules — this produces the same rule
 	 * ordering as the old coraza_rules_merge() approach.

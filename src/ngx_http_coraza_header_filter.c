@@ -138,10 +138,6 @@ ngx_http_coraza_resolv_header_date(ngx_http_request_t *r, ngx_str_t name, off_t 
         date.len = h->value.len;
     }
 
-#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
-    ngx_http_coraza_store_ctx_header(r, &name, &date);
-#endif
-
     return ngx_http_coraza_add_response_header(r, ctx, &name, &date);
 }
 
@@ -161,9 +157,6 @@ ngx_http_coraza_resolv_header_content_length(ngx_http_request_t *r, ngx_str_t na
         value.data = (unsigned char *)buf;
         value.len = strlen(buf);
 
-#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
-        ngx_http_coraza_store_ctx_header(r, &name, &value);
-#endif
         return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
     }
 
@@ -180,10 +173,6 @@ ngx_http_coraza_resolv_header_content_type(ngx_http_request_t *r, ngx_str_t name
 
     if (r->headers_out.content_type.len > 0)
     {
-
-#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
-        ngx_http_coraza_store_ctx_header(r, &name, &r->headers_out.content_type);
-#endif
 
         return ngx_http_coraza_add_response_header(r, ctx, &name,
             &r->headers_out.content_type);
@@ -210,10 +199,6 @@ ngx_http_coraza_resolv_header_last_modified(ngx_http_request_t *r, ngx_str_t nam
 
     value.data = buf;
     value.len = (int)(p-buf);
-
-#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
-    ngx_http_coraza_store_ctx_header(r, &name, &value);
-#endif
 
     return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
 }
@@ -257,10 +242,6 @@ ngx_http_coraza_resolv_header_connection(ngx_http_request_t *r, ngx_str_t name, 
             value.data = buf;
             value.len = strlen((char *)buf);
 
-#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
-            ngx_http_coraza_store_ctx_header(r, &name2, &value);
-#endif
-
             if (ngx_http_coraza_add_response_header(r, ctx, &name2, &value)
                 != NGX_OK)
             {
@@ -274,10 +255,6 @@ ngx_http_coraza_resolv_header_connection(ngx_http_request_t *r, ngx_str_t name, 
     value.data = (u_char *) connection;
     value.len = strlen(connection);
 
-#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
-    ngx_http_coraza_store_ctx_header(r, &name, &value);
-#endif
-
     return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
 }
 
@@ -290,10 +267,6 @@ ngx_http_coraza_resolv_header_transfer_encoding(ngx_http_request_t *r, ngx_str_t
         ngx_str_t value = ngx_string("chunked");
 
         ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
-
-#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
-        ngx_http_coraza_store_ctx_header(r, &name, &value);
-#endif
 
         return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
     }
@@ -313,10 +286,6 @@ ngx_http_coraza_resolv_header_vary(ngx_http_request_t *r, ngx_str_t name, off_t 
         ngx_str_t value = ngx_string("Accept-Encoding");
 
         ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
-
-#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
-        ngx_http_coraza_store_ctx_header(r, &name, &value);
-#endif
 
         return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
     }
@@ -412,10 +381,6 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
         if (data[i].hash == 0) {
             continue;
         }
-
-#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
-        ngx_http_coraza_store_ctx_header(r, &data[i].key, &data[i].value);
-#endif
 
         /*
          * Doing this ugly cast here, explanation on the request_header

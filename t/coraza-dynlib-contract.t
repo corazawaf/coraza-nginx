@@ -41,6 +41,17 @@ unlike($dl, qr/\bfn_coraza_(?:rules_merge|add_get_args)\b/,
 unlike($dl, qr/\bdl_(?:rules_merge|add_get_args)\b/,
 	'dead Coraza function pointers are removed');
 
+my ($close_body) = $dl =~
+	qr/ngx_http_coraza_dl_close\s*\([^)]*\)\s*\{(.*?)\n\}/s;
+
+ok(defined $close_body, 'found ngx_http_coraza_dl_close body');
+
+unlike($close_body, qr/\bdynlib_close\b/,
+	'worker exit does not unload the Go-backed libcoraza handle');
+
+unlike($close_body, qr/\bdl_handle\s*=\s*NULL\b/,
+	'worker exit keeps the loaded libcoraza handle intact');
+
 done_testing();
 
 ###############################################################################
