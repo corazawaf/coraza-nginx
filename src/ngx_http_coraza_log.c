@@ -12,13 +12,6 @@
 #include "ngx_http_coraza_common.h"
 
 
-void
-ngx_http_coraza_log(void *log, const void* data)
-{
-    ngx_log_error(NGX_LOG_INFO, (ngx_log_t *)log, 0, "%s", (const char *)data);
-}
-
-
 ngx_int_t
 ngx_http_coraza_log_handler(ngx_http_request_t *r)
 {
