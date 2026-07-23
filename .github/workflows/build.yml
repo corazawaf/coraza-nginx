@@ -94,7 +94,7 @@ jobs:
           sudo apt-get -qq update
           sudo apt-get -y -qq \
           --fix-missing --no-install-recommends install \
-          gcc make ccache eatmydata
+          gcc make ccache eatmydata libcryptx-perl openssl
           # Route gcc/cc through ccache for every later step.
           echo /usr/lib/ccache >> "$GITHUB_PATH"
 
@@ -142,6 +142,7 @@ jobs:
           --with-http_realip_module \
           --with-http_auth_request_module \
           --with-http_v2_module \
+          --with-http_v3_module \
           --with-http_sub_module
 
       - name: Compile dynamic module and install nginx
