@@ -36,7 +36,6 @@ if test -n "$ngx_module_link"; then
 
 	ngx_module_deps="$ngx_addon_dir/src/ddebug.h";
     ngx_module_libs="-ldl"
-    ngx_module_incs="-L/usr/local/lib"
 
     ngx_module_order="ngx_http_chunked_filter_module \
                       ngx_http_v2_filter_module \

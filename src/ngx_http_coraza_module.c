@@ -91,6 +91,30 @@ ngx_http_coraza_process_intervention(coraza_transaction_t transaction, ngx_http_
 			if (h != NULL)
 			{
 				size_t len = ngx_strlen(intervention->data);
+				/*
+				 * Defend against response splitting / header injection.
+				 * If a rule builds the redirect target from
+				 * client-controlled data (macro expansion of a request
+				 * variable), intervention->data may contain CR/LF or other
+				 * control bytes.  nginx does not sanitize outgoing header
+				 * values, so a raw CR/LF here would let an attacker inject
+				 * extra response headers or a body.  Truncate the Location
+				 * at the first C0 control character or DEL (a legitimate
+				 * URL carries none unencoded).
+				 */
+				{
+					u_char *loc = (u_char *) intervention->data;
+					size_t safe = 0;
+					while (safe < len && loc[safe] >= 0x20 && loc[safe] != 0x7f) {
+						safe++;
+					}
+					if (safe != len) {
+						ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+							"coraza: control character in redirect target; "
+							"truncating Location to %uz byte(s)", safe);
+						len = safe;
+					}
+				}
 				h->hash = 0;
 				ngx_str_set(&h->key, "Location");
 				h->value.len = 0;
@@ -528,10 +552,6 @@ ngx_http_coraza_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 	ngx_conf_merge_value(c->delay_response_headers,
 						 p->delay_response_headers, 1);
 	ngx_conf_merge_ptr_value(c->transaction_id, p->transaction_id, NULL);
-#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
-	ngx_conf_merge_value(c->sanity_checks_enabled, p->sanity_checks_enabled, 0);
-#endif
-
 	/*
 	 * Prepend parent rules to child rules — this produces the same rule
 	 * ordering as the old coraza_rules_merge() approach.

@@ -15,6 +15,8 @@
 
 static ngx_http_output_header_filter_pt ngx_http_next_header_filter;
 
+static ngx_int_t ngx_http_coraza_add_response_header(ngx_http_request_t *r,
+    ngx_http_coraza_ctx_t *ctx, ngx_str_t *name, ngx_str_t *value);
 static ngx_int_t ngx_http_coraza_resolv_header_server(ngx_http_request_t *r, ngx_str_t name, off_t offset);
 static ngx_int_t ngx_http_coraza_resolv_header_date(ngx_http_request_t *r, ngx_str_t name, off_t offset);
 static ngx_int_t ngx_http_coraza_resolv_header_content_length(ngx_http_request_t *r, ngx_str_t name, off_t offset);
@@ -63,6 +65,31 @@ ngx_http_coraza_header_out_t ngx_http_coraza_headers_out[] = {
 
 
 static ngx_int_t
+ngx_http_coraza_add_response_header(ngx_http_request_t *r,
+    ngx_http_coraza_ctx_t *ctx, ngx_str_t *name, ngx_str_t *value)
+{
+    if (ctx == NULL) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "coraza: missing context while adding response header \"%V\"", name);
+        return NGX_ERROR;
+    }
+
+    if (coraza_add_response_header(ctx->coraza_transaction,
+        (char *) name->data,
+        name->len,
+        (char *) value->data,
+        value->len) < 0)
+    {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "coraza: failed to add response header \"%V\"", name);
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
 ngx_http_coraza_resolv_header_server(ngx_http_request_t *r, ngx_str_t name, off_t offset)
 {
     static char ngx_http_server_full_string[] = NGINX_VER;
@@ -78,10 +105,10 @@ ngx_http_coraza_resolv_header_server(ngx_http_request_t *r, ngx_str_t name, off_
     if (r->headers_out.server == NULL) {
         if (clcf->server_tokens) {
             value.data = (u_char *)ngx_http_server_full_string;
-            value.len = sizeof(ngx_http_server_full_string);
+            value.len = sizeof(ngx_http_server_full_string) - 1;
         } else {
             value.data = (u_char *)ngx_http_server_string;
-            value.len = sizeof(ngx_http_server_string);
+            value.len = sizeof(ngx_http_server_string) - 1;
         }
     } else {
         ngx_table_elt_t *h = r->headers_out.server;
@@ -90,11 +117,7 @@ ngx_http_coraza_resolv_header_server(ngx_http_request_t *r, ngx_str_t name, off_
     }
 
 
-    return coraza_add_response_header(ctx->coraza_transaction,
-        (char *) name.data,
-        name.len,
-        (char *) value.data,
-        value.len);
+    return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
 }
 
 
@@ -115,15 +138,7 @@ ngx_http_coraza_resolv_header_date(ngx_http_request_t *r, ngx_str_t name, off_t 
         date.len = h->value.len;
     }
 
-#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
-    ngx_http_coraza_store_ctx_header(r, &name, &date);
-#endif
-
-    return coraza_add_response_header(ctx->coraza_transaction,
-        (char *) name.data,
-        name.len,
-        (char *) date.data,
-        date.len);
+    return ngx_http_coraza_add_response_header(r, ctx, &name, &date);
 }
 
 
@@ -142,17 +157,10 @@ ngx_http_coraza_resolv_header_content_length(ngx_http_request_t *r, ngx_str_t na
         value.data = (unsigned char *)buf;
         value.len = strlen(buf);
 
-#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
-        ngx_http_coraza_store_ctx_header(r, &name, &value);
-#endif
-        return coraza_add_response_header(ctx->coraza_transaction,
-            (char *) name.data,
-            name.len,
-            (char *) value.data,
-            value.len);
+        return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
     }
 
-    return 1;
+    return NGX_OK;
 }
 
 
@@ -166,18 +174,11 @@ ngx_http_coraza_resolv_header_content_type(ngx_http_request_t *r, ngx_str_t name
     if (r->headers_out.content_type.len > 0)
     {
 
-#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
-        ngx_http_coraza_store_ctx_header(r, &name, &r->headers_out.content_type);
-#endif
-
-        return coraza_add_response_header(ctx->coraza_transaction,
-            (char *) name.data,
-            name.len,
-            (char *) r->headers_out.content_type.data,
-            r->headers_out.content_type.len);
+        return ngx_http_coraza_add_response_header(r, ctx, &name,
+            &r->headers_out.content_type);
     }
 
-    return 1;
+    return NGX_OK;
 }
 
 
@@ -191,7 +192,7 @@ ngx_http_coraza_resolv_header_last_modified(ngx_http_request_t *r, ngx_str_t nam
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
     if (r->headers_out.last_modified_time == -1) {
-        return 1;
+        return NGX_OK;
     }
 
     p = ngx_http_time(buf, r->headers_out.last_modified_time);
@@ -199,15 +200,7 @@ ngx_http_coraza_resolv_header_last_modified(ngx_http_request_t *r, ngx_str_t nam
     value.data = buf;
     value.len = (int)(p-buf);
 
-#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
-    ngx_http_coraza_store_ctx_header(r, &name, &value);
-#endif
-
-    return coraza_add_response_header(ctx->coraza_transaction,
-        (char *) name.data,
-        name.len,
-        (char *) value.data,
-        value.len);
+    return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
 }
 
 
@@ -222,6 +215,20 @@ ngx_http_coraza_resolv_header_connection(ngx_http_request_t *r, ngx_str_t name, 
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
+    if (r->http_version >= NGX_HTTP_VERSION_20) {
+        /*
+         * HTTP/2 (RFC 9113 §8.2.2) and HTTP/3 (RFC 9114 §4.2) both forbid the
+         * connection-specific header fields Connection and Keep-Alive, and
+         * nginx never emits them on an h2 stream or an h3 request.  Synthesizing
+         * a phantom Connection/Keep-Alive here would make the WAF inspect a
+         * header the client never receives -- e.g. a rule on
+         * RESPONSE_HEADERS:Connection would false-positive on every HTTP/2 and
+         * HTTP/3 response.  A version check (rather than r->stream, which is
+         * h2-only and NULL for h3) covers both protocols.
+         */
+        return NGX_OK;
+    }
+
     if (r->headers_out.status == NGX_HTTP_SWITCHING_PROTOCOLS) {
         connection = "upgrade";
     } else if (r->keepalive) {
@@ -235,15 +242,11 @@ ngx_http_coraza_resolv_header_connection(ngx_http_request_t *r, ngx_str_t name, 
             value.data = buf;
             value.len = strlen((char *)buf);
 
-#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
-            ngx_http_coraza_store_ctx_header(r, &name2, &value);
-#endif
-
-            coraza_add_response_header(ctx->coraza_transaction,
-                (char *) name2.data,
-                name2.len,
-                (char *) value.data,
-                value.len);
+            if (ngx_http_coraza_add_response_header(r, ctx, &name2, &value)
+                != NGX_OK)
+            {
+                return NGX_ERROR;
+            }
         }
     } else {
         connection = "close";
@@ -252,15 +255,7 @@ ngx_http_coraza_resolv_header_connection(ngx_http_request_t *r, ngx_str_t name, 
     value.data = (u_char *) connection;
     value.len = strlen(connection);
 
-#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
-    ngx_http_coraza_store_ctx_header(r, &name, &value);
-#endif
-
-    return coraza_add_response_header(ctx->coraza_transaction,
-        (char *) name.data,
-        name.len,
-        (char *) value.data,
-        value.len);
+    return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
 }
 
 static ngx_int_t
@@ -273,18 +268,10 @@ ngx_http_coraza_resolv_header_transfer_encoding(ngx_http_request_t *r, ngx_str_t
 
         ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
-#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
-        ngx_http_coraza_store_ctx_header(r, &name, &value);
-#endif
-
-        return coraza_add_response_header(ctx->coraza_transaction,
-            (char *) name.data,
-            name.len,
-            (char *) value.data,
-            value.len);
+        return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
     }
 
-    return 1;
+    return NGX_OK;
 }
 
 static ngx_int_t
@@ -300,19 +287,11 @@ ngx_http_coraza_resolv_header_vary(ngx_http_request_t *r, ngx_str_t name, off_t 
 
         ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
-#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
-        ngx_http_coraza_store_ctx_header(r, &name, &value);
-#endif
-
-        return coraza_add_response_header(ctx->coraza_transaction,
-            (char *) name.data,
-            name.len,
-            (char *) value.data,
-            value.len);
+        return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
     }
 #endif
 
-    return 1;
+    return NGX_OK;
 }
 
 ngx_int_t
@@ -333,6 +312,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     ngx_table_elt_t *data = part->elts;
     ngx_uint_t i = 0;
     int ret = 0;
+    ngx_int_t rc;
     ngx_uint_t status;
     char *http_response_ver;
     ngx_http_coraza_conf_t *mcf;
@@ -378,9 +358,12 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     for (i = 0; ngx_http_coraza_headers_out[i].name.len; i++)
     {
 
-                ngx_http_coraza_headers_out[i].resolver(r,
-                    ngx_http_coraza_headers_out[i].name,
-                    ngx_http_coraza_headers_out[i].offset);
+        rc = ngx_http_coraza_headers_out[i].resolver(r,
+            ngx_http_coraza_headers_out[i].name,
+            ngx_http_coraza_headers_out[i].offset);
+        if (rc != NGX_OK) {
+            return rc;
+        }
     }
 
     for (i = 0 ;; i++)
@@ -402,18 +385,14 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
             continue;
         }
 
-#if defined(CORAZA_SANITY_CHECKS) && (CORAZA_SANITY_CHECKS)
-        ngx_http_coraza_store_ctx_header(r, &data[i].key, &data[i].value);
-#endif
-
         /*
          * Doing this ugly cast here, explanation on the request_header
          */
-        coraza_add_response_header(ctx->coraza_transaction,
-            (char *) data[i].key.data,
-            data[i].key.len,
-            (char *) data[i].value.data,
-            data[i].value.len);
+        rc = ngx_http_coraza_add_response_header(r, ctx, &data[i].key,
+            &data[i].value);
+        if (rc != NGX_OK) {
+            return rc;
+        }
     }
 
     /* prepare extra paramters for msc_process_response_headers() */
@@ -468,14 +447,33 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
             r->err_status = 0;
             r->header_only = 1;
 
-            /* Clear entity headers from the original response to avoid
-             * protocol-inconsistent redirects (e.g. 3xx with Content-Length
-             * but no body). */
+            /* Clear entity/representation headers carried over from the
+             * original response so the synthesized 3xx redirect is not
+             * protocol-inconsistent (RFC 9110 §15.4 / §8.3-8.8): a body-less
+             * redirect must not advertise Content-Length, Content-Type,
+             * Content-Encoding, Last-Modified, ETag or Accept-Ranges that
+             * describe the representation we are discarding. */
             r->headers_out.content_length_n = -1;
             if (r->headers_out.content_length) {
                 r->headers_out.content_length->hash = 0;
                 r->headers_out.content_length = NULL;
             }
+            ngx_str_null(&r->headers_out.content_type);
+            r->headers_out.content_type_len = 0;
+            r->headers_out.last_modified_time = -1;
+            if (r->headers_out.last_modified) {
+                r->headers_out.last_modified->hash = 0;
+                r->headers_out.last_modified = NULL;
+            }
+            if (r->headers_out.content_encoding) {
+                r->headers_out.content_encoding->hash = 0;
+                r->headers_out.content_encoding = NULL;
+            }
+            if (r->headers_out.etag) {
+                r->headers_out.etag->hash = 0;
+                r->headers_out.etag = NULL;
+            }
+            ngx_http_clear_accept_ranges(r);
 
             return ngx_http_next_header_filter(r);
         }
@@ -509,12 +507,14 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * page because the original 200 headers have not yet been sent to the
      * client.
      *
-     * We skip the delay when coraza_delay_response_headers is off (operators who
-     * know their loaded ruleset has no phase-4 response rules can restore
+     * We skip the delay when coraza_delay_response_headers is off (operators
+     * who know their loaded ruleset has no phase-4 response rules can restore
      * normal header streaming and accept that late phase-4 interventions can
      * no longer produce a clean error page after headers are sent), for HEAD
-     * requests (no body to inspect), error pages (already an error response),
-     * and subrequests (handled independently).
+     * requests (no body to inspect; nginx's final header filter sets
+     * r->header_only for HEAD, but check r->method explicitly so a delayed HEAD
+     * can never stall), error pages (already an error response), and
+     * subrequests (handled independently).
      * We also skip the delay when body inspection is not needed
      * (SecResponseBodyAccess Off or Content-Type mismatch): in that case
      * there is no phase-4 buffering and the response must not be held back.
@@ -526,7 +526,8 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * would never complete.
      */
     if (mcf->delay_response_headers
-        && !r->header_only && !r->error_page && r == r->main
+        && r->method != NGX_HTTP_HEAD && !r->header_only && !r->error_page
+        && r == r->main
         && r->headers_out.status != NGX_HTTP_SWITCHING_PROTOCOLS)
     {
         /*
