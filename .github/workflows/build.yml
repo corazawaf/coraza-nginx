@@ -120,7 +120,6 @@ jobs:
           --with-http_realip_module \
           --with-http_auth_request_module \
           --with-http_v2_module \
-          --with-http_v3_module \
           --with-http_sub_module
 
       - name: Compile dynamic module and install nginx
