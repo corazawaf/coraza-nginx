@@ -128,8 +128,14 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     int is_request_processed = 0;
     for (chain = in; chain != NULL; chain = chain->next)
     {
-        /* Use last_buf (not last_in_chain) to detect end of the full response */
-        is_request_processed = chain->buf->last_buf;
+        /*
+         * Use last_buf (not last_in_chain) to detect end of the full response.
+         * Accumulate with |=: a filter upstream of us (sub_filter, addition,
+         * SSI) may append a trailing zero-length buffer after the last_buf
+         * link, and a plain assignment would clear the flag again and skip
+         * the end-of-body flush below, stranding the delayed headers.
+         */
+        is_request_processed |= chain->buf->last_buf;
 
         /*
          * Only forward body data to the Coraza engine when body inspection
