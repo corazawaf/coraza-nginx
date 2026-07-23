@@ -9,6 +9,11 @@
 #
 # Each location below denies on a specific REQUEST_PROTOCOL value, so the
 # status code tells us exactly which string the WAF saw.
+#
+# NOTE: HTTP/3 needs nginx >= 1.25.0 built with --with-http_v3_module. CI
+# currently builds 1.24.0, so this test skips there and the mapping is
+# covered by coraza-h3-protocol-map.t, which runs everywhere. This test
+# starts running as soon as CI moves to an HTTP/3-capable nginx.
 
 ###############################################################################
 
