@@ -25,7 +25,6 @@ typedef int                  (*fn_coraza_free_waf_config)(coraza_waf_config_t);
 typedef coraza_waf_t         (*fn_coraza_new_waf)(coraza_waf_config_t, char **);
 typedef int                  (*fn_coraza_free_waf)(coraza_waf_t);
 typedef int                  (*fn_coraza_rules_count)(coraza_waf_t);
-typedef int                  (*fn_coraza_rules_merge)(coraza_waf_t, coraza_waf_t, char **);
 typedef coraza_transaction_t (*fn_coraza_new_transaction)(coraza_waf_t);
 typedef coraza_transaction_t (*fn_coraza_new_transaction_with_id)(coraza_waf_t, char *);
 typedef int                  (*fn_coraza_free_transaction)(coraza_transaction_t);
@@ -44,7 +43,6 @@ typedef int                  (*fn_coraza_process_response_body)(coraza_transacti
 typedef int                  (*fn_coraza_process_response_headers)(coraza_transaction_t, int, char *);
 typedef int                  (*fn_coraza_process_logging)(coraza_transaction_t);
 typedef int                  (*fn_coraza_update_status_code)(coraza_transaction_t, int);
-typedef int                  (*fn_coraza_add_get_args)(coraza_transaction_t, char *, char *);
 
 /* Present in libcoraza 1.4+.  Returns 1 if the response body
  * should be inspected (SecResponseBodyAccess On and Content-Type matches
@@ -63,7 +61,6 @@ static fn_coraza_free_waf_config         dl_free_waf_config;
 static fn_coraza_new_waf                 dl_new_waf;
 static fn_coraza_free_waf                dl_free_waf;
 static fn_coraza_rules_count             dl_rules_count;
-static fn_coraza_rules_merge             dl_rules_merge;
 static fn_coraza_new_transaction         dl_new_transaction;
 static fn_coraza_new_transaction_with_id dl_new_transaction_with_id;
 static fn_coraza_free_transaction        dl_free_transaction;
@@ -82,7 +79,6 @@ static fn_coraza_process_response_body   dl_process_response_body;
 static fn_coraza_process_response_headers dl_process_response_headers;
 static fn_coraza_process_logging         dl_process_logging;
 static fn_coraza_update_status_code      dl_update_status_code;
-static fn_coraza_add_get_args            dl_add_get_args;
 
 static fn_coraza_is_response_body_processable dl_is_response_body_processable;
 
@@ -133,7 +129,6 @@ ngx_http_coraza_dl_open(ngx_log_t *log)
     DL_SYM(dl_new_waf,                  coraza_new_waf);
     DL_SYM(dl_free_waf,                 coraza_free_waf);
     DL_SYM(dl_rules_count,              coraza_rules_count);
-    DL_SYM(dl_rules_merge,              coraza_rules_merge);
     DL_SYM(dl_new_transaction,           coraza_new_transaction);
     DL_SYM(dl_new_transaction_with_id,   coraza_new_transaction_with_id);
     DL_SYM(dl_free_transaction,          coraza_free_transaction);
@@ -152,7 +147,6 @@ ngx_http_coraza_dl_open(ngx_log_t *log)
     DL_SYM(dl_process_response_headers, coraza_process_response_headers);
     DL_SYM(dl_process_logging,          coraza_process_logging);
     DL_SYM(dl_update_status_code,       coraza_update_status_code);
-    DL_SYM(dl_add_get_args,             coraza_add_get_args);
 
     DL_SYM(dl_is_response_body_processable,
            coraza_is_response_body_processable);
@@ -217,11 +211,6 @@ int coraza_free_waf(coraza_waf_t w)
 int coraza_rules_count(coraza_waf_t w)
 {
     return dl_rules_count(w);
-}
-
-int coraza_rules_merge(coraza_waf_t w1, coraza_waf_t w2, char **err)
-{
-    return dl_rules_merge(w1, w2, err);
 }
 
 coraza_transaction_t coraza_new_transaction(coraza_waf_t w)
@@ -320,12 +309,6 @@ int coraza_process_logging(coraza_transaction_t t)
 int coraza_update_status_code(coraza_transaction_t t, int code)
 {
     return dl_update_status_code(t, code);
-}
-
-int coraza_add_get_args(coraza_transaction_t t, char *name,
-                        char *value)
-{
-    return dl_add_get_args(t, name, value);
 }
 
 /*
