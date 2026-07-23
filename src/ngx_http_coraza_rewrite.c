@@ -124,6 +124,11 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
                 http_version = "2.0";
                 break;
 #endif
+#if defined(nginx_version) && nginx_version >= 1025000
+            case NGX_HTTP_VERSION_30 :
+                http_version = "3.0";
+                break;
+#endif
             default :
                 http_version = "1.0";
                 break;
