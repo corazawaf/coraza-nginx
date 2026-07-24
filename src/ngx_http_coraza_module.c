@@ -186,8 +186,17 @@ ngx_http_coraza_create_ctx(ngx_http_request_t *r)
 			return NULL;
 		}
 		ctx->coraza_transaction = coraza_new_transaction_with_id(waf, (char *)s.data);
+
+		/*
+		 * Keep transaction_id.len consistent with .data: on allocation
+		 * failure leave the id empty rather than pairing a NULL pointer
+		 * with a non-zero length.  The engine already has the id (it was
+		 * passed to coraza_new_transaction_with_id above); this copy only
+		 * feeds the "%V" in the access-denied log line, which is guarded
+		 * on .len > 0.
+		 */
 		ctx->transaction_id.data = ngx_pstrdup(r->pool, &s);
-		ctx->transaction_id.len = s.len;
+		ctx->transaction_id.len = ctx->transaction_id.data ? s.len : 0;
 	}
 	else
 	{
