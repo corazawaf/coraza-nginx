@@ -1,5 +1,56 @@
 # Changelog
 
+## [0.11.5](https://github.com/corazawaf/coraza-nginx/compare/v0.11.4...v0.11.5) (2026-07-24)
+
+
+### Bug Fixes
+
+* align non-delayed body intervention teardown with finalize path ([1b0a60f](https://github.com/corazawaf/coraza-nginx/commit/1b0a60f5af3f91d2e1e8f070bb5dff4cf41c98b8))
+* cap delayed response-body buffering to bound worker memory ([03691ca](https://github.com/corazawaf/coraza-nginx/commit/03691ca9d8e91ca0d41a37345c073160275c4e44))
+* cap delayed response-body buffering to bound worker memory ([da34c4c](https://github.com/corazawaf/coraza-nginx/commit/da34c4c5b2d648df5e5b68c2208f89dbb712017d))
+* clear entity headers on synthesized redirects ([c8ed380](https://github.com/corazawaf/coraza-nginx/commit/c8ed3805853077172ddb5fdec450371fe8d2d8f8))
+* clear entity headers on synthesized redirects ([0c2163b](https://github.com/corazawaf/coraza-nginx/commit/0c2163b6f3268310b030c0c1bcea14031ab04d5d))
+* dedup body chunk length calc via shared helper ([955fa99](https://github.com/corazawaf/coraza-nginx/commit/955fa99e0215c7f1861a09f6bec0a252e9f0c0d3))
+* do not synthesize Connection/Keep-Alive for the WAF on HTTP/2 ([5dbcdb7](https://github.com/corazawaf/coraza-nginx/commit/5dbcdb7a05b05a39705e7ad5b69218515f4f1c21))
+* do not synthesize Connection/Keep-Alive for the WAF on HTTP/2 ([74ac2aa](https://github.com/corazawaf/coraza-nginx/commit/74ac2aace3bc6e123df595906cb2202b3558ffe8))
+* don't delay HEAD response headers ([062fd57](https://github.com/corazawaf/coraza-nginx/commit/062fd575f29372e64a609a84cafefd8af9c3bbc4))
+* don't delay HEAD response headers ([f7f65a3](https://github.com/corazawaf/coraza-nginx/commit/f7f65a39e0eea25b5c19f693e957c8d24a2da933))
+* don't delay response headers for SSE streams ([#81](https://github.com/corazawaf/coraza-nginx/issues/81)) ([dc49612](https://github.com/corazawaf/coraza-nginx/commit/dc496124bd69eaf7f55cbd88eb854d7a27aced21))
+* don't delay response headers for SSE streams ([#81](https://github.com/corazawaf/coraza-nginx/issues/81)) ([099f587](https://github.com/corazawaf/coraza-nginx/commit/099f5879df3c107a42b0d6d4a134980e4174b603))
+* drop unused Coraza dl symbols ([c1c0481](https://github.com/corazawaf/coraza-nginx/commit/c1c0481d32ae0a44058ad11bba676fcde12359fb))
+* drop unused Coraza dl symbols ([07eae2d](https://github.com/corazawaf/coraza-nginx/commit/07eae2d2d2c60d8a7a60f5b047545ad491affabc))
+* **fuzz:** empty input yields a valid pointer, not NULL ([8d4dda8](https://github.com/corazawaf/coraza-nginx/commit/8d4dda881b10ae150978f23f1adeb9a760fd2664))
+* guard h2/h3 forbidden headers by http_version, not r-&gt;stream ([cc38a6b](https://github.com/corazawaf/coraza-nginx/commit/cc38a6b7965aa3d7300b6973317a1091af59445b))
+* guard size_t to int narrowing at the Coraza cgo boundary ([ff47fd4](https://github.com/corazawaf/coraza-nginx/commit/ff47fd4ebc9f3b54889ff3d2b585b4eee8f26c8d))
+* guard size_t to int narrowing at the Coraza cgo boundary ([34987d4](https://github.com/corazawaf/coraza-nginx/commit/34987d497edc1c663e7bc79b7743e395ab0c8e58))
+* keep libcoraza loaded for worker lifetime ([056e7b3](https://github.com/corazawaf/coraza-nginx/commit/056e7b362df8789056b9cb4db5d8b5ce34277aa2))
+* keep libcoraza loaded for worker lifetime ([f5bd4c7](https://github.com/corazawaf/coraza-nginx/commit/f5bd4c7fd1ad7ee6bc2a2e7c51183814b899278d))
+* omit NUL from synthetic server header ([c27575d](https://github.com/corazawaf/coraza-nginx/commit/c27575d46b9883c81e4c27e5d8a1a90f907bf7ac))
+* omit NUL from synthetic server header ([6edbace](https://github.com/corazawaf/coraza-nginx/commit/6edbace5a10d239ccbf255dcc2b77e263c43b2e8))
+* propagate delayed header filter status ([acf18c0](https://github.com/corazawaf/coraza-nginx/commit/acf18c0992e6dbca3459d573e9192690d20ec9d4))
+* propagate delayed header filter status ([5c4be30](https://github.com/corazawaf/coraza-nginx/commit/5c4be3072793271429e7798866c48a952d532bdb))
+* propagate response header insert failures ([3a14a41](https://github.com/corazawaf/coraza-nginx/commit/3a14a4113eb4c049a661d9a23ffffedbef0cdd61))
+* propagate response header insert failures ([11916db](https://github.com/corazawaf/coraza-nginx/commit/11916db458b51c038f6a5ff67c1b9cd6f015920b))
+* reject oversized response-body chunks before read, set intervention flag ([d151590](https://github.com/corazawaf/coraza-nginx/commit/d151590a24facd625a8a9fbc46acff0e10c0fa2b))
+* remove linker path from include flags ([f864842](https://github.com/corazawaf/coraza-nginx/commit/f86484267ac4cafcee1f22840c2e7e7435e5c1ff))
+* remove linker path from include flags ([89a7a5f](https://github.com/corazawaf/coraza-nginx/commit/89a7a5f964a7a2dcba3a7a2fb83abd06f3935d49))
+* remove stale sanity check build traps ([d29279f](https://github.com/corazawaf/coraza-nginx/commit/d29279f1d2fba60f98ea0d98d015f44b2cc5102b))
+* remove stale sanity check build traps ([589785b](https://github.com/corazawaf/coraza-nginx/commit/589785b90a17b4beeff5a658f68d6bf7109be568))
+* require libcoraza 1.4 ABI ([2492a2a](https://github.com/corazawaf/coraza-nginx/commit/2492a2afbd3c85e0f4e273475f6f1582a5f0d427))
+* require libcoraza 1.4 ABI ([ff2181b](https://github.com/corazawaf/coraza-nginx/commit/ff2181ba342d0104eb49774cc718947ef5c55bf2))
+* require valid file pointer before replaying file buffer ([9fc0a19](https://github.com/corazawaf/coraza-nginx/commit/9fc0a1949bbec7a4779471736750db782cb6e7f9))
+* return empty C string for empty ngx_str ([f8a76b0](https://github.com/corazawaf/coraza-nginx/commit/f8a76b0bba69f92e18ac4b0f38fafd750df36c2c))
+* return empty C string for empty ngx_str ([7abb251](https://github.com/corazawaf/coraza-nginx/commit/7abb251aaa3c3bc9438cea8760275bc1250c5273))
+* use ngx_http_clear_accept_ranges to clear Accept-Ranges ([4ef52a9](https://github.com/corazawaf/coraza-nginx/commit/4ef52a9ffa2d274b35693917d2d4f0b9d0463898))
+
+
+### Performance Improvements
+
+* add coraza_delay_response_headers directive ([2afa451](https://github.com/corazawaf/coraza-nginx/commit/2afa451a38356020bf4e73129464efda3f8809e9))
+* avoid copying uninspected file response buffers ([735d715](https://github.com/corazawaf/coraza-nginx/commit/735d715d41ffdee4545b86bb967a49e18744b8d2))
+* avoid copying uninspected file response buffers ([7c2bb44](https://github.com/corazawaf/coraza-nginx/commit/7c2bb44a495baac02aa9456d670c1392033fb054))
+* make response body header delay configurable ([a42e606](https://github.com/corazawaf/coraza-nginx/commit/a42e6063186610ca660cf0ce3410dfe6c54d54b7))
+
 ## [0.11.4](https://github.com/corazawaf/coraza-nginx/compare/v0.11.3...v0.11.4) (2026-06-28)
 
 
