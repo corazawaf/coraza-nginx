@@ -113,6 +113,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
     if (ctx->waiting_more_body == 0)
     {
         int ret = 0;
+        int pret = 0;
         int already_inspected = 0;
         char *file_name = NULL;
 
@@ -192,9 +193,9 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
             return ret;
         }
 
-        coraza_process_request_body(ctx->coraza_transaction);
+        pret = coraza_process_request_body(ctx->coraza_transaction);
 
-        ret = ngx_http_coraza_process_intervention(ctx, r, 0);
+        ret = ngx_http_coraza_poll_after_process(ctx, r, 0, pret);
         if (r->error_page) {
             return NGX_DECLINED;
         }

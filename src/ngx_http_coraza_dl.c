@@ -56,8 +56,8 @@ typedef int                  (*fn_coraza_is_response_body_processable)(coraza_tr
  * replacing one coraza_add_*_header cgo call per header.  Resolved
  * optionally: on an older libcoraza the pointers stay NULL and the module
  * falls back to the per-header path. */
-typedef int                  (*fn_coraza_add_request_headers)(coraza_transaction_t, const char *, int, int);
-typedef int                  (*fn_coraza_add_response_headers)(coraza_transaction_t, const char *, int, int);
+typedef int                  (*fn_coraza_add_request_headers)(coraza_transaction_t, char *, int, int);
+typedef int                  (*fn_coraza_add_response_headers)(coraza_transaction_t, char *, int, int);
 
 /* ------------------------------------------------------------------ */
 /* Static function pointers — set once by ngx_http_coraza_dl_open()   */
@@ -362,13 +362,13 @@ ngx_http_coraza_is_response_body_processable(coraza_transaction_t t)
  * symbols; callers must first check ngx_http_coraza_bulk_headers_available()
  * because the pointers may be NULL on an older library.
  */
-int coraza_add_request_headers(coraza_transaction_t t, const char *packed,
+int coraza_add_request_headers(coraza_transaction_t t, char *packed,
                                int packed_len, int count)
 {
     return dl_add_request_headers(t, packed, packed_len, count);
 }
 
-int coraza_add_response_headers(coraza_transaction_t t, const char *packed,
+int coraza_add_response_headers(coraza_transaction_t t, char *packed,
                                 int packed_len, int count)
 {
     return dl_add_response_headers(t, packed, packed_len, count);

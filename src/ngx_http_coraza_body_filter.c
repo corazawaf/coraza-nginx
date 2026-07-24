@@ -196,10 +196,11 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
          */
         if (is_request_processed) {
             int ret;
+            int pret;
 
-            coraza_process_response_body(ctx->coraza_transaction);
+            pret = coraza_process_response_body(ctx->coraza_transaction);
 
-            ret = ngx_http_coraza_process_intervention(ctx, r, 0);
+            ret = ngx_http_coraza_poll_after_process(ctx, r, 0, pret);
             if (ret > 0) {
                 if (ctx->headers_delayed) {
                     ctx->intervention_triggered = 1;

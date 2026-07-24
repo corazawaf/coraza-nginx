@@ -411,6 +411,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     ngx_table_elt_t *data = part->elts;
     ngx_uint_t i = 0;
     int ret = 0;
+    int pret = 0;
     ngx_int_t rc;
     ngx_uint_t status;
     char *http_response_ver;
@@ -529,7 +530,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
                    &packed, &packed_len) == NGX_OK)
         {
             coraza_add_response_headers(ctx->coraza_transaction,
-                (const char *) packed, (int) packed_len,
+                (char *) packed, (int) packed_len,
                 (int) collected->nelts);
         } else {
             /* Pack failed (over-range header) or empty: replay directly. The
@@ -563,7 +564,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     }
 #endif
 
-    coraza_process_response_headers(ctx->coraza_transaction, status, http_response_ver);
+    pret = coraza_process_response_headers(ctx->coraza_transaction, status, http_response_ver);
 
     /*
      * Determine whether response-body inspection is needed for this
@@ -580,7 +581,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     ctx->response_body_processable =
         ngx_http_coraza_is_response_body_processable(ctx->coraza_transaction);
 
-    ret = ngx_http_coraza_process_intervention(ctx, r, 0);
+    ret = ngx_http_coraza_poll_after_process(ctx, r, 0, pret);
     if (r->error_page) {
         return ngx_http_next_header_filter(r);
     }

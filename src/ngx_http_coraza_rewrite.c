@@ -42,6 +42,7 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
     if (ctx == NULL)
     {
         int ret = 0;
+        int pret = 0;
 
         ngx_connection_t *connection = r->connection;
 
@@ -102,12 +103,15 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
         if (ret != 1){
             dd("Was not able to extract connection information.");
         }
-        dd("Processing intervention with the connection information filled in");
-        ret = ngx_http_coraza_process_intervention(ctx, r, 1);
-        if (ret > 0) {
-            ctx->intervention_triggered = 1;
-            return ret;
-        }
+        /*
+         * No intervention poll here: coraza_process_connection only populates
+         * connection variables (REMOTE_ADDR/PORT, SERVER_ADDR/PORT) and runs no
+         * rule phase, so tx.Interruption() is provably nil at this point on
+         * every libcoraza version (coraza core sets tx.interruption only inside
+         * phase evaluation, first reached at ProcessRequestHeaders). A phase-1
+         * REMOTE_ADDR deny still fires at the post-request-headers poll below.
+         */
+        dd("connection variables filled in; first rule phase is request headers");
 
         switch (r->http_version) {
             case NGX_HTTP_VERSION_9 :
@@ -139,12 +143,13 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
         
         coraza_process_uri(ctx->coraza_transaction, uri, method, http_version);
 
-        dd("Processing intervention with the transaction information filled in (uri, method and version)");
-        ret = ngx_http_coraza_process_intervention(ctx, r, 1);
-        if (ret > 0) {
-            ctx->intervention_triggered = 1;
-            return ret;
-        }
+        /*
+         * No intervention poll here either: coraza_process_uri only populates
+         * URI-derived variables (REQUEST_URI, REQUEST_METHOD, ARGS, …) and runs
+         * no rule phase, so tx.Interruption() is still provably nil. A phase-1
+         * REQUEST_URI deny fires at ProcessRequestHeaders → the poll below.
+         */
+        dd("uri/method/version variables filled in");
 
         /**
          * Since incoming request headers are already in place, lets send it to Coraza
@@ -216,7 +221,7 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
                             &packed, &packed_len) == NGX_OK)
                     {
                         coraza_add_request_headers(ctx->coraza_transaction,
-                            (const char *) packed, (int) packed_len, (int) k);
+                            (char *) packed, (int) packed_len, (int) k);
                         bulk_done = 1;
                     }
                 }
@@ -274,9 +279,9 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
          * to process this information.
          */
 
-        coraza_process_request_headers(ctx->coraza_transaction);
+        pret = coraza_process_request_headers(ctx->coraza_transaction);
         dd("Processing intervention with the request headers information filled in");
-        ret = ngx_http_coraza_process_intervention(ctx, r, 1);
+        ret = ngx_http_coraza_poll_after_process(ctx, r, 1, pret);
         if (r->error_page) {
             return NGX_DECLINED;
             }

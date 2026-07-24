@@ -149,6 +149,54 @@ extern ngx_module_t ngx_http_coraza_module;
 ngx_int_t ngx_http_coraza_process_intervention (ngx_http_coraza_ctx_t *ctx, ngx_http_request_t *r, ngx_int_t early_log);
 ngx_http_coraza_ctx_t *ngx_http_coraza_create_ctx(ngx_http_request_t *r);
 
+/*
+ * CORAZA_INTERRUPTION is the coraza_result_t value libcoraza 1.6+ returns from
+ * coraza_process_{request_headers,request_body,response_headers,response_body}
+ * when a rule interrupted the transaction (added upstream b3fedde3, the same
+ * commit that added the bulk-header symbols). Older libcoraza headers (<1.6) do
+ * NOT define the coraza_result_t enum, so provide a local fallback of the stable
+ * value (1) to keep the connector compilable against a 1.4 header. The value is
+ * only consulted on a bulk-capable (>=1.6) library — see
+ * ngx_http_coraza_poll_after_process() below — so the fallback is never trusted
+ * as a real signal on an old lib.
+ */
+#ifndef CORAZA_INTERRUPTION
+#define CORAZA_INTERRUPTION 1
+#endif
+
+/*
+ * ngx_http_coraza_poll_after_process — CGO-thrifty intervention poll for the
+ * four rule-phase entry points. Post phase, coraza_intervention() is almost
+ * always NULL; on libcoraza 1.6+ the process fn already told us whether a rule
+ * interrupted via its return value (pret), so we only cross into Go to fetch the
+ * intervention when pret == CORAZA_INTERRUPTION. On <1.6 the return value is not
+ * a reliable signal (request/response_headers always returned 0, the body fns
+ * returned 1 only on error), so we MUST fall back to an unconditional poll —
+ * gating on the return there would fail open and skip a real block. The 1.6+
+ * guarantee is proxied by ngx_http_coraza_bulk_headers_available() (same commit
+ * introduced both). Semantics are otherwise identical to a bare
+ * ngx_http_coraza_process_intervention() call: returns NGX_OK / >0 status /
+ * NGX_ERROR exactly as that helper does, so callers keep their existing
+ * error_page and ret handling.
+ */
+/* Forward declaration (full prototype in the ngx_http_coraza_dl.c block below);
+ * needed here because the inline poll helper calls it under -Werror. */
+int ngx_http_coraza_bulk_headers_available(void);
+
+static ngx_inline ngx_int_t
+ngx_http_coraza_poll_after_process(ngx_http_coraza_ctx_t *ctx,
+    ngx_http_request_t *r, ngx_int_t early_log, int pret)
+{
+    if (ngx_http_coraza_bulk_headers_available()
+        && pret != CORAZA_INTERRUPTION)
+    {
+        /* 1.6+ said OK: no rule interrupted this phase, nothing to fetch. */
+        return NGX_OK;
+    }
+
+    return ngx_http_coraza_process_intervention(ctx, r, early_log);
+}
+
 /* ngx_http_coraza_dl.c */
 ngx_int_t ngx_http_coraza_dl_open(ngx_log_t *log);
 void ngx_http_coraza_dl_close(ngx_log_t *log);
@@ -156,9 +204,12 @@ int ngx_http_coraza_is_response_body_processable(coraza_transaction_t t);
 /* Bulk header entry points (libcoraza 1.6+); guard every call with
  * ngx_http_coraza_bulk_headers_available(). */
 int ngx_http_coraza_bulk_headers_available(void);
-int coraza_add_request_headers(coraza_transaction_t t, const char *packed,
+/* NOTE: `packed` is non-const to match libcoraza's SWIG-generated 1.6 header
+ * (which declares `char *packed`); a `const char *` here trips -Werror
+ * conflicting-types when the connector is built against the real 1.6 header. */
+int coraza_add_request_headers(coraza_transaction_t t, char *packed,
     int packed_len, int count);
-int coraza_add_response_headers(coraza_transaction_t t, const char *packed,
+int coraza_add_response_headers(coraza_transaction_t t, char *packed,
     int packed_len, int count);
 
 /* ngx_http_coraza_body_filter.c */
