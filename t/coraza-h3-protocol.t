@@ -34,7 +34,7 @@ select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
 my $t = Test::Nginx->new()->has(qw/http http_v3 cryptx/)
-	->has_daemon('openssl')->plan(3);
+	->has_daemon('openssl')->plan(4);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -75,6 +75,20 @@ http {
             ';
         }
 
+        # Response side: the header filter reports the response protocol to
+        # the WAF from r->http_version.  Before the fix it keyed on r->stream
+        # (HTTP/2 only), so an HTTP/3 response was reported as HTTP/1.1 and a
+        # phase-5 RESPONSE_PROTOCOL rule never fired.  Deny on HTTP/3.0 proves
+        # the response-side mapping.
+        location /resp {
+            coraza on;
+            coraza_rules '
+                SecRuleEngine On
+                SecResponseBodyAccess On
+                SecRule RESPONSE_PROTOCOL "@streq HTTP/3.0" "id:35,phase:5,status:403,deny,log"
+            ';
+        }
+
         # Sanity: coraza is active here but no protocol rule matches.
         location /none {
             coraza on;
@@ -107,6 +121,7 @@ foreach my $name ('localhost') {
 
 $t->write_file('h3', 'body');
 $t->write_file('h1', 'body');
+$t->write_file('resp', 'body');
 $t->write_file('none', 'body');
 
 $t->run();
@@ -117,6 +132,8 @@ is(get_status('/h3'), 403,
 	'HTTP/3 request is reported to the WAF as HTTP/3.0');
 is(get_status('/h1'), 200,
 	'HTTP/3 request is not reported to the WAF as HTTP/1.0');
+is(get_status('/resp'), 403,
+	'HTTP/3 response is reported to the WAF as HTTP/3.0 (phase 5)');
 is(get_status('/none'), 200,
 	'no protocol rule matches, request is served');
 
