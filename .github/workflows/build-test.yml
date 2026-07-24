@@ -41,14 +41,22 @@ jobs:
             channel: mainline
             label: nginx mainline (full)
             full_tests: true
+            debug_build: false
+          # The stable cell doubles as the debug-logging compile gate: the dd()
+          # call sites (src/ddebug.h) are compiled OUT of every release build, so
+          # a broken dd() ships unnoticed (PR #37). Building stable with
+          # -DCORAZA_DDEBUG=1 --with-debug under -Werror type-checks those live
+          # call sites here instead of a separate job.
           - server: nginx
             channel: stable
-            label: nginx stable (build-only)
+            label: nginx stable (debug build)
             full_tests: false
+            debug_build: true
           - server: angie
             channel: angie
             label: Angie (build-only)
             full_tests: false
+            debug_build: false
 
     steps:
       - name: Checkout repo
@@ -90,17 +98,31 @@ jobs:
         with:
           path: ${{ github.workspace }}/src.tar.gz
           key: src-${{ matrix.server }}-${{ env.SRC_VER }}-${{ hashFiles('.github/versions.env') }}
-      - name: libcoraza archive cache
+      # Cache the fully-BUILT libcoraza tree, not just the archive. libcoraza is
+      # a cgo (Go) shared object — the build.sh/configure/make chain is the
+      # slowest single step and is identical across all three matrix cells for a
+      # given LIBCORAZA_VERSION. On a hit we skip the compile and only re-run the
+      # (cheap) `make install` to place the .so + headers under /usr/local.
+      # LIBCORAZA_VERSION is an immutable release tag, so the version + the pins
+      # file hash fully key the artifact.
+      - name: libcoraza built-tree cache
+        id: cache-libcoraza
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ github.workspace }}/libcoraza.zip
-          key: libcoraza-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
+          path: ${{ github.workspace }}/libcoraza-build
+          key: libcoraza-built-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
+      # ccache primary key is the pins hash (stable across commits that only
+      # touch module source), so successive PRs hit the primary rather than only
+      # the restore-keys prefix — fewer redundant save-slots + less LRU churn.
+      # github.sha stays in the key so each commit still writes back its own warm
+      # cache for its own reruns; restore-keys walks back to any prior build.
       - name: ccache cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-build-${{ matrix.channel }}-${{ github.sha }}
+          key: ccache-build-${{ matrix.channel }}-${{ hashFiles('.github/versions.env') }}-${{ github.sha }}
           restore-keys: |
+            ccache-build-${{ matrix.channel }}-${{ hashFiles('.github/versions.env') }}-
             ccache-build-${{ matrix.channel }}-
       - name: Go build cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -138,24 +160,47 @@ jobs:
       - name: Fetch + verify + build libcoraza
         run: |
           set -euo pipefail
-          bash .github/scripts/fetch-verify.sh \
-            "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip" \
-            "$LIBCORAZA_SHA256" libcoraza.zip
-          unzip -oq libcoraza.zip
-          cd libcoraza-*
-          ./build.sh
-          ./configure
-          eatmydata make -j"$(nproc)"
-          sudo eatmydata make install
+          DEST="${{ github.workspace }}/libcoraza-build"
+          if [ "${{ steps.cache-libcoraza.outputs.cache-hit }}" = "true" ] && [ -f "$DEST/.built" ]; then
+            echo "libcoraza built-tree cache hit — installing only, no recompile."
+          else
+            # Cache miss: fetch (sha256-verified), build, and stage into $DEST so
+            # the cache action can persist the compiled tree for later runs.
+            bash .github/scripts/fetch-verify.sh \
+              "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip" \
+              "$LIBCORAZA_SHA256" libcoraza.zip
+            rm -rf "$DEST"
+            unzip -oq libcoraza.zip
+            # libcoraza-<ver>/ — normalise to the fixed cache path.
+            mv libcoraza-*/ "$DEST"
+            cd "$DEST"
+            ./build.sh
+            ./configure
+            eatmydata make -j"$(nproc)"
+            touch "$DEST/.built"
+            cd "${{ github.workspace }}"
+          fi
+          # make install is cheap (copy .so + headers); run on both paths so the
+          # lib lands under /usr/local regardless of cache state.
+          sudo eatmydata make -C "$DEST" install
           sudo ldconfig
 
       - name: Configure compilation of dynamic module
         run: |
           cd "${{ github.workspace }}/$SRC_DIR"
+          # Debug cell (stable): fold in the debug-logging compile gate —
+          # -DCORAZA_DDEBUG=1 turns the connector's dd() macro into real code and
+          # -Werror makes any format-string / undeclared-identifier mistake in
+          # those newly-live call sites a hard failure. --with-debug below already
+          # enables nginx's own debug logging on every cell.
+          EXTRA_CC=""
+          if [ "${{ matrix.debug_build }}" = "true" ]; then
+            EXTRA_CC=" -DCORAZA_DDEBUG=1 -Werror"
+          fi
           ./configure \
           --with-compat \
           --add-dynamic-module=${{ github.workspace }}/ \
-          --with-cc-opt='-g -O2 -fstack-protector-strong -Wformat -Werror=format-security -Wno-unused-function -fPIC -Wdate-time -D_FORTIFY_SOURCE=2' \
+          --with-cc-opt="-g -O2 -fstack-protector-strong -Wformat -Werror=format-security -Wno-unused-function -fPIC -Wdate-time -D_FORTIFY_SOURCE=2${EXTRA_CC}" \
           --with-ld-opt='-fuse-ld=mold -Wl,-Bsymbolic-functions -Wl,-z,relro -Wl,-z,now -fPIC' \
           --prefix=/etc/nginx \
           --sbin-path=/usr/sbin/nginx \
@@ -184,6 +229,57 @@ jobs:
           eatmydata make -j"$(nproc)" modules
           eatmydata make -j"$(nproc)"
           sudo eatmydata make install
+
+      # ---- config lint (mainline cell): nginx -t the SHIPPED coraza.conf ----
+      # Cheap directive-name/arg gate on the snippet we actually ship (the t/
+      # inline configs are exercised by the prove suite; the go-ftw run uses its
+      # own nginx-test.conf, so neither lints coraza.conf). Reuses the installed
+      # binary + module — no extra compile. (Folded in from config-lint.yml.)
+      - name: Lint shipped coraza.conf (nginx -t)
+        if: matrix.full_tests
+        run: |
+          set -euo pipefail
+          PREFIX="${{ github.workspace }}/_lint"
+          mkdir -p "$PREFIX/logs"
+          cat > "$PREFIX/nginx.conf" <<EOF
+          load_module "/usr/lib/nginx/modules/ngx_http_coraza_module.so";
+          events { worker_connections 64; }
+          error_log $PREFIX/logs/error.log;
+          pid $PREFIX/nginx.pid;
+          http {
+            server {
+              listen 8080;
+              include ${{ github.workspace }}/coraza.conf;
+              location / { return 200; }
+            }
+          }
+          EOF
+          /usr/sbin/nginx -t -p "$PREFIX" -c "$PREFIX/nginx.conf"
+
+      # ---- debug cell: confirm the --with-debug/DDEBUG module loads ---------
+      # nginx -t a minimal coraza-on config under `error_log ... debug;` so the
+      # debug logging paths are exercised at load time, not just compiled.
+      # (Folded in from debug-build.yml; the compile gate itself is the
+      # -DCORAZA_DDEBUG=1 -Werror build above.)
+      - name: Confirm the debug module loads
+        if: matrix.debug_build
+        run: |
+          set -euo pipefail
+          PREFIX="${{ github.workspace }}/_dbg"
+          mkdir -p "$PREFIX/logs"
+          cat > "$PREFIX/nginx.conf" <<EOF
+          load_module "/usr/lib/nginx/modules/ngx_http_coraza_module.so";
+          events { worker_connections 64; }
+          error_log $PREFIX/logs/error.log debug;
+          pid $PREFIX/nginx.pid;
+          http {
+            server {
+              listen 8080;
+              location / { coraza on; coraza_rules 'SecRuleEngine On'; return 200; }
+            }
+          }
+          EOF
+          /usr/sbin/nginx -t -p "$PREFIX" -c "$PREFIX/nginx.conf"
 
       # ---- full test suite: nginx cells only -------------------------------
       - name: Run prove tests

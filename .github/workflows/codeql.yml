@@ -75,6 +75,19 @@ jobs:
           # the header comment). The `make modules` build below is what scopes
           # the traced compile to the coraza connector.
 
+      # libcoraza built-tree cache: it only supplies coraza.h + libcoraza.so for
+      # the module link — it is NOT the traced translation unit (CodeQL traces
+      # `make modules`, the C connector), so caching its prebuilt tree does not
+      # taint the database. Skip the cgo compile on a hit; only `make install`.
+      # (No ccache in this job — the tracer needs a real cc invocation; that
+      # constraint does not apply to libcoraza, which CodeQL never analyses.)
+      - name: libcoraza built-tree cache
+        id: cache-libcoraza
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/libcoraza-build
+          key: libcoraza-built-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
+
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
@@ -83,13 +96,22 @@ jobs:
       - name: Build + install libcoraza
         run: |
           set -euo pipefail
-          wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
-          unzip -oq "${LIBCORAZA_VERSION}.zip"
-          cd libcoraza-*
-          ./build.sh
-          ./configure
-          eatmydata make -j"$(nproc)"
-          sudo eatmydata make install
+          DEST="$GITHUB_WORKSPACE/libcoraza-build"
+          if [ "${{ steps.cache-libcoraza.outputs.cache-hit }}" = "true" ] && [ -f "$DEST/.built" ]; then
+            echo "libcoraza built-tree cache hit — installing only, no recompile."
+          else
+            wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
+            rm -rf "$DEST"
+            unzip -oq "${LIBCORAZA_VERSION}.zip"
+            mv libcoraza-*/ "$DEST"
+            cd "$DEST"
+            ./build.sh
+            ./configure
+            eatmydata make -j"$(nproc)"
+            touch "$DEST/.built"
+            cd "$GITHUB_WORKSPACE"
+          fi
+          sudo eatmydata make -C "$DEST" install
           sudo ldconfig
 
       # Configure the full nginx tree (needed for headers) but compile ONLY the

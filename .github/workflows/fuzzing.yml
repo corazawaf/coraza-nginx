@@ -44,8 +44,9 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-fuzzing-${{ github.sha }}
+          key: ccache-fuzzing-${{ hashFiles('.github/versions.env') }}-${{ github.sha }}
           restore-keys: |
+            ccache-fuzzing-${{ hashFiles('.github/versions.env') }}-
             ccache-fuzzing-
 
       - name: Install clang + libFuzzer

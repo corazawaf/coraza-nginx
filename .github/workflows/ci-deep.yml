@@ -76,8 +76,9 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-cideep-fuzz-${{ github.sha }}
+          key: ccache-cideep-fuzz-${{ hashFiles('.github/versions.env') }}-${{ github.sha }}
           restore-keys: |
+            ccache-cideep-fuzz-${{ hashFiles('.github/versions.env') }}-
             ccache-cideep-fuzz-
 
       - name: Install clang + libFuzzer
@@ -168,8 +169,9 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-${{ github.sha }}
+          key: ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-${{ hashFiles('.github/versions.env') }}-${{ github.sha }}
           restore-keys: |
+            ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-${{ hashFiles('.github/versions.env') }}-
             ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-
       - name: Go build cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -198,14 +200,29 @@ jobs:
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: ^1.25.x
+      - name: libcoraza built-tree cache
+        id: cache-libcoraza
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/libcoraza-build
+          key: libcoraza-built-${{ matrix.arch }}-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
       - name: Build + install libcoraza
         run: |
           set -euo pipefail
-          wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
-          unzip -oq "${LIBCORAZA_VERSION}.zip"
-          cd libcoraza-*
-          ./build.sh && ./configure && eatmydata make -j"$(nproc)"
-          sudo eatmydata make install && sudo ldconfig
+          DEST="$GITHUB_WORKSPACE/libcoraza-build"
+          if [ "${{ steps.cache-libcoraza.outputs.cache-hit }}" = "true" ] && [ -f "$DEST/.built" ]; then
+            echo "libcoraza built-tree cache hit — installing only, no recompile."
+          else
+            wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
+            rm -rf "$DEST"
+            unzip -oq "${LIBCORAZA_VERSION}.zip"
+            mv libcoraza-*/ "$DEST"
+            cd "$DEST"
+            ./build.sh && ./configure && eatmydata make -j"$(nproc)"
+            touch "$DEST/.built"
+            cd "$GITHUB_WORKSPACE"
+          fi
+          sudo eatmydata make -C "$DEST" install && sudo ldconfig
       - name: Build debug ${{ matrix.server }} + coraza module
         run: |
           set -euo pipefail
@@ -296,8 +313,9 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-${{ github.sha }}
+          key: ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-${{ hashFiles('.github/versions.env') }}-${{ github.sha }}
           restore-keys: |
+            ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-${{ hashFiles('.github/versions.env') }}-
             ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-
       - name: Go build cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -326,14 +344,29 @@ jobs:
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: ^1.25.x
+      - name: libcoraza built-tree cache
+        id: cache-libcoraza
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/libcoraza-build
+          key: libcoraza-built-${{ matrix.arch }}-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
       - name: Build + install libcoraza
         run: |
           set -euo pipefail
-          wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
-          unzip -oq "${LIBCORAZA_VERSION}.zip"
-          cd libcoraza-*
-          ./build.sh && ./configure && eatmydata make -j"$(nproc)"
-          sudo eatmydata make install && sudo ldconfig
+          DEST="$GITHUB_WORKSPACE/libcoraza-build"
+          if [ "${{ steps.cache-libcoraza.outputs.cache-hit }}" = "true" ] && [ -f "$DEST/.built" ]; then
+            echo "libcoraza built-tree cache hit — installing only, no recompile."
+          else
+            wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
+            rm -rf "$DEST"
+            unzip -oq "${LIBCORAZA_VERSION}.zip"
+            mv libcoraza-*/ "$DEST"
+            cd "$DEST"
+            ./build.sh && ./configure && eatmydata make -j"$(nproc)"
+            touch "$DEST/.built"
+            cd "$GITHUB_WORKSPACE"
+          fi
+          sudo eatmydata make -C "$DEST" install && sudo ldconfig
       - name: Build debug ${{ matrix.server }} + coraza module
         run: |
           set -euo pipefail
@@ -533,16 +566,31 @@ jobs:
         with:
           go-version: ^1.25.x
 
+      - name: libcoraza built-tree cache
+        id: cache-libcoraza
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/libcoraza-build
+          key: libcoraza-built-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
       - name: Build + install libcoraza
         run: |
           set -euo pipefail
-          wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
-          unzip -oq "${LIBCORAZA_VERSION}.zip"
-          cd libcoraza-*
-          ./build.sh
-          ./configure
-          eatmydata make -j"$(nproc)"
-          sudo eatmydata make install
+          DEST="$GITHUB_WORKSPACE/libcoraza-build"
+          if [ "${{ steps.cache-libcoraza.outputs.cache-hit }}" = "true" ] && [ -f "$DEST/.built" ]; then
+            echo "libcoraza built-tree cache hit — installing only, no recompile."
+          else
+            wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
+            rm -rf "$DEST"
+            unzip -oq "${LIBCORAZA_VERSION}.zip"
+            mv libcoraza-*/ "$DEST"
+            cd "$DEST"
+            ./build.sh
+            ./configure
+            eatmydata make -j"$(nproc)"
+            touch "$DEST/.built"
+            cd "$GITHUB_WORKSPACE"
+          fi
+          sudo eatmydata make -C "$DEST" install
           sudo ldconfig
 
       - name: Fetch + configure nginx, build module (traced)
@@ -596,8 +644,9 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-cideep-asan-${{ github.sha }}
+          key: ccache-cideep-asan-${{ hashFiles('.github/versions.env') }}-${{ github.sha }}
           restore-keys: |
+            ccache-cideep-asan-${{ hashFiles('.github/versions.env') }}-
             ccache-cideep-asan-
       - name: Go build cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -619,16 +668,31 @@ jobs:
         with:
           go-version: ^1.25.x
 
+      - name: libcoraza built-tree cache
+        id: cache-libcoraza
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/libcoraza-build
+          key: libcoraza-built-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
       - name: Build + install libcoraza
         run: |
           set -euo pipefail
-          wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
-          unzip -oq "${LIBCORAZA_VERSION}.zip"
-          cd libcoraza-*
-          ./build.sh
-          ./configure
-          eatmydata make -j"$(nproc)"
-          sudo eatmydata make install
+          DEST="$GITHUB_WORKSPACE/libcoraza-build"
+          if [ "${{ steps.cache-libcoraza.outputs.cache-hit }}" = "true" ] && [ -f "$DEST/.built" ]; then
+            echo "libcoraza built-tree cache hit — installing only, no recompile."
+          else
+            wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
+            rm -rf "$DEST"
+            unzip -oq "${LIBCORAZA_VERSION}.zip"
+            mv libcoraza-*/ "$DEST"
+            cd "$DEST"
+            ./build.sh
+            ./configure
+            eatmydata make -j"$(nproc)"
+            touch "$DEST/.built"
+            cd "$GITHUB_WORKSPACE"
+          fi
+          sudo eatmydata make -C "$DEST" install
           sudo ldconfig
 
       - name: Build ASan/UBSan nginx + coraza module

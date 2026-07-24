@@ -53,12 +53,24 @@ jobs:
             wget zlib1g-dev unzip ccache eatmydata mold
           echo /usr/lib/ccache >> "$GITHUB_PATH"
 
+      # libcoraza built-tree cache: skip the cgo compile on a hit, only re-run the
+      # cheap `make install`. Keyed on the immutable release tag + pins hash.
+      - name: libcoraza built-tree cache
+        id: cache-libcoraza
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/libcoraza-build
+          key: libcoraza-built-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
+      # Pins-hash primary key so commits that only touch module source hit the
+      # primary (not just the prefix restore-key); github.sha keeps a per-commit
+      # write-back for reruns.
       - name: ccache cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-asan-${{ github.sha }}
+          key: ccache-asan-${{ hashFiles('.github/versions.env') }}-${{ github.sha }}
           restore-keys: |
+            ccache-asan-${{ hashFiles('.github/versions.env') }}-
             ccache-asan-
       - name: Go build cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -83,13 +95,22 @@ jobs:
       - name: Build + install libcoraza
         run: |
           set -euo pipefail
-          wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
-          unzip -oq "${LIBCORAZA_VERSION}.zip"
-          cd libcoraza-*
-          ./build.sh
-          ./configure
-          eatmydata make -j"$(nproc)"
-          sudo eatmydata make install
+          DEST="$GITHUB_WORKSPACE/libcoraza-build"
+          if [ "${{ steps.cache-libcoraza.outputs.cache-hit }}" = "true" ] && [ -f "$DEST/.built" ]; then
+            echo "libcoraza built-tree cache hit — installing only, no recompile."
+          else
+            wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
+            rm -rf "$DEST"
+            unzip -oq "${LIBCORAZA_VERSION}.zip"
+            mv libcoraza-*/ "$DEST"
+            cd "$DEST"
+            ./build.sh
+            ./configure
+            eatmydata make -j"$(nproc)"
+            touch "$DEST/.built"
+            cd "$GITHUB_WORKSPACE"
+          fi
+          sudo eatmydata make -C "$DEST" install
           sudo ldconfig
 
       - name: Build ASan/UBSan nginx + coraza module
