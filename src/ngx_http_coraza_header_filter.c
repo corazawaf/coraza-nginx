@@ -315,6 +315,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     ngx_int_t rc;
     ngx_uint_t status;
     char *http_response_ver;
+    ngx_http_coraza_conf_t *mcf;
 
 
     /* 304 Not Modified responses are still processed for header inspection
@@ -327,6 +328,8 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     {
         return ngx_http_next_header_filter(r);
     }
+
+    mcf = ngx_http_get_module_loc_conf(r, ngx_http_coraza_module);
 
     if (ctx->intervention_triggered) {
         return ngx_http_next_header_filter(r);
@@ -504,10 +507,14 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * page because the original 200 headers have not yet been sent to the
      * client.
      *
-     * We skip the delay for HEAD requests (no body to inspect; nginx's final
-     * header filter sets r->header_only for HEAD, but check r->method
-     * explicitly so a delayed HEAD can never stall), error pages (already an
-     * error response), and subrequests (handled independently).
+     * We skip the delay when coraza_delay_response_headers is off (operators
+     * who know their loaded ruleset has no phase-4 response rules can restore
+     * normal header streaming and accept that late phase-4 interventions can
+     * no longer produce a clean error page after headers are sent), for HEAD
+     * requests (no body to inspect; nginx's final header filter sets
+     * r->header_only for HEAD, but check r->method explicitly so a delayed HEAD
+     * can never stall), error pages (already an error response), and
+     * subrequests (handled independently).
      * We also skip the delay when body inspection is not needed
      * (SecResponseBodyAccess Off or Content-Type mismatch): in that case
      * there is no phase-4 buffering and the response must not be held back.
@@ -518,7 +525,8 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * Delaying the 101 would hold the handshake forever and the upgrade
      * would never complete.
      */
-    if (r->method != NGX_HTTP_HEAD && !r->header_only && !r->error_page
+    if (mcf->delay_response_headers
+        && r->method != NGX_HTTP_HEAD && !r->header_only && !r->error_page
         && r == r->main
         && r->headers_out.status != NGX_HTTP_SWITCHING_PROTOCOLS)
     {
