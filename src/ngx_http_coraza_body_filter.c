@@ -170,8 +170,8 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
             ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
             if (ret > 0) {
+                ctx->intervention_triggered = 1;
                 if (ctx->headers_delayed) {
-                    ctx->intervention_triggered = 1;
                     ctx->headers_delayed = 0;
                     return ret;
                 }
@@ -201,8 +201,8 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
             ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
             if (ret > 0) {
+                ctx->intervention_triggered = 1;
                 if (ctx->headers_delayed) {
-                    ctx->intervention_triggered = 1;
                     ctx->headers_delayed = 0;
                     return ret;
                 }
@@ -210,8 +210,8 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                     &ngx_http_coraza_module, ret);
             }
             else if (ret < 0) {
+                ctx->intervention_triggered = 1;
                 if (ctx->headers_delayed) {
-                    ctx->intervention_triggered = 1;
                     ctx->headers_delayed = 0;
                     return NGX_HTTP_INTERNAL_SERVER_ERROR;
                 }
