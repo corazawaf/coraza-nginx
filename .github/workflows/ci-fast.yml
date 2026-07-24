@@ -15,7 +15,8 @@ name: CI Fast
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   # renovate: depName=libcoraza packageName=corazawaf/libcoraza datasource=github-releases
-  LIBCORAZA_VERSION: v1.4.0
+  # 1.6.0 floor — matches build.yml; the perf hot-path needs the bulk-header symbols.
+  LIBCORAZA_VERSION: v1.6.0
   NGINX_VERSION: "1.30.3"
   NGINX_SHA256: "e5823dc6f45610993def93ebf6cfce68264af4958c77e874b7d20f3709001b8f"
 
@@ -104,7 +105,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential curl git libpcre2-dev pkg-config \
-            wget zlib1g-dev unzip ccache eatmydata
+            wget zlib1g-dev unzip ccache eatmydata autoconf automake libtool
           echo /usr/lib/ccache >> "$GITHUB_PATH"
 
       # ccache object cache + Go build cache + nginx source cache — cut rebuild
@@ -210,7 +211,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc make libpcre2-dev zlib1g-dev libssl-dev ccache eatmydata
+          sudo apt-get install -y gcc make libpcre2-dev zlib1g-dev libssl-dev ccache eatmydata autoconf automake libtool
           echo /usr/lib/ccache >> "$GITHUB_PATH"
 
       - name: ccache cache
@@ -307,7 +308,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc make libpcre2-dev zlib1g-dev libssl-dev ccache eatmydata
+          sudo apt-get install -y gcc make libpcre2-dev zlib1g-dev libssl-dev ccache eatmydata autoconf automake libtool
           echo /usr/lib/ccache >> "$GITHUB_PATH"
 
       - name: ccache cache

@@ -17,7 +17,8 @@ name: CI Deep
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   # renovate: depName=libcoraza packageName=corazawaf/libcoraza datasource=github-releases
-  LIBCORAZA_VERSION: v1.4.0
+  # 1.6.0 floor — matches build.yml; the perf hot-path needs the bulk-header symbols.
+  LIBCORAZA_VERSION: v1.6.0
   NGINX_VERSION: "1.30.3"
   NGINX_SHA256: "e5823dc6f45610993def93ebf6cfce68264af4958c77e874b7d20f3709001b8f"
   # renovate: depName=angie datasource=github-tags packageName=webserver-llc/angie
@@ -184,7 +185,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential curl git libpcre2-dev libssl-dev pkg-config \
-            valgrind wget zlib1g-dev unzip ccache eatmydata
+            valgrind wget zlib1g-dev unzip ccache eatmydata autoconf automake libtool
           echo /usr/lib/ccache >> "$GITHUB_PATH"
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
@@ -307,7 +308,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential curl git libpcre2-dev libssl-dev pkg-config \
-            valgrind wget zlib1g-dev unzip ccache eatmydata
+            valgrind wget zlib1g-dev unzip ccache eatmydata autoconf automake libtool
           echo /usr/lib/ccache >> "$GITHUB_PATH"
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
@@ -411,7 +412,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y flawfinder clang-tidy bear python3 python3-pip gcc make eatmydata
+          sudo apt-get install -y flawfinder clang-tidy bear python3 python3-pip gcc make eatmydata autoconf automake libtool
           pip3 install --quiet semgrep
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
