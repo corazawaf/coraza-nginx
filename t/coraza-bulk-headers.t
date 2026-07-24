@@ -134,9 +134,10 @@ EOF
 like($benign, qr!^HTTP/\S+ 200!,
     'bulk path: benign request+response passes both rules');
 
-# Prove the connector actually reports its bulk-header capability at load time
-# (the CI-built libcoraza is >= 1.6, so this must be "yes"; on an older library
-# it would be "no" and the fallback path is what the assertions above cover).
+# Prove the connector actually resolved the bulk-header symbols and thus that the
+# assertions above exercised the bulk path (not the per-header fallback). The
+# CI-built libcoraza is >= 1.6, so this MUST be "yes"; accepting "no" would let
+# the whole suite pass green via the fallback while the feature under test is dead.
 my $log = $t->read_file('error.log');
-like($log, qr/coraza: \S+ loaded via dynlib_open \(bulk headers: (yes|no)\)/,
-    'connector logs its bulk-header capability');
+like($log, qr/coraza: \S+ loaded via dynlib_open \(bulk headers: yes\)/,
+    'bulk-header symbols resolved, so the assertions above exercised the bulk path');

@@ -525,17 +525,33 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
 
         ctx->resp_hdr_collect = NULL;
 
+        ngx_int_t bulk_ok = 0;
+
         if (collected->nelts > 0
             && ngx_http_coraza_pack_headers(r, hp, collected->nelts,
                    &packed, &packed_len) == NGX_OK)
         {
-            coraza_add_response_headers(ctx->coraza_transaction,
-                (char *) packed, (int) packed_len,
-                (int) collected->nelts);
-        } else {
-            /* Pack failed (over-range header) or empty: replay directly. The
-             * pairs were copied into r->pool when collected, so they are safe
-             * to submit now. */
+            /*
+             * A negative return means Coraza rejected the whole batch; treat
+             * it like a pack failure and replay per-header below, so a batch
+             * failure never degrades to zero response headers inspected.
+             */
+            if (coraza_add_response_headers(ctx->coraza_transaction,
+                    (char *) packed, (int) packed_len,
+                    (int) collected->nelts) >= 0)
+            {
+                bulk_ok = 1;
+            } else {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                    "coraza: bulk response-header submission failed, "
+                    "falling back to per-header path");
+            }
+        }
+
+        if (!bulk_ok) {
+            /* Pack failed (over-range header), empty, or the bulk submission
+             * was rejected: replay directly. The pairs were copied into
+             * r->pool when collected, so they are safe to submit now. */
             for (i = 0; i < collected->nelts; i++) {
                 rc = ngx_http_coraza_add_response_header(r, ctx,
                     &hp[i].name, &hp[i].value);

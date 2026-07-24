@@ -220,9 +220,24 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
                     if (ngx_http_coraza_pack_headers(r, pairs, k,
                             &packed, &packed_len) == NGX_OK)
                     {
-                        coraza_add_request_headers(ctx->coraza_transaction,
-                            (char *) packed, (int) packed_len, (int) k);
-                        bulk_done = 1;
+                        /*
+                         * A negative return means Coraza rejected the whole
+                         * batch (bad framing, count mismatch, allocation
+                         * failure).  Do NOT commit to the bulk path in that
+                         * case -- leaving bulk_done == 0 lets the per-header
+                         * loop below replay every header, so a batch failure
+                         * degrades to the same coverage as the fallback path
+                         * rather than to zero headers inspected.
+                         */
+                        if (coraza_add_request_headers(ctx->coraza_transaction,
+                                (char *) packed, (int) packed_len, (int) k) >= 0)
+                        {
+                            bulk_done = 1;
+                        } else {
+                            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                                "coraza: bulk request-header submission failed, "
+                                "falling back to per-header path");
+                        }
                     }
                 }
             }

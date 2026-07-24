@@ -42,7 +42,7 @@ use Test::Nginx;
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http/)->plan(12);
+my $t = Test::Nginx->new()->has(qw/http/)->plan(13);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -175,6 +175,15 @@ http {
             default_type text/plain;
             return 200 "all safe";
         }
+        location /resphdr-ok {
+            coraza on;
+            coraza_rules '
+                SecRuleEngine On
+                SecRule RESPONSE_HEADERS:X-Secret "@streq leak" "id:202,phase:3,deny,status:403,log"
+            ';
+            add_header X-Secret "safe";
+            return 200 "ok";
+        }
     }
 
     # Backend for /reqbody: a location whose only job is to read the proxied
@@ -247,6 +256,8 @@ like($reqbody_ok, qr!^HTTP/\S+ 200!,
 
 like(http_get('/resphdr'), qr!^HTTP/\S+ 403!,
     'B: response-header deny still blocks (gated poll)');
+like(http_get('/resphdr-ok'), qr!^HTTP/\S+ 200!,
+    'B: response-header control passes');
 
 like(http_get('/respbody'), qr!^HTTP/\S+ 403!,
     'B: response-body deny still blocks (gated poll)');
