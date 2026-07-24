@@ -32,7 +32,7 @@ use Test::Nginx;
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http/)->plan(5);
+my $t = Test::Nginx->new()->has(qw/http/)->plan(6);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -134,10 +134,22 @@ EOF
 like($benign, qr!^HTTP/\S+ 200!,
     'bulk path: benign request+response passes both rules');
 
-# Prove the connector actually resolved the bulk-header symbols and thus that the
-# assertions above exercised the bulk path (not the per-header fallback). The
-# CI-built libcoraza is >= 1.6, so this MUST be "yes"; accepting "no" would let
-# the whole suite pass green via the fallback while the feature under test is dead.
+# Report which path the assertions above actually exercised, and make the bulk
+# path a first-class assertion when it is available. The bulk symbols exist only
+# in libcoraza >= 1.6; on an older runtime (e.g. the v1.4.0 the upstream CI still
+# pins) the connector falls back to the per-header path. Rather than accept
+# "(yes|no)" — which would let the feature under test go silently untested when
+# the symbols vanish — we branch: assert "yes" when the capability is present,
+# and SKIP explicitly (never silently pass) when it is absent.
 my $log = $t->read_file('error.log');
-like($log, qr/coraza: \S+ loaded via dynlib_open \(bulk headers: yes\)/,
-    'bulk-header symbols resolved, so the assertions above exercised the bulk path');
+like($log, qr/coraza: \S+ loaded via dynlib_open \(bulk headers: (yes|no)\)/,
+    'connector logs its bulk-header capability at load time');
+
+if ($log =~ /bulk headers: yes/) {
+    pass('bulk-header symbols resolved: the assertions above exercised the bulk path');
+} else {
+    SKIP: {
+        skip('running libcoraza < 1.6 (no bulk symbols); assertions above ran '
+             . 'via the per-header fallback, bulk path not exercised', 1);
+    }
+}

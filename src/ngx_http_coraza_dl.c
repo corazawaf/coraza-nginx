@@ -53,8 +53,8 @@ typedef int                  (*fn_coraza_is_response_body_processable)(coraza_tr
 /* Bulk header submission, present in libcoraza 1.6+.  Adds every request /
  * response header in a single cgo crossing from a packed buffer
  * ([u16 name_len][name][u32 value_len][value] repeated `count` times),
- * replacing one coraza_add_*_header cgo call per header.  Resolved
- * optionally: on an older libcoraza the pointers stay NULL and the module
+ * replacing one coraza_add_*_header cgo call per header.  Resolved with
+ * DL_SYM_OPT: on an older libcoraza the pointers stay NULL and the module
  * falls back to the per-header path. */
 typedef int                  (*fn_coraza_add_request_headers)(coraza_transaction_t, char *, int, int);
 typedef int                  (*fn_coraza_add_response_headers)(coraza_transaction_t, char *, int, int);
@@ -91,7 +91,7 @@ static fn_coraza_update_status_code      dl_update_status_code;
 
 static fn_coraza_is_response_body_processable dl_is_response_body_processable;
 
-/* Optional (libcoraza 1.6+) — NULL when the running library predates them. */
+/* libcoraza 1.6+ only (DL_SYM_OPT) — NULL when the running library predates them. */
 static fn_coraza_add_request_headers     dl_add_request_headers;
 static fn_coraza_add_response_headers    dl_add_response_headers;
 
@@ -115,7 +115,7 @@ static dynlib_t dl_handle;
     } while (0)
 
 
-/* Resolve an OPTIONAL symbol — leaves the pointer NULL (no failure) when
+/* Resolve a best-effort symbol — leaves the pointer NULL (no failure) when
  * the running libcoraza does not export it, so the caller can fall back. */
 #define DL_SYM_OPT(ptr, name)                                           \
     do {                                                                \
@@ -172,8 +172,8 @@ ngx_http_coraza_dl_open(ngx_log_t *log)
     DL_SYM(dl_is_response_body_processable,
            coraza_is_response_body_processable);
 
-    /* Optional bulk-header entry points (libcoraza 1.6+).  Absence is not an
-     * error: dl_add_*_headers stays NULL and the module keeps using the
+    /* Best-effort bulk-header entry points (libcoraza 1.6+).  Absence is not
+     * an error: dl_add_*_headers stays NULL and the module keeps using the
      * per-header path. */
     DL_SYM_OPT(dl_add_request_headers,  coraza_add_request_headers);
     DL_SYM_OPT(dl_add_response_headers, coraza_add_response_headers);
