@@ -28,19 +28,17 @@ static ngx_int_t ngx_http_coraza_init_process(ngx_cycle_t *cycle);
 static void ngx_http_coraza_exit_process(ngx_cycle_t *cycle);
 
 ngx_inline ngx_int_t
-ngx_http_coraza_process_intervention(coraza_transaction_t transaction, ngx_http_request_t *r, ngx_int_t early_log)
+ngx_http_coraza_process_intervention(ngx_http_coraza_ctx_t *ctx, ngx_http_request_t *r, ngx_int_t early_log)
 {
 	coraza_intervention_t *intervention;
-	ngx_http_coraza_ctx_t *ctx = NULL;
 
 	dd("processing intervention");
 
-	ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 	if (ctx == NULL)
 	{
 		return NGX_HTTP_INTERNAL_SERVER_ERROR;
 	}
-	intervention = coraza_intervention(transaction);
+	intervention = coraza_intervention(ctx->coraza_transaction);
 
 	if (intervention == NULL)
 	{

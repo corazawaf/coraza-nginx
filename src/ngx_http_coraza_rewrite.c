@@ -103,7 +103,7 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
             dd("Was not able to extract connection information.");
         }
         dd("Processing intervention with the connection information filled in");
-        ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 1);
+        ret = ngx_http_coraza_process_intervention(ctx, r, 1);
         if (ret > 0) {
             ctx->intervention_triggered = 1;
             return ret;
@@ -140,7 +140,7 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
         coraza_process_uri(ctx->coraza_transaction, uri, method, http_version);
 
         dd("Processing intervention with the transaction information filled in (uri, method and version)");
-        ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 1);
+        ret = ngx_http_coraza_process_intervention(ctx, r, 1);
         if (ret > 0) {
             ctx->intervention_triggered = 1;
             return ret;
@@ -206,7 +206,7 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
 
         coraza_process_request_headers(ctx->coraza_transaction);
         dd("Processing intervention with the request headers information filled in");
-        ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 1);
+        ret = ngx_http_coraza_process_intervention(ctx, r, 1);
         if (r->error_page) {
             return NGX_DECLINED;
             }

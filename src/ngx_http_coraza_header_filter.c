@@ -147,15 +147,18 @@ ngx_http_coraza_resolv_header_content_length(ngx_http_request_t *r, ngx_str_t na
 {
     ngx_http_coraza_ctx_t *ctx = NULL;
     ngx_str_t value;
-    char buf[NGX_INT64_LEN+2];
+    u_char buf[NGX_INT64_LEN+2];
+    u_char *p;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
     if (r->headers_out.content_length_n >= 0)
     {
-        ngx_sprintf((u_char *)buf, "%O%Z", r->headers_out.content_length_n);
-        value.data = (unsigned char *)buf;
-        value.len = strlen(buf);
+        /* ngx_sprintf returns a pointer past the last byte written, so the
+         * length is (p - buf) -- no strlen() rescan of the buffer. */
+        p = ngx_sprintf(buf, "%O", r->headers_out.content_length_n);
+        value.data = buf;
+        value.len = (size_t) (p - buf);
 
         return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
     }
@@ -488,7 +491,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     ctx->response_body_processable =
         ngx_http_coraza_is_response_body_processable(ctx->coraza_transaction);
 
-    ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
+    ret = ngx_http_coraza_process_intervention(ctx, r, 0);
     if (r->error_page) {
         return ngx_http_next_header_filter(r);
     }

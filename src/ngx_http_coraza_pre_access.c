@@ -168,7 +168,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
             chain = chain->next;
 
             /* Check for intervention after each chunk for prompt detection */
-            ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
+            ret = ngx_http_coraza_process_intervention(ctx, r, 0);
             if (ret > 0) {
                 ctx->intervention_triggered = 1;
                 return ret;
@@ -183,7 +183,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
          */
 
         /* Check for body limit intervention before processing rules */
-        ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
+        ret = ngx_http_coraza_process_intervention(ctx, r, 0);
         if (r->error_page) {
             return NGX_DECLINED;
         }
@@ -194,7 +194,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
 
         coraza_process_request_body(ctx->coraza_transaction);
 
-        ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
+        ret = ngx_http_coraza_process_intervention(ctx, r, 0);
         if (r->error_page) {
             return NGX_DECLINED;
         }
