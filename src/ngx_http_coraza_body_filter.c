@@ -165,7 +165,30 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
             }
 
             if (len > 0) {
-                coraza_append_response_body(ctx->coraza_transaction, data, len);
+                /*
+                 * A non-zero return means libcoraza could not write the
+                 * chunk into the response-body buffer, so the engine would
+                 * evaluate phase 4 against a shorter body than nginx streams
+                 * to the client -- an inspection bypass. Fail closed, exactly
+                 * as the request-body append path does. Matches the libcoraza
+                 * contract where coraza_append_response_body() returns 1 on a
+                 * WriteResponseBody error and 0 on success.
+                 */
+                if (coraza_append_response_body(ctx->coraza_transaction,
+                                                data, len) != 0)
+                {
+                    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                        "coraza: failed to append response body chunk "
+                        "for inspection");
+                    ctx->intervention_triggered = 1;
+                    if (ctx->headers_delayed) {
+                        ctx->headers_delayed = 0;
+                        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+                    }
+                    return ngx_http_filter_finalize_request(r,
+                        &ngx_http_coraza_module,
+                        NGX_HTTP_INTERNAL_SERVER_ERROR);
+                }
             }
 
             ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
