@@ -255,6 +255,9 @@ jobs:
             fastcgi_temp_path $PREFIX/tmp/fastcgi;
             uwsgi_temp_path $PREFIX/tmp/uwsgi;
             scgi_temp_path $PREFIX/tmp/scgi;
+            # nginx -t opens the compile-time default access_log
+            # (/var/log/nginx/access.log) too — not writable on the runner.
+            access_log off;
             server {
               listen 8080;
               include ${{ github.workspace }}/coraza.conf;
@@ -262,7 +265,7 @@ jobs:
             }
           }
           EOF
-          /usr/sbin/nginx -t -p "$PREFIX" -c "$PREFIX/nginx.conf"
+          /usr/sbin/nginx -t -p "$PREFIX" -e "$PREFIX/logs/error.log" -c "$PREFIX/nginx.conf"
 
       # ---- debug cell: confirm the --with-debug/DDEBUG module loads ---------
       # nginx -t a minimal coraza-on config under `error_log ... debug;` so the
@@ -288,13 +291,15 @@ jobs:
             fastcgi_temp_path $PREFIX/tmp/fastcgi;
             uwsgi_temp_path $PREFIX/tmp/uwsgi;
             scgi_temp_path $PREFIX/tmp/scgi;
+            # See the lint step: -t opens the default access_log too.
+            access_log off;
             server {
               listen 8080;
               location / { coraza on; coraza_rules 'SecRuleEngine On'; return 200; }
             }
           }
           EOF
-          /usr/sbin/nginx -t -p "$PREFIX" -c "$PREFIX/nginx.conf"
+          /usr/sbin/nginx -t -p "$PREFIX" -e "$PREFIX/logs/error.log" -c "$PREFIX/nginx.conf"
 
       # ---- full test suite: nginx cells only -------------------------------
       - name: Run prove tests
