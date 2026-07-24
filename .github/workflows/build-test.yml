@@ -240,13 +240,21 @@ jobs:
         run: |
           set -euo pipefail
           PREFIX="${{ github.workspace }}/_lint"
-          mkdir -p "$PREFIX/logs"
+          mkdir -p "$PREFIX/logs" "$PREFIX/tmp"
           cat > "$PREFIX/nginx.conf" <<EOF
           load_module "/usr/lib/nginx/modules/ngx_http_coraza_module.so";
           events { worker_connections 64; }
           error_log $PREFIX/logs/error.log;
           pid $PREFIX/nginx.pid;
           http {
+            # Redirect all temp/scratch paths under the writable prefix — the
+            # binary is configured with absolute /var/cache/nginx defaults the
+            # unprivileged runner can't mkdir (nginx -t creates them eagerly).
+            client_body_temp_path $PREFIX/tmp/client;
+            proxy_temp_path $PREFIX/tmp/proxy;
+            fastcgi_temp_path $PREFIX/tmp/fastcgi;
+            uwsgi_temp_path $PREFIX/tmp/uwsgi;
+            scgi_temp_path $PREFIX/tmp/scgi;
             server {
               listen 8080;
               include ${{ github.workspace }}/coraza.conf;
@@ -266,13 +274,20 @@ jobs:
         run: |
           set -euo pipefail
           PREFIX="${{ github.workspace }}/_dbg"
-          mkdir -p "$PREFIX/logs"
+          mkdir -p "$PREFIX/logs" "$PREFIX/tmp"
           cat > "$PREFIX/nginx.conf" <<EOF
           load_module "/usr/lib/nginx/modules/ngx_http_coraza_module.so";
           events { worker_connections 64; }
           error_log $PREFIX/logs/error.log debug;
           pid $PREFIX/nginx.pid;
           http {
+            # See the lint step: redirect temp paths off the absolute
+            # /var/cache/nginx defaults the unprivileged runner can't create.
+            client_body_temp_path $PREFIX/tmp/client;
+            proxy_temp_path $PREFIX/tmp/proxy;
+            fastcgi_temp_path $PREFIX/tmp/fastcgi;
+            uwsgi_temp_path $PREFIX/tmp/uwsgi;
+            scgi_temp_path $PREFIX/tmp/scgi;
             server {
               listen 8080;
               location / { coraza on; coraza_rules 'SecRuleEngine On'; return 200; }
