@@ -103,19 +103,26 @@ jobs:
           echo "FUZZ_SECS=$SECS" >> "$GITHUB_ENV"
           echo "FUZZ_JOBS=$JOBS" >> "$GITHUB_ENV"
 
-      - name: Build fuzz target
-        run: bash fuzz/build.sh "$GITHUB_WORKSPACE/fuzz/fuzz_str_to_char"
+      - name: Build fuzz targets
+        # No-arg build.sh builds every target (fuzz_str_to_char + fuzz_pack_headers).
+        run: bash fuzz/build.sh
 
       - name: Fuzz (parallel, deep-parity breadth)
-        run: bash fuzz/run.sh "$FUZZ_SECS" "$FUZZ_JOBS"
+        run: |
+          bash fuzz/run.sh "$FUZZ_SECS" "$FUZZ_JOBS"
+          FUZZ_BIN="$GITHUB_WORKSPACE/fuzz/fuzz_pack_headers" \
+          CORPUS_DIR="$GITHUB_WORKSPACE/fuzz/corpus_pack_headers" \
+            bash fuzz/run.sh "$FUZZ_SECS" "$FUZZ_JOBS"
 
       - name: Minimize + persist corpus
         if: success()
         run: |
           cd fuzz
-          mkdir -p corpus-min
+          mkdir -p corpus-min corpus_pack_headers-min
           ./fuzz_str_to_char -merge=1 corpus-min/ corpus/
-          echo "merged: $(find corpus-min -type f | wc -l) units"
+          ./fuzz_pack_headers -merge=1 corpus_pack_headers-min/ corpus_pack_headers/
+          echo "merged str_to_char: $(find corpus-min -type f | wc -l) units"
+          echo "merged pack_headers: $(find corpus_pack_headers-min -type f | wc -l) units"
 
       - name: Upload crash artifacts
         if: failure()
