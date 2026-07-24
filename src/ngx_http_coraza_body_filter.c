@@ -130,12 +130,27 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     {
         /*
          * Use last_buf (not last_in_chain) to detect end of the full response.
-         * Accumulate with |=: a filter upstream of us (sub_filter, addition,
-         * SSI) may append a trailing zero-length buffer after the last_buf
-         * link, and a plain assignment would clear the flag again and skip
-         * the end-of-body flush below, stranding the delayed headers.
+         *
+         * Two distinct questions are asked about last_buf, and they must not
+         * share one variable:
+         *
+         *   is_last               -- is THIS buffer the final one?  Selects
+         *                            passthrough vs deep-copy below.
+         *   is_request_processed  -- has the final buffer been seen anywhere
+         *                            in this chain?  Drives the end-of-body
+         *                            flush after the loop.
+         *
+         * Accumulate the latter with |=: a filter upstream of us (sub_filter,
+         * addition, SSI) may append a trailing zero-length buffer after the
+         * last_buf link, and a plain assignment would clear the flag again and
+         * skip the flush, stranding the delayed headers.  The former stays
+         * per-buffer: were it sticky, every buffer following the last_buf link
+         * would take the passthrough branch and skip the pool copy, forwarding
+         * a buffer nginx may reuse.
          */
-        is_request_processed |= chain->buf->last_buf;
+        int is_last = chain->buf->last_buf;
+
+        is_request_processed |= is_last;
 
         /*
          * Only forward body data to the Coraza engine when body inspection
@@ -247,7 +262,7 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                 return NGX_ERROR;
             }
 
-            if (is_request_processed) {
+            if (is_last) {
                 cl->buf = chain->buf;
             } else {
                 ngx_buf_t *b;
