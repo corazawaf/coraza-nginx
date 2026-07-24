@@ -315,6 +315,11 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
         if (r->error_page) {
             return NGX_DECLINED;
             }
+        if (ret < 0) {
+            /* NGX_ERROR from the intervention handler: fail closed. */
+            ctx->intervention_triggered = 1;
+            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        }
         if (ret > 0) {
             ctx->intervention_triggered = 1;
             return ret;
