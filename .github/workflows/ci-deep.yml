@@ -267,11 +267,11 @@ jobs:
           test -f objs/ngx_http_coraza_module.so
           echo "SERVER_BIN=$PWD/$server_bin" >> "$GITHUB_ENV"
           echo "CORAZA_MODULE_SO=$PWD/objs/ngx_http_coraza_module.so" >> "$GITHUB_ENV"
-      - name: Memcheck soak (300s @ 4 conc, WITH suppressions)
+      - name: Memcheck soak (300s @ 8 conc, WITH suppressions)
         env:
           USE_VALGRIND: "1"
         run: |
-          bash tools/soak.sh "$SERVER_BIN" 300 4
+          bash tools/soak.sh "$SERVER_BIN" 300 8
 
   helgrind:
     name: Valgrind Helgrind soak (${{ matrix.server }}/${{ matrix.arch }})
@@ -400,11 +400,11 @@ jobs:
           test -f objs/ngx_http_coraza_module.so
           echo "SERVER_BIN=$PWD/$server_bin" >> "$GITHUB_ENV"
           echo "CORAZA_MODULE_SO=$PWD/objs/ngx_http_coraza_module.so" >> "$GITHUB_ENV"
-      - name: Helgrind soak (300s @ 4 conc, --error-exitcode=99, WITH suppressions)
+      - name: Helgrind soak (300s @ 8 conc, --error-exitcode=99, WITH suppressions)
         env:
           USE_HELGRIND: "1"
         run: |
-          bash tools/soak.sh "$SERVER_BIN" 300 4
+          bash tools/soak.sh "$SERVER_BIN" 300 8
 
   scanners:
     name: Security scanners
@@ -670,7 +670,7 @@ jobs:
           eatmydata make -j"$(nproc)" modules
           eatmydata make -j"$(nproc)"
 
-      - name: Sanitizer soak (300s @ 4 conc)
+      - name: Sanitizer soak (300s @ 8 conc)
         env:
           ASAN_OPTIONS: "verify_asan_link_order=0"
           CORAZA_MODULE_SO: ${{ github.workspace }}/nginx-${{ env.NGINX_VERSION }}/objs/ngx_http_coraza_module.so
