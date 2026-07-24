@@ -297,7 +297,7 @@ ngx_http_coraza_resolv_header_last_modified(ngx_http_request_t *r, ngx_str_t nam
     p = ngx_http_time(buf, r->headers_out.last_modified_time);
 
     value.data = buf;
-    value.len = (int)(p-buf);
+    value.len = (size_t) (p - buf);
 
     return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
 }
@@ -562,7 +562,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
         }
     }
 
-    /* prepare extra paramters for msc_process_response_headers() */
+    /* prepare extra parameters for coraza_process_response_headers() */
     if (r->err_status) {
         status = r->err_status;
     } else {
@@ -678,9 +678,9 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      */
 
     /*
-     * The line below is commented to make the spdy test to work
+     * The line below is intentionally not executed to keep the spdy test
+     * working.
      */
-     //r->headers_out.content_length_n = -1;
 
     /*
      * Delay forwarding response headers until the body filter has finished

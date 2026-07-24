@@ -38,7 +38,6 @@ ngx_http_coraza_request_read(ngx_http_request_t *r)
 ngx_int_t
 ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
 {
-#if 1
     ngx_http_coraza_ctx_t   *ctx;
     ngx_http_coraza_conf_t  *mcf;
 
@@ -243,7 +242,6 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
     }
 
     dd("Nothing to add on the body inspection, reclaiming a NGX_DECLINED");
-#endif
     return NGX_DECLINED;
 }
 
