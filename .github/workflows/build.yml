@@ -69,7 +69,7 @@ jobs:
           sudo apt-get -qq update
           sudo apt-get -y -qq \
           --fix-missing --no-install-recommends install \
-          gcc make
+          gcc make libcryptx-perl openssl
 
       - name: Set up Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
