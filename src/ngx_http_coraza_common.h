@@ -79,6 +79,12 @@ typedef struct {
     ngx_chain_t **pending_chain_last;
     size_t       pending_bytes;   /* bytes buffered while headers are delayed */
 
+    /* When non-NULL, ngx_http_coraza_add_response_header() collects pairs
+     * here instead of making one cgo call each, so the header filter can
+     * submit the whole set via coraza_add_response_headers() in a single
+     * crossing (libcoraza 1.6+).  NULL => direct per-header cgo path. */
+    ngx_array_t *resp_hdr_collect;
+
     unsigned waiting_more_body:1;
     unsigned body_requested:1;
     unsigned processed:1;
@@ -147,6 +153,13 @@ ngx_http_coraza_ctx_t *ngx_http_coraza_create_ctx(ngx_http_request_t *r);
 ngx_int_t ngx_http_coraza_dl_open(ngx_log_t *log);
 void ngx_http_coraza_dl_close(ngx_log_t *log);
 int ngx_http_coraza_is_response_body_processable(coraza_transaction_t t);
+/* Bulk header entry points (libcoraza 1.6+); guard every call with
+ * ngx_http_coraza_bulk_headers_available(). */
+int ngx_http_coraza_bulk_headers_available(void);
+int coraza_add_request_headers(coraza_transaction_t t, const char *packed,
+    int packed_len, int count);
+int coraza_add_response_headers(coraza_transaction_t t, const char *packed,
+    int packed_len, int count);
 
 /* ngx_http_coraza_body_filter.c */
 ngx_int_t ngx_http_coraza_body_filter_init(void);
@@ -169,5 +182,8 @@ ngx_int_t ngx_http_coraza_rewrite_handler(ngx_http_request_t *r);
 
 /* ngx_http_coraza_utils.c */
 ngx_int_t ngx_str_to_char(ngx_str_t a, char **str, ngx_pool_t *p);
+ngx_int_t ngx_http_coraza_pack_headers(ngx_http_request_t *r,
+    ngx_http_coraza_header_t *pairs, ngx_uint_t count,
+    u_char **out, size_t *out_len);
 
 #endif /* _ngx_http_coraza_COMMON_H_INCLUDED_ */

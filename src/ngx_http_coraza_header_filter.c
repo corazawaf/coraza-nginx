@@ -74,6 +74,44 @@ ngx_http_coraza_add_response_header(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
+    /*
+     * Bulk path: buffer the pair for a single coraza_add_response_headers()
+     * crossing later, rather than one cgo call per header.  The collector is
+     * armed by the header filter only when libcoraza exposes the bulk symbol.
+     *
+     * Copy name and value into r->pool: several resolvers synthesize their
+     * value in a function-local stack buffer (Content-Length, Last-Modified,
+     * the Keep-Alive timeout), which would dangle by the time the collected
+     * set is flushed.  The duplication cost is paid only on the bulk path and
+     * only for headers that are actually inspected.
+     */
+    if (ctx->resp_hdr_collect != NULL) {
+        ngx_http_coraza_header_t *pair = ngx_array_push(ctx->resp_hdr_collect);
+        if (pair == NULL) {
+            return NGX_ERROR;
+        }
+
+        pair->name.len = name->len;
+        pair->name.data = name->len ? ngx_pnalloc(r->pool, name->len) : NULL;
+        if (name->len && pair->name.data == NULL) {
+            return NGX_ERROR;
+        }
+        if (name->len) {
+            ngx_memcpy(pair->name.data, name->data, name->len);
+        }
+
+        pair->value.len = value->len;
+        pair->value.data = value->len ? ngx_pnalloc(r->pool, value->len) : NULL;
+        if (value->len && pair->value.data == NULL) {
+            return NGX_ERROR;
+        }
+        if (value->len) {
+            ngx_memcpy(pair->value.data, value->data, value->len);
+        }
+
+        return NGX_OK;
+    }
+
     if (coraza_add_response_header(ctx->coraza_transaction,
         (char *) name->data,
         name->len,
@@ -403,6 +441,22 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     }
 
     ctx->processed = 1;
+
+    /*
+     * Arm the bulk collector when libcoraza can take all response headers in
+     * one cgo crossing (1.6+).  Every ngx_http_coraza_add_response_header()
+     * below then buffers into ctx->resp_hdr_collect instead of crossing per
+     * header; we flush the whole set once, just before
+     * coraza_process_response_headers().  If arming fails (allocation) or the
+     * symbol is absent, resp_hdr_collect stays NULL and the per-header path is
+     * used unchanged.
+     */
+    if (ngx_http_coraza_bulk_headers_available()) {
+        ctx->resp_hdr_collect = ngx_array_create(r->pool, 16,
+            sizeof(ngx_http_coraza_header_t));
+        /* NULL on failure is fine: falls back to the direct path. */
+    }
+
     /*
      *
      * Assuming Coraza module is running immediately before the
@@ -453,6 +507,41 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
             &data[i].value);
         if (rc != NGX_OK) {
             return rc;
+        }
+    }
+
+    /*
+     * Flush the collected response headers in a single cgo crossing.  Detach
+     * the collector first so this loop's own submissions go direct rather than
+     * re-buffering, and so a fallback replay after a pack failure also takes
+     * the direct path.
+     */
+    if (ctx->resp_hdr_collect != NULL) {
+        ngx_array_t              *collected = ctx->resp_hdr_collect;
+        ngx_http_coraza_header_t *hp = collected->elts;
+        u_char                   *packed;
+        size_t                    packed_len;
+
+        ctx->resp_hdr_collect = NULL;
+
+        if (collected->nelts > 0
+            && ngx_http_coraza_pack_headers(r, hp, collected->nelts,
+                   &packed, &packed_len) == NGX_OK)
+        {
+            coraza_add_response_headers(ctx->coraza_transaction,
+                (const char *) packed, (int) packed_len,
+                (int) collected->nelts);
+        } else {
+            /* Pack failed (over-range header) or empty: replay directly. The
+             * pairs were copied into r->pool when collected, so they are safe
+             * to submit now. */
+            for (i = 0; i < collected->nelts; i++) {
+                rc = ngx_http_coraza_add_response_header(r, ctx,
+                    &hp[i].name, &hp[i].value);
+                if (rc != NGX_OK) {
+                    return rc;
+                }
+            }
         }
     }
 

@@ -50,6 +50,15 @@ typedef int                  (*fn_coraza_update_status_code)(coraza_transaction_
  * coraza_process_response_headers(). */
 typedef int                  (*fn_coraza_is_response_body_processable)(coraza_transaction_t);
 
+/* Bulk header submission, present in libcoraza 1.6+.  Adds every request /
+ * response header in a single cgo crossing from a packed buffer
+ * ([u16 name_len][name][u32 value_len][value] repeated `count` times),
+ * replacing one coraza_add_*_header cgo call per header.  Resolved
+ * optionally: on an older libcoraza the pointers stay NULL and the module
+ * falls back to the per-header path. */
+typedef int                  (*fn_coraza_add_request_headers)(coraza_transaction_t, const char *, int, int);
+typedef int                  (*fn_coraza_add_response_headers)(coraza_transaction_t, const char *, int, int);
+
 /* ------------------------------------------------------------------ */
 /* Static function pointers — set once by ngx_http_coraza_dl_open()   */
 /* ------------------------------------------------------------------ */
@@ -82,6 +91,10 @@ static fn_coraza_update_status_code      dl_update_status_code;
 
 static fn_coraza_is_response_body_processable dl_is_response_body_processable;
 
+/* Optional (libcoraza 1.6+) — NULL when the running library predates them. */
+static fn_coraza_add_request_headers     dl_add_request_headers;
+static fn_coraza_add_response_headers    dl_add_response_headers;
+
 static dynlib_t dl_handle;
 
 /* ------------------------------------------------------------------ */
@@ -99,6 +112,14 @@ static dynlib_t dl_handle;
             dl_handle = NULL;                                          \
             return NGX_ERROR;                                          \
         }                                                              \
+    } while (0)
+
+
+/* Resolve an OPTIONAL symbol — leaves the pointer NULL (no failure) when
+ * the running libcoraza does not export it, so the caller can fall back. */
+#define DL_SYM_OPT(ptr, name)                                           \
+    do {                                                                \
+        *(void **)(&ptr) = dynlib_sym(dl_handle, #name);               \
     } while (0)
 
 
@@ -151,9 +172,17 @@ ngx_http_coraza_dl_open(ngx_log_t *log)
     DL_SYM(dl_is_response_body_processable,
            coraza_is_response_body_processable);
 
+    /* Optional bulk-header entry points (libcoraza 1.6+).  Absence is not an
+     * error: dl_add_*_headers stays NULL and the module keeps using the
+     * per-header path. */
+    DL_SYM_OPT(dl_add_request_headers,  coraza_add_request_headers);
+    DL_SYM_OPT(dl_add_response_headers, coraza_add_response_headers);
+
     ngx_log_error(NGX_LOG_NOTICE, log, 0,
-                  "coraza: %s loaded via dynlib_open",
-                  CORAZA_DYNLIB_BASENAME DYNLIB_EXT);
+                  "coraza: %s loaded via dynlib_open (bulk headers: %s)",
+                  CORAZA_DYNLIB_BASENAME DYNLIB_EXT,
+                  (dl_add_request_headers && dl_add_response_headers)
+                      ? "yes" : "no");
 
     return NGX_OK;
 }
@@ -326,4 +355,32 @@ int
 ngx_http_coraza_is_response_body_processable(coraza_transaction_t t)
 {
     return dl_is_response_body_processable(t);
+}
+
+/*
+ * Bulk header wrappers (libcoraza 1.6+).  These forward to the resolved
+ * symbols; callers must first check ngx_http_coraza_bulk_headers_available()
+ * because the pointers may be NULL on an older library.
+ */
+int coraza_add_request_headers(coraza_transaction_t t, const char *packed,
+                               int packed_len, int count)
+{
+    return dl_add_request_headers(t, packed, packed_len, count);
+}
+
+int coraza_add_response_headers(coraza_transaction_t t, const char *packed,
+                                int packed_len, int count)
+{
+    return dl_add_response_headers(t, packed, packed_len, count);
+}
+
+/*
+ * ngx_http_coraza_bulk_headers_available — 1 when the loaded libcoraza
+ * exports both bulk-header entry points, 0 otherwise.  Callers use the
+ * per-header path when this returns 0.
+ */
+int
+ngx_http_coraza_bulk_headers_available(void)
+{
+    return dl_add_request_headers != NULL && dl_add_response_headers != NULL;
 }

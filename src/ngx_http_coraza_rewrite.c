@@ -153,7 +153,77 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
         ngx_list_part_t *part = &r->headers_in.headers.part;
         ngx_table_elt_t *data = part->elts;
         ngx_uint_t i = 0;
-        for (i = 0 ; /* void */ ; i++) {
+        ngx_int_t  bulk_done = 0;
+
+        /*
+         * Fast path (libcoraza 1.6+): pack every request header into one
+         * buffer and hand Coraza the whole set in a single cgo crossing,
+         * instead of one crossing per header.  Falls through to the
+         * per-header loop below if the bulk symbol is absent or the pack
+         * fails (e.g. an over-range header length -- treated as fail-closed
+         * there too).
+         */
+        if (ngx_http_coraza_bulk_headers_available()) {
+            ngx_http_coraza_header_t *pairs;
+            ngx_uint_t nheaders = 0;
+            ngx_list_part_t *cp = part;
+            ngx_table_elt_t *cd = cp->elts;
+
+            for (i = 0; ; i++) {
+                if (i >= cp->nelts) {
+                    if (cp->next == NULL) {
+                        break;
+                    }
+                    cp = cp->next;
+                    cd = cp->elts;
+                    i = 0;
+                }
+                if (cd[i].hash != 0) {
+                    nheaders++;
+                }
+            }
+
+            if (nheaders == 0) {
+                bulk_done = 1;   /* nothing to add, skip the fallback loop */
+            } else {
+                pairs = ngx_palloc(r->pool,
+                    nheaders * sizeof(ngx_http_coraza_header_t));
+                if (pairs != NULL) {
+                    ngx_uint_t k = 0;
+                    u_char    *packed;
+                    size_t     packed_len;
+
+                    cp = part;
+                    cd = cp->elts;
+                    for (i = 0; ; i++) {
+                        if (i >= cp->nelts) {
+                            if (cp->next == NULL) {
+                                break;
+                            }
+                            cp = cp->next;
+                            cd = cp->elts;
+                            i = 0;
+                        }
+                        if (cd[i].hash == 0) {
+                            continue;
+                        }
+                        pairs[k].name = cd[i].key;
+                        pairs[k].value = cd[i].value;
+                        k++;
+                    }
+
+                    if (ngx_http_coraza_pack_headers(r, pairs, k,
+                            &packed, &packed_len) == NGX_OK)
+                    {
+                        coraza_add_request_headers(ctx->coraza_transaction,
+                            (const char *) packed, (int) packed_len, (int) k);
+                        bulk_done = 1;
+                    }
+                }
+            }
+        }
+
+        for (i = 0 ; !bulk_done ; i++) {
             if (i >= part->nelts) {
                 if (part->next == NULL) {
                     break;
