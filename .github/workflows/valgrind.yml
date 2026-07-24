@@ -7,7 +7,7 @@ name: Valgrind
 # valgrind — it probes CPU features / mmaps arenas in ways valgrind rejects — so
 # nginx never comes up and a memcheck soak of the running module is impossible
 # (this is the same reason ci-fast runs an ASan/UBSan soak, NOT valgrind, for
-# the live module). See the sanitizer-lite comment in ci-fast.yml.
+# the live module). See the sanitizer-lite comment in asan.yml.
 #
 # What valgrind CAN cover here that ASan cannot: the pure-C parser
 # (ngx_str_to_char) has no Go in it, so it runs clean under memcheck. Memcheck
@@ -17,7 +17,7 @@ name: Valgrind
 # -g -O1 — and libFuzzer replays each corpus file as one run then exits.
 #
 # This is a fast PR gate (replay only, no fresh mutation). Long fuzz DISCOVERY
-# lives in ci-deep.yml; the 120s regression fuzz lives in ci-fast.yml.
+# lives in ci-deep.yml; the 120s regression fuzz lives in fuzzing.yml.
 #
 # NGINX pins are not needed here — the fuzz target is self-contained pure C.
 

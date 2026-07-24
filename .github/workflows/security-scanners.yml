@@ -1,4 +1,4 @@
-name: Security scanners
+name: Security Scanners
 
 # Static analysis gate on every PR/push over the coraza connector src/ only:
 #   flawfinder  -- blocks at severity >=4. It is a grep for risky APIs and is

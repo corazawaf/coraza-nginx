@@ -1,7 +1,14 @@
 name: CI Deep
 
 # Exhaustive dynamic analysis — monthly cron + on-demand only, NEVER on PR.
-# Jobs: fuzz (600s) · memcheck soak · helgrind soak · scanners.
+# Jobs: fuzz (600s) · memcheck soak · helgrind soak · scanners · codeql ·
+#       asan (300s deep soak).
+#   * The fast PR path runs cheaper versions of several of these: fuzzing.yml
+#     (120s), asan.yml (60s), security-scanners.yml, codeql.yml. This file is
+#     the deep counterpart — longer soaks, gating scanners, full CodeQL.
+#   * valgrind IS the memcheck + helgrind soaks below; security-scanners IS the
+#     `scanners` job below — both already live here, so "add valgrind/scanners
+#     to ci-deep" needed no new job. codeql + a deep asan soak are the additions.
 #   * scanners GATE: flawfinder (--error-level=4), clang-tidy against a real
 #     bear-captured compile DB (cert-*/security warnings-as-errors), semgrep
 #     (--error). libcoraza is built here so coraza.h resolves for clang-tidy.
@@ -485,3 +492,171 @@ jobs:
             ${{ github.workspace }}/semgrep.log
             ${{ github.workspace }}/compile_commands.json
           retention-days: 14
+
+  codeql:
+    name: CodeQL (deep)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      security-events: write   # required to upload the SARIF results
+    # Full CodeQL analysis, scoped to the connector TU via `make modules` (nginx
+    # core never compiled/traced). The fast PR gate (codeql.yml) runs the same
+    # analysis on every push; this deep copy guarantees a monthly run even if the
+    # PR path is skipped. NO ccache — the tracer only populates its database from
+    # a real compile (a warm ccache hit produces "no source seen during build").
+    # SARIF upload needs Code Scanning enabled on the repo (see codeql.yml).
+    steps:
+      - name: Checkout module
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Load version pins
+        run: bash .github/scripts/load-versions.sh
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential curl git libpcre2-dev pkg-config \
+            wget zlib1g-dev unzip eatmydata
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        with:
+          languages: c-cpp
+          queries: security-extended
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: ^1.25.x
+
+      - name: Build + install libcoraza
+        run: |
+          set -euo pipefail
+          wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
+          unzip -oq "${LIBCORAZA_VERSION}.zip"
+          cd libcoraza-*
+          ./build.sh
+          ./configure
+          eatmydata make -j"$(nproc)"
+          sudo eatmydata make install
+          sudo ldconfig
+
+      - name: Fetch + configure nginx, build module (traced)
+        run: |
+          set -euo pipefail
+          bash .github/scripts/fetch-verify.sh \
+            "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+            "$NGINX_VERSION_SHA256" nginx-src.tar.gz
+          tar -xzf nginx-src.tar.gz
+          cd "nginx-${NGINX_VERSION}"
+          ./configure \
+            --with-compat --with-debug --with-threads \
+            --with-http_ssl_module --with-http_v2_module \
+            --add-dynamic-module="$GITHUB_WORKSPACE"
+          make modules
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        with:
+          category: /language:c-cpp
+
+  asan:
+    name: ASan/UBSan soak (deep, 300s)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
+    # Deep counterpart to the 60s asan.yml PR gate: a 300s ASan/UBSan soak of the
+    # running module. Same build recipe and sanitizer scoping as asan.yml; only
+    # the soak duration differs. (Not valgrind — cgo Go aborts under it; the
+    # valgrind memcheck/helgrind soaks are the separate jobs above.)
+    steps:
+      - name: Checkout module
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Load version pins
+        run: bash .github/scripts/load-versions.sh
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential curl git libpcre2-dev pkg-config \
+            wget zlib1g-dev unzip ccache eatmydata mold
+          echo /usr/lib/ccache >> "$GITHUB_PATH"
+
+      - name: ccache cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-cideep-asan-${{ github.sha }}
+          restore-keys: |
+            ccache-cideep-asan-
+      - name: Go build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: gobuild-cideep-asan-${{ hashFiles('.github/versions.env') }}
+          restore-keys: |
+            gobuild-cideep-asan-
+      - name: nginx source cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/nginx-src.tar.gz
+          key: nginx-src-${{ hashFiles('.github/versions.env') }}
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: ^1.25.x
+
+      - name: Build + install libcoraza
+        run: |
+          set -euo pipefail
+          wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
+          unzip -oq "${LIBCORAZA_VERSION}.zip"
+          cd libcoraza-*
+          ./build.sh
+          ./configure
+          eatmydata make -j"$(nproc)"
+          sudo eatmydata make install
+          sudo ldconfig
+
+      - name: Build ASan/UBSan nginx + coraza module
+        run: |
+          set -euo pipefail
+          bash .github/scripts/fetch-verify.sh \
+            "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+            "$NGINX_VERSION_SHA256" nginx-src.tar.gz
+          tar -xzf nginx-src.tar.gz
+          cd "nginx-${NGINX_VERSION}"
+          # See asan.yml for the -fno-sanitize rationale (benign nginx-core init
+          # UB that would otherwise kill nginx before it listens).
+          SAN_LD="-fsanitize=address,undefined"
+          SAN_CC="$SAN_LD -fno-sanitize=nonnull-attribute,null -fno-sanitize-recover=address"
+          ./configure \
+            --with-compat --with-debug --with-threads \
+            --with-http_ssl_module --with-http_v2_module \
+            --with-http_realip_module --with-http_auth_request_module \
+            --add-dynamic-module="$GITHUB_WORKSPACE" \
+            --with-cc-opt="-DNGX_DEBUG_PALLOC=1 -g3 -O0 -fno-omit-frame-pointer -funwind-tables $SAN_CC $(pkg-config --cflags libpcre2-8)" \
+            --with-ld-opt="-fuse-ld=mold $SAN_LD $(pkg-config --libs libpcre2-8)"
+          eatmydata make -j"$(nproc)" modules
+          eatmydata make -j"$(nproc)"
+
+      - name: Sanitizer soak (300s @ 4 conc)
+        env:
+          ASAN_OPTIONS: "verify_asan_link_order=0"
+          CORAZA_MODULE_SO: ${{ github.workspace }}/nginx-${{ env.NGINX_VERSION }}/objs/ngx_http_coraza_module.so
+        run: |
+          bash tools/soak.sh \
+            "$GITHUB_WORKSPACE/nginx-${NGINX_VERSION}/objs/nginx" 300 4

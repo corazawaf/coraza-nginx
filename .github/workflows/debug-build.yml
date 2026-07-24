@@ -1,0 +1,129 @@
+name: Debug build
+
+# Compile gate on every PR/push for the debug-only code paths.
+#
+# The dd() debug-logging paths are compiled out of every other job, so a broken
+# dd() call site ships unnoticed: an undeclared variable inside dd() once made
+# every --with-debug build fail to compile, and no CI job caught it (the fix was
+# PR #37). This job compiles the module with nginx debug logging AND
+# CORAZA_DDEBUG=1 under -Werror so those call sites are type-checked on every
+# push. Compile-only — behaviour is covered elsewhere.
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # NGINX_VERSION / NGINX_VERSION_SHA256 / LIBCORAZA_VERSION come from
+  # .github/versions.env, loaded per job via load-versions.sh (first step).
+
+on:
+  push:
+    branches: [main, master, dev, "[0-9][0-9]-*"]
+  pull_request: {}
+  workflow_dispatch: {}
+
+concurrency:
+  group: debug-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  debug-build:
+    name: Debug build (--with-debug, DDEBUG)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
+    steps:
+      - name: Checkout module
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Load version pins
+        run: bash .github/scripts/load-versions.sh
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc make libpcre2-dev zlib1g-dev libssl-dev ccache eatmydata mold
+          echo /usr/lib/ccache >> "$GITHUB_PATH"
+
+      - name: ccache cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-debugbuild-${{ github.sha }}
+          restore-keys: |
+            ccache-debugbuild-
+
+      - name: Go build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: gobuild-debugbuild-${{ hashFiles('.github/versions.env') }}
+          restore-keys: |
+            gobuild-debugbuild-
+
+      - name: nginx source cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/nginx-src.tar.gz
+          key: nginx-src-${{ hashFiles('.github/versions.env') }}
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: ^1.25.x
+
+      - name: Build libcoraza
+        run: |
+          set -euo pipefail
+          wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
+          unzip -qo "${LIBCORAZA_VERSION}.zip"
+          cd libcoraza-*
+          ./build.sh && ./configure && eatmydata make && sudo eatmydata make install && sudo ldconfig
+
+      - name: Build module with debug logging enabled
+        run: |
+          set -euo pipefail
+          bash .github/scripts/fetch-verify.sh \
+            "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+            "$NGINX_VERSION_SHA256" nginx-src.tar.gz
+          tar -xzf nginx-src.tar.gz
+          cd "nginx-${NGINX_VERSION}"
+          # -DCORAZA_DDEBUG=1 turns the connector's own dd() macro into real
+          # code (src/ddebug.h); --with-debug enables nginx's debug logging.
+          # -Werror makes any format-string or undeclared-identifier mistake in
+          # those newly-live call sites a hard failure.
+          ./configure --with-compat --with-debug \
+            --with-http_ssl_module --with-http_v2_module \
+            --with-cc-opt="-DCORAZA_DDEBUG=1 -Werror" \
+            --with-ld-opt="-fuse-ld=mold" \
+            --add-dynamic-module="$GITHUB_WORKSPACE" >/dev/null
+          eatmydata make -j"$(nproc)" modules
+
+      - name: Confirm the debug module loads
+        run: |
+          set -euo pipefail
+          cd "nginx-${NGINX_VERSION}"
+          eatmydata make -j"$(nproc)"
+          SO="$PWD/objs/ngx_http_coraza_module.so"
+          PREFIX="$GITHUB_WORKSPACE/_dbg"
+          mkdir -p "$PREFIX/logs"
+          cat > "$PREFIX/nginx.conf" <<EOF
+          load_module $SO;
+          events { worker_connections 64; }
+          error_log $PREFIX/logs/error.log debug;
+          pid $PREFIX/nginx.pid;
+          http {
+            server {
+              listen 8080;
+              location / { coraza on; coraza_rules 'SecRuleEngine On'; return 200; }
+            }
+          }
+          EOF
+          "$PWD/objs/nginx" -t -p "$PREFIX" -c "$PREFIX/nginx.conf"

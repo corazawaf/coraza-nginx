@@ -1,0 +1,134 @@
+name: A/UBSan
+
+# Fast ASan/UBSan gate on every PR/push: 60s soak of the running module under
+# benign + attack traffic.
+#
+# NOT valgrind. libcoraza is a cgo (Go) shared object; the Go runtime aborts at
+# init under valgrind (probes CPU features / arena mmap valgrind rejects), so
+# nginx never comes up (sub-second death, no error.log). ASan/UBSan instrument
+# the C connector at native speed and tolerate the dlopen'd Go .so. Pure-C paths
+# are also covered by the fuzz job (fuzzing.yml). A longer ASan soak + the
+# valgrind/helgrind runs (if they ever work for cgo) live in ci-deep.yml.
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # NGINX_VERSION / NGINX_VERSION_SHA256 / LIBCORAZA_VERSION come from
+  # .github/versions.env, loaded per job via load-versions.sh (first step).
+
+on:
+  push:
+    branches: [main, master, dev, "[0-9][0-9]-*"]
+  pull_request: {}
+  workflow_dispatch: {}
+
+concurrency:
+  group: asan-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  sanitizer-lite:
+    name: Sanitizer lite (60s soak)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
+    steps:
+      - name: Checkout module
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Load version pins
+        run: bash .github/scripts/load-versions.sh
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential curl git libpcre2-dev pkg-config \
+            wget zlib1g-dev unzip ccache eatmydata mold
+          echo /usr/lib/ccache >> "$GITHUB_PATH"
+
+      - name: ccache cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-asan-${{ github.sha }}
+          restore-keys: |
+            ccache-asan-
+      - name: Go build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: gobuild-asan-${{ hashFiles('.github/versions.env') }}
+          restore-keys: |
+            gobuild-asan-
+      - name: nginx source cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/nginx-src.tar.gz
+          key: nginx-src-${{ hashFiles('.github/versions.env') }}
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: ^1.25.x
+
+      - name: Build + install libcoraza
+        run: |
+          set -euo pipefail
+          wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
+          unzip -oq "${LIBCORAZA_VERSION}.zip"
+          cd libcoraza-*
+          ./build.sh
+          ./configure
+          eatmydata make -j"$(nproc)"
+          sudo eatmydata make install
+          sudo ldconfig
+
+      - name: Build ASan/UBSan nginx + coraza module
+        run: |
+          set -euo pipefail
+          bash .github/scripts/fetch-verify.sh \
+            "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+            "$NGINX_VERSION_SHA256" nginx-src.tar.gz
+          tar -xzf nginx-src.tar.gz
+          cd "nginx-${NGINX_VERSION}"
+          # ASan errors are fatal (real heap bugs / UAF — the point of the
+          # soak; -fno-sanitize-recover=address). UBSan is report-only.
+          # -fno-sanitize=nonnull-attribute,null: nginx core trips benign
+          # nullability UB at init (ngx_pstrdup -> memcpy(dst,NULL,0) in
+          # ngx_init_cycle) that would otherwise route through the shared
+          # sanitizer die-path and kill nginx before it listens — not our bug,
+          # and gcc has no -fsanitize-ignorelist to scope it to our TUs. Real
+          # pure-C UB is gated by the fuzz job. -fno-sanitize* are COMPILE-only;
+          # the link line takes only -fsanitize=... (SAN_LD).
+          SAN_LD="-fsanitize=address,undefined"
+          SAN_CC="$SAN_LD -fno-sanitize=nonnull-attribute,null -fno-sanitize-recover=address"
+          ./configure \
+            --with-compat --with-debug --with-threads \
+            --with-http_ssl_module --with-http_v2_module \
+            --with-http_realip_module --with-http_auth_request_module \
+            --add-dynamic-module="$GITHUB_WORKSPACE" \
+            --with-cc-opt="-DNGX_DEBUG_PALLOC=1 -g3 -O0 -fno-omit-frame-pointer -funwind-tables $SAN_CC $(pkg-config --cflags libpcre2-8)" \
+            --with-ld-opt="-fuse-ld=mold $SAN_LD $(pkg-config --libs libpcre2-8)"
+          eatmydata make -j"$(nproc)" modules
+          eatmydata make -j"$(nproc)"
+
+      - name: Sanitizer soak (60s @ 4 conc)
+        env:
+          # No valgrind: soak.sh runs the ASan/UBSan-built nginx directly and
+          # fails on any asan* log. The dlopen'd Go libcoraza is uninstrumented;
+          # verify_asan_link_order=0 allows ASan to init from the main binary
+          # rather than requiring LD_PRELOAD.
+          ASAN_OPTIONS: "verify_asan_link_order=0"
+          CORAZA_MODULE_SO: ${{ github.workspace }}/nginx-${{ env.NGINX_VERSION }}/objs/ngx_http_coraza_module.so
+        run: |
+          bash tools/soak.sh \
+            "$GITHUB_WORKSPACE/nginx-${NGINX_VERSION}/objs/nginx" 60 4

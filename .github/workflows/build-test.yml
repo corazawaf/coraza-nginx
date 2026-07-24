@@ -1,14 +1,15 @@
 # Build + test the coraza dynamic module on every push/PR across the three
 # server targets we ship for:
 #   * nginx mainline  (odd minor)  — full: compile + prove + go-ftw/CRS
-#   * nginx stable     (even minor) — full: compile + prove + go-ftw/CRS
+#   * nginx stable     (even minor) — build-only (full prove/go-ftw runs on the
+#                                     mainline cell; stable just proves it compiles)
 #   * Angie            (nginx fork) — build-only (soak/prove of Angie lives in
 #                                     ci-deep; here we just prove it compiles)
 # All versions + sha256 pins come from .github/versions.env (single source of
 # truth, bumped monthly by bump.yml). Every source archive is sha256-verified
 # after download. Caching: actions/cache for source archives + ccache object
 # cache + Go build cache; ccache/eatmydata/mold cut wall-clock.
-name: Compile module
+name: Build&Test
 
 on:
   push:
@@ -42,8 +43,8 @@ jobs:
             full_tests: true
           - server: nginx
             channel: stable
-            label: nginx stable (full)
-            full_tests: true
+            label: nginx stable (build-only)
+            full_tests: false
           - server: angie
             channel: angie
             label: Angie (build-only)
