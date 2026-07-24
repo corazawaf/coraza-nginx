@@ -17,27 +17,31 @@ jobs:
     env:
       # renovate: depName=libcoraza packageName=corazawaf/libcoraza datasource=github-releases
       LIBCORAZA_VERSION: v1.4.0
+      # sha256 of nginx-1.30.3.tar.gz from nginx.org — update together with the matrix
+      NGINX_SHA256: "e5823dc6f45610993def93ebf6cfce68264af4958c77e874b7d20f3709001b8f"
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
     strategy:
       matrix:
-        nginx_version: ['1.24.0', '1.26.0']
+        nginx_version: ['1.30.3']
         arch: [amd64, arm64]
         include:
           - arch: amd64
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
             deb_arch: amd64
             rpm_arch: x86_64
           - arch: arm64
-            runner: ubuntu-22.04-arm
+            runner: ubuntu-24.04-arm
             deb_arch: arm64
             rpm_arch: aarch64
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       # Grab nginx source, from cache if possible, or from web
       - name: Grab nginx-${{ matrix.nginx_version }} cache
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-nginx
         with:
           path: nginx-${{ matrix.nginx_version }}
@@ -47,11 +51,12 @@ jobs:
         run: |
           cd ${{ github.workspace }}
           wget https://nginx.org/download/nginx-${{ matrix.nginx_version }}.tar.gz
+          echo "${NGINX_SHA256}  nginx-${{ matrix.nginx_version }}.tar.gz" | sha256sum -c -
           tar -xzvf nginx-${{ matrix.nginx_version }}.tar.gz
 
       # Grab libcoraza
       - name: Grab libcoraza-${{ env.LIBCORAZA_VERSION }} cache
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-libcoraza
         with:
           path: libcoraza-*
@@ -63,25 +68,28 @@ jobs:
           wget https://github.com/corazawaf/libcoraza/archive/refs/tags/${{ env.LIBCORAZA_VERSION }}.zip
           unzip -o ${{ env.LIBCORAZA_VERSION }}.zip
 
+      # NB: no ccache / Go build-cache restore in this job. It runs only on
+      # release:published with contents:write + id-token:write and emits
+      # cosign-signed artifacts. Restoring a build cache that a lower-trust PR
+      # run could have poisoned would let attacker-controlled objects be
+      # compiled/linked into a signed release (zizmor cache-poisoning). Build
+      # caches live in the ci-*/build workflows only; the release build is cold.
+
       - name: Install build dependencies
         run: |
           sudo add-apt-repository universe
           sudo apt-get -qq update
           sudo apt-get -y -qq \
           --fix-missing --no-install-recommends install \
-          gcc make ruby ruby-dev rubygems build-essential
+          gcc make ruby ruby-dev rubygems build-essential ccache eatmydata
+          echo /usr/lib/ccache >> "$GITHUB_PATH"
           sudo gem install --no-document fpm
 
       - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: ^1.21.x
-
-      - name: Configure environment
-        run: |
-          export LD_LIBRARY_PATH=/usr/local/lib
-          export LIBRARY_PATH=/usr/local/lib
-          export C_INCLUDE_PATH=/usr/local/include
+          go-version: ^1.25.x
+          cache: false   # release job: don't restore a PR-poisonable module cache
 
       # Build libcoraza
       - name: Build libcoraza
@@ -89,8 +97,8 @@ jobs:
           cd libcoraza-*
           ./build.sh
           ./configure
-          make
-          sudo make install
+          eatmydata make
+          sudo eatmydata make install
           sudo ldconfig
 
       - name: Configure compilation of dynamic module
@@ -125,7 +133,7 @@ jobs:
       - name: Compile dynamic module
         run: |
           cd ${{ github.workspace }}/nginx-${{ matrix.nginx_version }}
-          make modules
+          eatmydata make modules
 
       - name: Create packages
         run: |
@@ -175,7 +183,7 @@ jobs:
           mv "${PKGBASE}.rpm" "${{ github.workspace }}/"
 
       - name: Upload packages as artifacts for install tests
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: packages-nginx${{ matrix.nginx_version }}-${{ matrix.arch }}
           path: |
@@ -184,7 +192,7 @@ jobs:
           retention-days: 1
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Sign packages with cosign (keyless)
         run: |
@@ -201,7 +209,7 @@ jobs:
             "${PKGBASE}.rpm"
 
       - name: Upload packages and signatures to release
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           files: |
             coraza-nginx_*_nginx${{ matrix.nginx_version }}_${{ matrix.arch }}.deb
@@ -217,18 +225,18 @@ jobs:
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        nginx_version: ['1.24.0', '1.26.0']
+        nginx_version: ['1.30.3']
         arch: [amd64, arm64]
         pkg_type: [deb, rpm]
         include:
           - arch: amd64
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
           - arch: arm64
-            runner: ubuntu-22.04-arm
+            runner: ubuntu-24.04-arm
 
     steps:
       - name: Download packages artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: packages-nginx${{ matrix.nginx_version }}-${{ matrix.arch }}
 

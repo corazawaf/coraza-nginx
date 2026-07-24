@@ -23,20 +23,23 @@ jobs:
     env:
       # renovate: depName=libcoraza packageName=corazawaf/libcoraza datasource=github-releases
       LIBCORAZA_VERSION: v1.4.0
+      # ccache object cache (compiled .o reuse across runs) — see cache step below.
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
     strategy:
       matrix:
         nginx_version: ['1.24.0']
         # The type of runner that the job will run on
-        os: [ubuntu-22.04]
+        os: [ubuntu-24.04]
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       - name: "Checkout repo"
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       # Grab nginx source, from cache if possible, or from web
       - name: Grab nginx-${{ matrix.nginx_version }} cache
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-nginx
         with:
           path: nginx-${{ matrix.nginx_version }}
@@ -50,7 +53,7 @@ jobs:
 
       # Grab libcoraza
       - name: Grab libcoraza-${{ env.LIBCORAZA_VERSION }} cache
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-libcoraza
         with:
           path: libcoraza-*
@@ -62,6 +65,28 @@ jobs:
           wget https://github.com/corazawaf/libcoraza/archive/refs/tags/${{ env.LIBCORAZA_VERSION }}.zip
           unzip -o ${{ env.LIBCORAZA_VERSION }}.zip
 
+      # ccache object cache: reuse compiled .o across runs (keyed per nginx
+      # version, restore-fallback to the newest prior cache).
+      - name: ccache cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-build-${{ matrix.os }}-nginx${{ matrix.nginx_version }}-${{ github.sha }}
+          restore-keys: |
+            ccache-build-${{ matrix.os }}-nginx${{ matrix.nginx_version }}-
+            ccache-build-${{ matrix.os }}-
+
+      # Go build/module cache for the cgo libcoraza build.
+      - name: Go build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: gobuild-build-${{ matrix.os }}-${{ env.LIBCORAZA_VERSION }}
+          restore-keys: |
+            gobuild-build-${{ matrix.os }}-
+
       # Grab prebuilts from apt
       - name: Install dependencies with apt
         run: |
@@ -69,27 +94,24 @@ jobs:
           sudo apt-get -qq update
           sudo apt-get -y -qq \
           --fix-missing --no-install-recommends install \
-          gcc make
+          gcc make ccache eatmydata
+          # Route gcc/cc through ccache for every later step.
+          echo /usr/lib/ccache >> "$GITHUB_PATH"
 
       - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: ^1.25.x
 
-      - name: Configure environment
-        run: |
-          export LD_LIBRARY_PATH=/usr/local/lib
-          export LIBRARY_PATH=/usr/local/lib
-          export C_INCLUDE_PATH=/usr/local/include
-
-      # Build libcoraza
+      # Build libcoraza (installs to /usr/local/lib; ldconfig registers it —
+      # no LD_LIBRARY_PATH/C_INCLUDE_PATH exports needed, cf. ci-fast).
       - name: Build libcoraza
         run: |
           cd libcoraza-*
           ./build.sh
           ./configure
-          make
-          sudo make install
+          eatmydata make
+          sudo eatmydata make install
           sudo ldconfig
 
 
@@ -125,9 +147,9 @@ jobs:
       - name: Compile dynamic module and install nginx
         run: |
           cd ${{ github.workspace }}/nginx-${{ matrix.nginx_version }}
-          make modules
-          make
-          sudo make install
+          eatmydata make modules
+          eatmydata make
+          sudo eatmydata make install
 
       - name: Run tests
         run: |
@@ -207,7 +229,7 @@ jobs:
           sudo /usr/sbin/nginx -s stop
 
       - name: Upload a Build Artifact
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           # Artifact name
           name: nginx-coraza-module-nginx-${{ matrix.nginx_version }}-${{ matrix.os }}
