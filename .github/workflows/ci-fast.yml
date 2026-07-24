@@ -14,10 +14,10 @@ name: CI Fast
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  # renovate: depName=libcoraza packageName=corazawaf/libcoraza datasource=github-releases
-  LIBCORAZA_VERSION: v1.4.0
-  NGINX_VERSION: "1.30.3"
-  NGINX_SHA256: "e5823dc6f45610993def93ebf6cfce68264af4958c77e874b7d20f3709001b8f"
+  # NGINX_VERSION / NGINX_VERSION_SHA256 / LIBCORAZA_VERSION come from
+  # .github/versions.env, loaded per job via load-versions.sh (first step).
+  # Kept out of this top-level block so there is a single source of truth
+  # (bump.yml owns versions.env).
 
 on:
   push:
@@ -99,12 +99,15 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Load version pins
+        run: bash .github/scripts/load-versions.sh
+
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential curl git libpcre2-dev pkg-config \
-            wget zlib1g-dev unzip ccache eatmydata
+            wget zlib1g-dev unzip ccache eatmydata mold
           echo /usr/lib/ccache >> "$GITHUB_PATH"
 
       # ccache object cache + Go build cache + nginx source cache — cut rebuild
@@ -122,14 +125,14 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: gobuild-cifast-${{ env.LIBCORAZA_VERSION }}
+          key: gobuild-cifast-${{ hashFiles('.github/versions.env') }}
           restore-keys: |
             gobuild-cifast-
       - name: nginx source cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ github.workspace }}/nginx-${{ env.NGINX_VERSION }}.tar.gz
-          key: nginx-src-${{ env.NGINX_VERSION }}
+          path: ${{ github.workspace }}/nginx-src.tar.gz
+          key: nginx-src-${{ hashFiles('.github/versions.env') }}
 
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
@@ -151,11 +154,10 @@ jobs:
       - name: Build ASan/UBSan nginx + coraza module
         run: |
           set -euo pipefail
-          test -f "nginx-${NGINX_VERSION}.tar.gz" || \
-            wget -q -O "nginx-${NGINX_VERSION}.tar.gz" \
-              "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
-          echo "${NGINX_SHA256}  nginx-${NGINX_VERSION}.tar.gz" | sha256sum -c -
-          tar -xzf "nginx-${NGINX_VERSION}.tar.gz"
+          bash .github/scripts/fetch-verify.sh \
+            "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+            "$NGINX_VERSION_SHA256" nginx-src.tar.gz
+          tar -xzf nginx-src.tar.gz
           cd "nginx-${NGINX_VERSION}"
           # ASan errors are fatal (real heap bugs / UAF — the point of the
           # soak; -fno-sanitize-recover=address). UBSan is report-only.
@@ -174,7 +176,7 @@ jobs:
             --with-http_realip_module --with-http_auth_request_module \
             --add-dynamic-module="$GITHUB_WORKSPACE" \
             --with-cc-opt="-DNGX_DEBUG_PALLOC=1 -g3 -O0 -fno-omit-frame-pointer -funwind-tables $SAN_CC $(pkg-config --cflags libpcre2-8)" \
-            --with-ld-opt="$SAN_LD $(pkg-config --libs libpcre2-8)"
+            --with-ld-opt="-fuse-ld=mold $SAN_LD $(pkg-config --libs libpcre2-8)"
           eatmydata make -j"$(nproc)" modules
           eatmydata make -j"$(nproc)"
 
@@ -207,10 +209,13 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Load version pins
+        run: bash .github/scripts/load-versions.sh
+
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc make libpcre2-dev zlib1g-dev libssl-dev ccache eatmydata
+          sudo apt-get install -y gcc make libpcre2-dev zlib1g-dev libssl-dev ccache eatmydata mold
           echo /usr/lib/ccache >> "$GITHUB_PATH"
 
       - name: ccache cache
@@ -226,14 +231,14 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: gobuild-cifast-${{ env.LIBCORAZA_VERSION }}
+          key: gobuild-cifast-${{ hashFiles('.github/versions.env') }}
           restore-keys: |
             gobuild-cifast-
       - name: nginx source cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ github.workspace }}/nginx-${{ env.NGINX_VERSION }}.tar.gz
-          key: nginx-src-${{ env.NGINX_VERSION }}
+          path: ${{ github.workspace }}/nginx-src.tar.gz
+          key: nginx-src-${{ hashFiles('.github/versions.env') }}
 
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
@@ -251,13 +256,13 @@ jobs:
       - name: Build module
         run: |
           set -euo pipefail
-          test -f "nginx-${NGINX_VERSION}.tar.gz" || \
-            wget -q -O "nginx-${NGINX_VERSION}.tar.gz" \
-              "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
-          echo "${NGINX_SHA256}  nginx-${NGINX_VERSION}.tar.gz" | sha256sum -c -
-          tar -xzf "nginx-${NGINX_VERSION}.tar.gz"
+          bash .github/scripts/fetch-verify.sh \
+            "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+            "$NGINX_VERSION_SHA256" nginx-src.tar.gz
+          tar -xzf nginx-src.tar.gz
           cd "nginx-${NGINX_VERSION}"
           ./configure --with-compat --with-http_ssl_module --with-http_v2_module \
+            --with-ld-opt="-fuse-ld=mold" \
             --add-dynamic-module="$GITHUB_WORKSPACE" >/dev/null
           eatmydata make -j"$(nproc)" modules
           # the nginx -t lint step below needs the actual binary, not just the .so
@@ -304,10 +309,13 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Load version pins
+        run: bash .github/scripts/load-versions.sh
+
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc make libpcre2-dev zlib1g-dev libssl-dev ccache eatmydata
+          sudo apt-get install -y gcc make libpcre2-dev zlib1g-dev libssl-dev ccache eatmydata mold
           echo /usr/lib/ccache >> "$GITHUB_PATH"
 
       - name: ccache cache
@@ -324,15 +332,15 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: gobuild-cifast-${{ env.LIBCORAZA_VERSION }}
+          key: gobuild-cifast-${{ hashFiles('.github/versions.env') }}
           restore-keys: |
             gobuild-cifast-
 
       - name: nginx source cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ github.workspace }}/nginx-${{ env.NGINX_VERSION }}.tar.gz
-          key: nginx-src-${{ env.NGINX_VERSION }}
+          path: ${{ github.workspace }}/nginx-src.tar.gz
+          key: nginx-src-${{ hashFiles('.github/versions.env') }}
 
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
@@ -350,11 +358,10 @@ jobs:
       - name: Build module with debug logging enabled
         run: |
           set -euo pipefail
-          test -f "nginx-${NGINX_VERSION}.tar.gz" || \
-            wget -q -O "nginx-${NGINX_VERSION}.tar.gz" \
-              "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
-          echo "${NGINX_SHA256}  nginx-${NGINX_VERSION}.tar.gz" | sha256sum -c -
-          tar -xzf "nginx-${NGINX_VERSION}.tar.gz"
+          bash .github/scripts/fetch-verify.sh \
+            "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+            "$NGINX_VERSION_SHA256" nginx-src.tar.gz
+          tar -xzf nginx-src.tar.gz
           cd "nginx-${NGINX_VERSION}"
           # -DCORAZA_DDEBUG=1 turns the connector's own dd() macro into real
           # code (src/ddebug.h); --with-debug enables nginx's debug logging.
@@ -363,6 +370,7 @@ jobs:
           ./configure --with-compat --with-debug \
             --with-http_ssl_module --with-http_v2_module \
             --with-cc-opt="-DCORAZA_DDEBUG=1 -Werror" \
+            --with-ld-opt="-fuse-ld=mold" \
             --add-dynamic-module="$GITHUB_WORKSPACE" >/dev/null
           eatmydata make -j"$(nproc)" modules
 

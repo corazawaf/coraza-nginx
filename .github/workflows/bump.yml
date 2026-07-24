@@ -1,0 +1,75 @@
+name: Bump CI version pins
+
+# Monthly refresh of .github/versions.env: resolve the latest nginx mainline +
+# stable, latest Angie, latest OWASP CRS LTS, and latest libcoraza, re-pin each
+# with a fresh sha256, and open a PR. Never commits to main directly — the PR
+# runs the full ci-fast/build matrix as its own gate before a human merges.
+#
+# GitHub Actions themselves are pinned by SHA and bumped separately by renovate;
+# this job only owns the upstream source-archive versions.
+#
+# Requires repo setting "Allow GitHub Actions to create and approve pull
+# requests" to be ON (Settings > Actions > General) for the default GITHUB_TOKEN
+# to open the PR.
+
+on:
+  schedule:
+    # 1st of the month, 04:30 UTC (after ci-deep's 03:30 monthly soak).
+    - cron: "30 4 1 * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bump-versions
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Recompute pins + open PR
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write        # create the bump branch
+      pull-requests: write   # open the PR
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y jq curl
+
+      - name: Recompute versions.env
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/compute-versions.sh | tee /tmp/bump-summary.txt
+
+      - name: Open PR if changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- .github/versions.env; then
+            echo "versions.env unchanged — nothing to bump."
+            exit 0
+          fi
+
+          branch="ci/bump-versions-$(date -u +%Y%m)"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add .github/versions.env
+          git commit -m "ci: monthly bump of CI version pins"
+          git push -f origin "$branch"
+
+          summary="$(cat /tmp/bump-summary.txt)"
+          body=$'Monthly automated bump of `.github/versions.env` (nginx mainline/stable, Angie, OWASP CRS LTS, libcoraza) with fresh sha256 pins.\n\n```\n'"$summary"$'\n```\n\nThe full ci-fast + build matrix gates this PR before merge.'
+
+          # Reuse an existing open PR for this branch, else create one.
+          if gh pr view "$branch" --json number >/dev/null 2>&1; then
+            gh pr edit "$branch" --body "$body"
+          else
+            gh pr create --base main --head "$branch" \
+              --title "ci: monthly CI version-pin bump ($(date -u +%Y-%m))" \
+              --body "$body"
+          fi

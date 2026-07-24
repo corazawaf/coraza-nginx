@@ -1,100 +1,121 @@
-# This is a basic workflow to help you get started with Actions
+# Build + test the coraza dynamic module on every push/PR across the three
+# server targets we ship for:
+#   * nginx mainline  (odd minor)  — full: compile + prove + go-ftw/CRS
+#   * nginx stable     (even minor) — full: compile + prove + go-ftw/CRS
+#   * Angie            (nginx fork) — build-only (soak/prove of Angie lives in
+#                                     ci-deep; here we just prove it compiles)
+# All versions + sha256 pins come from .github/versions.env (single source of
+# truth, bumped monthly by bump.yml). Every source archive is sha256-verified
+# after download. Caching: actions/cache for source archives + ccache object
+# cache + Go build cache; ccache/eatmydata/mold cut wall-clock.
 name: Compile module
 
-# Controls when the action will run. Triggers the workflow on push or pull request
-# events but only for the master branch
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+    branches: [main, master, dev, "[0-9][0-9]-*"]
+  pull_request: {}
+  workflow_dispatch: {}
 
 permissions: {}
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  # This workflow contains a single job called "compile"
   compile:
     permissions:
       contents: read
 
-    name: Compile on ${{ matrix.os }} for nginx ${{ matrix.nginx_version }}
-    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.label }}
+    runs-on: ubuntu-24.04
     env:
-      # renovate: depName=libcoraza packageName=corazawaf/libcoraza datasource=github-releases
-      LIBCORAZA_VERSION: v1.4.0
-      # ccache object cache (compiled .o reuse across runs) — see cache step below.
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 500M
     strategy:
+      fail-fast: false
       matrix:
-        nginx_version: ['1.24.0']
-        # The type of runner that the job will run on
-        os: [ubuntu-24.04]
+        include:
+          - server: nginx
+            channel: mainline
+            label: nginx mainline (full)
+            full_tests: true
+          - server: nginx
+            channel: stable
+            label: nginx stable (full)
+            full_tests: true
+          - server: angie
+            channel: angie
+            label: Angie (build-only)
+            full_tests: false
 
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      - name: "Checkout repo"
+      - name: Checkout repo
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      # Grab nginx source, from cache if possible, or from web
-      - name: Grab nginx-${{ matrix.nginx_version }} cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: cache-nginx
         with:
-          path: nginx-${{ matrix.nginx_version }}
-          key: nginx-${{ matrix.nginx_version }}
-      - name: Download nginx
-        if: steps.cache-nginx.outputs.cache-hit != 'true'
-        run: |
-          cd ${{ github.workspace }}
-          wget https://nginx.org/download/nginx-${{ matrix.nginx_version }}.tar.gz
-          tar -xzvf nginx-${{ matrix.nginx_version }}.tar.gz
+          persist-credentials: false
 
-      # Grab libcoraza
-      - name: Grab libcoraza-${{ env.LIBCORAZA_VERSION }} cache
+      - name: Load version pins
+        run: bash .github/scripts/load-versions.sh
+
+      # Resolve this cell's server version + sha + download URL from the pins.
+      - name: Resolve source coordinates
+        run: |
+          set -euo pipefail
+          case "${{ matrix.channel }}" in
+            mainline)
+              echo "SRC_VER=$NGINX_MAINLINE" >> "$GITHUB_ENV"
+              echo "SRC_SHA=$NGINX_MAINLINE_SHA256" >> "$GITHUB_ENV"
+              echo "SRC_URL=https://nginx.org/download/nginx-${NGINX_MAINLINE}.tar.gz" >> "$GITHUB_ENV"
+              echo "SRC_DIR=nginx-${NGINX_MAINLINE}" >> "$GITHUB_ENV"
+              ;;
+            stable)
+              echo "SRC_VER=$NGINX_STABLE" >> "$GITHUB_ENV"
+              echo "SRC_SHA=$NGINX_STABLE_SHA256" >> "$GITHUB_ENV"
+              echo "SRC_URL=https://nginx.org/download/nginx-${NGINX_STABLE}.tar.gz" >> "$GITHUB_ENV"
+              echo "SRC_DIR=nginx-${NGINX_STABLE}" >> "$GITHUB_ENV"
+              ;;
+            angie)
+              echo "SRC_VER=$ANGIE_VERSION" >> "$GITHUB_ENV"
+              echo "SRC_SHA=$ANGIE_SHA256" >> "$GITHUB_ENV"
+              echo "SRC_URL=https://github.com/webserver-llc/angie/archive/refs/tags/${ANGIE_VERSION}.tar.gz" >> "$GITHUB_ENV"
+              echo "SRC_DIR=angie" >> "$GITHUB_ENV"
+              ;;
+          esac
+
+      # ---- caches ----------------------------------------------------------
+      - name: Source archive cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: cache-libcoraza
         with:
-          path: libcoraza-*
-          key: libcoraza-${{ env.LIBCORAZA_VERSION }}
-      - name: Download libcoraza
-        if: steps.cache-libcoraza.outputs.cache-hit != 'true'
-        run: |
-          cd ${{ github.workspace }}
-          wget https://github.com/corazawaf/libcoraza/archive/refs/tags/${{ env.LIBCORAZA_VERSION }}.zip
-          unzip -o ${{ env.LIBCORAZA_VERSION }}.zip
-
-      # ccache object cache: reuse compiled .o across runs (keyed per nginx
-      # version, restore-fallback to the newest prior cache).
+          path: ${{ github.workspace }}/src.tar.gz
+          key: src-${{ matrix.server }}-${{ env.SRC_VER }}-${{ hashFiles('.github/versions.env') }}
+      - name: libcoraza archive cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/libcoraza.zip
+          key: libcoraza-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
       - name: ccache cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-build-${{ matrix.os }}-nginx${{ matrix.nginx_version }}-${{ github.sha }}
+          key: ccache-build-${{ matrix.channel }}-${{ github.sha }}
           restore-keys: |
-            ccache-build-${{ matrix.os }}-nginx${{ matrix.nginx_version }}-
-            ccache-build-${{ matrix.os }}-
-
-      # Go build/module cache for the cgo libcoraza build.
+            ccache-build-${{ matrix.channel }}-
       - name: Go build cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: gobuild-build-${{ matrix.os }}-${{ env.LIBCORAZA_VERSION }}
+          key: gobuild-build-${{ env.LIBCORAZA_VERSION }}
           restore-keys: |
-            gobuild-build-${{ matrix.os }}-
+            gobuild-build-
 
-      # Grab prebuilts from apt
-      - name: Install dependencies with apt
+      - name: Install dependencies
         run: |
-          sudo add-apt-repository universe
           sudo apt-get -qq update
-          sudo apt-get -y -qq \
-          --fix-missing --no-install-recommends install \
-          gcc make ccache eatmydata
+          sudo apt-get -y -qq --no-install-recommends install \
+            gcc make ccache eatmydata mold
           # Route gcc/cc through ccache for every later step.
           echo /usr/lib/ccache >> "$GITHUB_PATH"
 
@@ -103,26 +124,38 @@ jobs:
         with:
           go-version: ^1.25.x
 
-      # Build libcoraza (installs to /usr/local/lib; ldconfig registers it —
-      # no LD_LIBRARY_PATH/C_INCLUDE_PATH exports needed, cf. ci-fast).
-      - name: Build libcoraza
+      - name: Fetch + verify server source
         run: |
+          bash .github/scripts/fetch-verify.sh "$SRC_URL" "$SRC_SHA" src.tar.gz
+          tar -xzf src.tar.gz
+          # Angie's tag tarball unpacks to angie-Angie-<ver>/ — normalise to $SRC_DIR.
+          if [ "${{ matrix.server }}" = "angie" ]; then
+            d="$(find . -maxdepth 1 -type d -name 'angie-*' | head -1)"
+            [ -n "$d" ] && mv "$d" "$SRC_DIR"
+          fi
+
+      - name: Fetch + verify + build libcoraza
+        run: |
+          set -euo pipefail
+          bash .github/scripts/fetch-verify.sh \
+            "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip" \
+            "$LIBCORAZA_SHA256" libcoraza.zip
+          unzip -oq libcoraza.zip
           cd libcoraza-*
           ./build.sh
           ./configure
-          eatmydata make
+          eatmydata make -j"$(nproc)"
           sudo eatmydata make install
           sudo ldconfig
 
-
       - name: Configure compilation of dynamic module
         run: |
-          cd ${{ github.workspace }}/nginx-${{ matrix.nginx_version }}
+          cd "${{ github.workspace }}/$SRC_DIR"
           ./configure \
           --with-compat \
           --add-dynamic-module=${{ github.workspace }}/ \
           --with-cc-opt='-g -O2 -fstack-protector-strong -Wformat -Werror=format-security -Wno-unused-function -fPIC -Wdate-time -D_FORTIFY_SOURCE=2' \
-          --with-ld-opt='-Wl,-Bsymbolic-functions -Wl,-z,relro -Wl,-z,now -fPIC' \
+          --with-ld-opt='-fuse-ld=mold -Wl,-Bsymbolic-functions -Wl,-z,relro -Wl,-z,now -fPIC' \
           --prefix=/etc/nginx \
           --sbin-path=/usr/sbin/nginx \
           --conf-path=/etc/nginx/nginx.conf \
@@ -144,14 +177,16 @@ jobs:
           --with-http_v2_module \
           --with-http_sub_module
 
-      - name: Compile dynamic module and install nginx
+      - name: Compile dynamic module and install
         run: |
-          cd ${{ github.workspace }}/nginx-${{ matrix.nginx_version }}
-          eatmydata make modules
-          eatmydata make
+          cd "${{ github.workspace }}/$SRC_DIR"
+          eatmydata make -j"$(nproc)" modules
+          eatmydata make -j"$(nproc)"
           sudo eatmydata make install
 
-      - name: Run tests
+      # ---- full test suite: nginx cells only -------------------------------
+      - name: Run prove tests
+        if: matrix.full_tests
         run: |
           curl -sSL https://github.com/nginx/nginx-tests/archive/refs/heads/master.zip -o nginx-tests.zip
           unzip nginx-tests.zip
@@ -162,27 +197,27 @@ jobs:
           prove coraza*.t
 
       - name: Install go-ftw
-        run: |
-          # renovate: depName=coreruleset/go-ftw datasource=github-releases
-          go install github.com/coreruleset/go-ftw/v2@v2.1.0
+        if: matrix.full_tests
+        run: go install "github.com/coreruleset/go-ftw/v2@${GO_FTW_VERSION}"
 
       - name: Setup CRS and run go-ftw tests
+        if: matrix.full_tests
         run: |
+          set -euo pipefail
           # Create directories owned by runner (avoids sudo for file operations)
           sudo mkdir -p /opt/coraza /var/cache/nginx/client_temp /var/log/nginx
-          sudo chown -R $(id -u):$(id -g) /opt/coraza /var/cache/nginx /var/log/nginx
+          sudo chown -R "$(id -u):$(id -g)" /opt/coraza /var/cache/nginx /var/log/nginx
           mkdir -p /opt/coraza/{owasp-crs,config,config.d,plugins,rules,rules.d,overrides} /tmp/empty
 
-          # Download and install CRS
-          # renovate: depName=coreruleset/coreruleset datasource=github-releases
-          CRS_VERSION="4.25.0"
-          curl -sSL "https://github.com/coreruleset/coreruleset/archive/refs/tags/v${CRS_VERSION}.tar.gz" -o /tmp/crs.tar.gz
+          # Download + verify CRS (LTS), pinned via versions.env.
+          bash .github/scripts/fetch-verify.sh \
+            "https://github.com/coreruleset/coreruleset/archive/refs/tags/v${CRS_VERSION}.tar.gz" \
+            "$CRS_SHA256" /tmp/crs.tar.gz
           tar xzf /tmp/crs.tar.gz -C /tmp
-          cp -r /tmp/coreruleset-${CRS_VERSION}/rules /opt/coraza/owasp-crs/
+          cp -r /tmp/coreruleset-${CRS_VERSION}/rules   /opt/coraza/owasp-crs/
           cp -r /tmp/coreruleset-${CRS_VERSION}/plugins /opt/coraza/owasp-crs/
           cp /tmp/coreruleset-${CRS_VERSION}/crs-setup.conf.example /opt/coraza/config/crs-setup.conf
 
-          # Create coraza config
           printf '%s\n' \
             'SecRuleEngine On' \
             'SecRequestBodyAccess On' \
@@ -190,7 +225,6 @@ jobs:
             'SecAuditEngine Off' \
             > /opt/coraza/config/coraza.conf
 
-          # Create rules include chain
           printf '%s\n' \
             'Include /opt/coraza/config/coraza.conf' \
             'Include /opt/coraza/config.d/*.conf' \
@@ -207,32 +241,26 @@ jobs:
             'Include /opt/coraza/overrides/*.conf' \
             > /opt/coraza/config/coraza-rules.conf
 
-          # Install nginx test config
           sudo cp tests/ftw/nginx-test.conf /etc/nginx/nginx.conf
           echo "OK" > /tmp/empty/index.html
 
-          # Start nginx (needs root for port 80) and wait for pidfile
           sudo /usr/sbin/nginx
-          for i in $(seq 1 10); do
-            if [ -f /tmp/nginx.pid ]; then break; fi
+          for _ in $(seq 1 10); do
+            [ -f /tmp/nginx.pid ] && break
             sleep 1
           done
 
-          # Run custom go-ftw tests
           printf 'testoverride:\n  input:\n    dest_addr: "127.0.0.1"\n    port: 80\n' > /tmp/.ftw.yaml
           ~/go/bin/go-ftw run --cloud --config /tmp/.ftw.yaml -d tests/ftw/
 
-          # Run full CRS regression tests
-          ~/go/bin/go-ftw run --cloud --config tests/ftw-crs.yml -d /tmp/coreruleset-${CRS_VERSION}/tests/regression/tests/ --exclude "^920"
+          ~/go/bin/go-ftw run --cloud --config tests/ftw-crs.yml \
+            -d /tmp/coreruleset-${CRS_VERSION}/tests/regression/tests/ --exclude "^920"
 
-          # Stop nginx
           sudo /usr/sbin/nginx -s stop
 
-      - name: Upload a Build Artifact
+      - name: Upload build artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          # Artifact name
-          name: nginx-coraza-module-nginx-${{ matrix.nginx_version }}-${{ matrix.os }}
-          # A file, directory or wildcard pattern that describes what to upload
+          name: coraza-module-${{ matrix.channel }}
           path: |
-            ${{ github.workspace }}/nginx-${{ matrix.nginx_version }}/objs/ngx_http_coraza_module.so
+            ${{ github.workspace }}/${{ env.SRC_DIR }}/objs/ngx_http_coraza_module.so
