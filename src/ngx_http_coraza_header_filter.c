@@ -479,11 +479,16 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * first so the library can evaluate SecResponseBodyAccess and the
      * Content-Type against SecResponseBodyMimeType.
      *
-     * With libcoraza 1.4+ the library answers this directly:
+     * The library answers this directly:
      *   - SecResponseBodyAccess Off  → 0 (no inspection needed)
      *   - Content-Type not in SecResponseBodyMimeType → 0
      *   - Otherwise → 1
-     * With older libcoraza the helper always returns 1 (conservative).
+     *
+     * coraza_is_response_body_processable is a required symbol (libcoraza
+     * >= 1.4.0, pinned in debian/control) resolved with the mandatory DL_SYM:
+     * a library that does not export it fails ngx_http_coraza_dl_open() and the
+     * worker never starts, so there is no runtime "old library" fallback here
+     * and the pointer is never NULL by the time this runs.
      */
     ctx->response_body_processable =
         ngx_http_coraza_is_response_body_processable(ctx->coraza_transaction);
