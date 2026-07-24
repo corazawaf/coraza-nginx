@@ -179,7 +179,7 @@ jobs:
           path: |
             ${{ github.workspace }}/nginx-src.tar.gz
             ${{ github.workspace }}/angie-src.tar.gz
-          key: srv-src-${{ hashFiles('.github/versions.env') }}
+          key: srv-src-${{ matrix.server }}-${{ hashFiles('.github/versions.env') }}
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -307,7 +307,7 @@ jobs:
           path: |
             ${{ github.workspace }}/nginx-src.tar.gz
             ${{ github.workspace }}/angie-src.tar.gz
-          key: srv-src-${{ hashFiles('.github/versions.env') }}
+          key: srv-src-${{ matrix.server }}-${{ hashFiles('.github/versions.env') }}
       - name: Install dependencies
         run: |
           sudo apt-get update

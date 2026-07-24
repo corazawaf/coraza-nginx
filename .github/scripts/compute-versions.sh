@@ -30,7 +30,9 @@ api() {
 # sha256 of a URL (download to scratch, hash). Fails the job on download error.
 sha_of_url() {
   local url="$1" out="$tmp/dl.$RANDOM"
-  bash "$FV" "$url" - "$out" | awk '{print $1}'
+  # fetch-verify.sh prints "downloading: URL" before the final "SHA  OUTFILE"
+  # line, so grab the first field of the LAST line only.
+  bash "$FV" "$url" - "$out" | awk 'END { print $1 }'
 }
 
 echo "resolving nginx versions from nginx.org..."
@@ -50,7 +52,8 @@ ANGIE="$(api 'https://api.github.com/repos/webserver-llc/angie/releases/latest' 
 echo "resolving OWASP CRS latest LTS..."
 # Newest release whose name contains "(LTS)".
 CRS_TAG="$(api 'https://api.github.com/repos/coreruleset/coreruleset/releases?per_page=30' \
-  | jq -r 'map(select(.name | test("\\(LTS\\)"))) | .[0].tag_name')"
+  | jq -r 'map(select(.draft | not) | select(.prerelease | not)
+             | select(.name | test("\\(LTS\\)"))) | .[0].tag_name')"
 [ -n "$CRS_TAG" ] && [ "$CRS_TAG" != "null" ] || { echo "::error::failed to resolve CRS LTS" >&2; exit 1; }
 CRS="${CRS_TAG#v}"
 

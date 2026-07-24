@@ -25,7 +25,9 @@ fi
 
 echo "downloading: $url"
 # -f: fail on HTTP errors; -S: show errors; -L: follow redirects; retries.
-curl -fSL --retry 3 --retry-delay 2 -o "$out" "$url"
+# --connect-timeout/--max-time: a stalled upstream must not hold a runner open.
+curl -fSL --retry 3 --retry-delay 2 \
+  --connect-timeout 30 --max-time 300 -o "$out" "$url"
 
 got="$(sha_of "$out")"
 if [ "$want" = "-" ]; then

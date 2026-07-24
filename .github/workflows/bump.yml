@@ -35,6 +35,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Don't leave the token wired into .git/config for later run steps;
+          # the push below authenticates explicitly via `gh auth setup-git`.
+          persist-credentials: false
 
       - name: Install tools
         run: sudo apt-get update && sudo apt-get install -y jq curl
@@ -55,6 +59,8 @@ jobs:
           fi
 
           branch="ci/bump-versions-$(date -u +%Y%m)"
+          # Re-establish git credentials (persist-credentials:false above).
+          gh auth setup-git
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$branch"

@@ -188,8 +188,12 @@ jobs:
       - name: Run prove tests
         if: matrix.full_tests
         run: |
-          curl -sSL https://github.com/nginx/nginx-tests/archive/refs/heads/master.zip -o nginx-tests.zip
-          unzip nginx-tests.zip
+          # Pinned to an immutable commit + sha256 (see versions.env), not the
+          # mutable master ref — consistent with every other fetched archive.
+          bash .github/scripts/fetch-verify.sh \
+            "https://github.com/nginx/nginx-tests/archive/${NGINX_TESTS_REF}.tar.gz" \
+            "$NGINX_TESTS_SHA256" nginx-tests.tar.gz
+          tar xzf nginx-tests.tar.gz
           cd nginx-tests-*
           cp ../t/* .
           export TEST_NGINX_BINARY=/usr/sbin/nginx
@@ -249,6 +253,12 @@ jobs:
             [ -f /tmp/nginx.pid ] && break
             sleep 1
           done
+          if [ ! -f /tmp/nginx.pid ]; then
+            echo "::error::nginx did not start (no pid after 10s)" >&2
+            sudo journalctl -xe --no-pager | tail -50 || true
+            sudo /usr/sbin/nginx -t || true
+            exit 1
+          fi
 
           printf 'testoverride:\n  input:\n    dest_addr: "127.0.0.1"\n    port: 80\n' > /tmp/.ftw.yaml
           ~/go/bin/go-ftw run --cloud --config /tmp/.ftw.yaml -d tests/ftw/
