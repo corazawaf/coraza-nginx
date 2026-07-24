@@ -271,10 +271,23 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
                     /*
                      * The cloned file buffer references the on-disk range
-                     * rather than copying it into r->pool, so it does not add
-                     * to the delayed-body memory the cap bounds -- leave
-                     * pending_bytes untouched here.
+                     * rather than copying it into r->pool, so it adds almost
+                     * no delayed-body *memory*.  But every buffer still costs a
+                     * pending_chain link, and the flush cap below is the only
+                     * thing that stops the delay on an open-ended response.  A
+                     * long-lived file-backed stream (repeated sendfile ranges,
+                     * no last_buf) would otherwise accumulate chain links in
+                     * r->pool without bound while pending_bytes stayed 0 and
+                     * the cap never tripped.  Charge the logical range so the
+                     * cap governs this path too: once past it the headers and
+                     * everything buffered so far are flushed and the remainder
+                     * streams through.  There is no cost to clean phase-4
+                     * blocking here -- body inspection is disabled for this
+                     * transaction (!response_body_processable), so the delay
+                     * is only holding headers, not enabling a body block.
                      */
+                    ctx->pending_bytes +=
+                        (size_t) (chain->buf->file_last - chain->buf->file_pos);
 
                 } else {
                     if (ngx_http_coraza_read_body_data(r, chain->buf, &data, &len)
