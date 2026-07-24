@@ -16,12 +16,9 @@ name: CI Deep
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  # renovate: depName=libcoraza packageName=corazawaf/libcoraza datasource=github-releases
-  LIBCORAZA_VERSION: v1.4.0
-  NGINX_VERSION: "1.30.3"
-  NGINX_SHA256: "e5823dc6f45610993def93ebf6cfce68264af4958c77e874b7d20f3709001b8f"
-  # renovate: depName=angie datasource=github-tags packageName=webserver-llc/angie
-  ANGIE_VERSION: Angie-1.11.8
+  # NGINX_VERSION / NGINX_VERSION_SHA256 / LIBCORAZA_VERSION / ANGIE_VERSION / ANGIE_SHA256
+  # come from .github/versions.env, loaded per job via load-versions.sh (first
+  # step). Single source of truth (bump.yml owns versions.env).
 
 on:
   schedule:
@@ -139,21 +136,25 @@ jobs:
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 500M
+    # amd64-only: valgrind memcheck/helgrind are arch-agnostic (they interpret
+    # the binary), so an arm64 cell re-runs the same analysis for ~no extra
+    # coverage while doubling deep-run minutes. arm64 *compilation* is proven
+    # by the build.yml matrix.
     strategy:
       fail-fast: false
       matrix:
         server: [nginx, angie]
-        arch: [amd64, arm64]
+        arch: [amd64]
         include:
           - arch: amd64
             runner: ubuntu-24.04
-          - arch: arm64
-            runner: ubuntu-24.04-arm
     steps:
       - name: Checkout module
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+      - name: Load version pins
+        run: bash .github/scripts/load-versions.sh
       # ccache + Go + source caches (key includes github.job so memcheck and
       # helgrind get distinct caches; both distinguished by server+arch).
       - name: ccache cache
@@ -169,22 +170,22 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: gobuild-cideep-${{ matrix.arch }}-${{ env.LIBCORAZA_VERSION }}
+          key: gobuild-cideep-${{ matrix.arch }}-${{ hashFiles('.github/versions.env') }}
           restore-keys: |
             gobuild-cideep-${{ matrix.arch }}-
       - name: Server source cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            ${{ github.workspace }}/nginx-${{ env.NGINX_VERSION }}.tar.gz
-            ${{ github.workspace }}/${{ env.ANGIE_VERSION }}.tar.gz
-          key: srv-src-${{ env.NGINX_VERSION }}-${{ env.ANGIE_VERSION }}
+            ${{ github.workspace }}/nginx-src.tar.gz
+            ${{ github.workspace }}/angie-src.tar.gz
+          key: srv-src-${{ matrix.server }}-${{ hashFiles('.github/versions.env') }}
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential curl git libpcre2-dev libssl-dev pkg-config \
-            valgrind wget zlib1g-dev unzip ccache eatmydata
+            valgrind wget zlib1g-dev unzip ccache eatmydata mold
           echo /usr/lib/ccache >> "$GITHUB_PATH"
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
@@ -212,21 +213,22 @@ jobs:
             --with-http_auth_request_module
             --add-dynamic-module="$GITHUB_WORKSPACE"
             --with-cc-opt="-DNGX_DEBUG_PALLOC=1 -g3 -O0 -fno-omit-frame-pointer -funwind-tables $(pkg-config --cflags libpcre2-8)"
-            --with-ld-opt="$(pkg-config --libs libpcre2-8)"
+            --with-ld-opt="-fuse-ld=mold $(pkg-config --libs libpcre2-8)"
           )
 
           case "${{ matrix.server }}" in
             nginx)
-              test -f "nginx-${NGINX_VERSION}.tar.gz" || wget -q -O "nginx-${NGINX_VERSION}.tar.gz" \
-                "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
-              echo "${NGINX_SHA256}  nginx-${NGINX_VERSION}.tar.gz" | sha256sum -c -
-              tar -xzf "nginx-${NGINX_VERSION}.tar.gz"
+              bash .github/scripts/fetch-verify.sh \
+                "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+                "$NGINX_VERSION_SHA256" nginx-src.tar.gz
+              tar -xzf nginx-src.tar.gz
               cd "nginx-${NGINX_VERSION}"
               ;;
             angie)
-              test -f "${ANGIE_VERSION}.tar.gz" || wget -q -O "${ANGIE_VERSION}.tar.gz" \
-                "https://github.com/webserver-llc/angie/archive/refs/tags/${ANGIE_VERSION}.tar.gz"
-              tar -xzf "${ANGIE_VERSION}.tar.gz"
+              bash .github/scripts/fetch-verify.sh \
+                "https://github.com/webserver-llc/angie/archive/refs/tags/${ANGIE_VERSION}.tar.gz" \
+                "$ANGIE_SHA256" angie-src.tar.gz
+              tar -xzf angie-src.tar.gz
               cd angie-*/
               ;;
             *)
@@ -262,21 +264,25 @@ jobs:
     name: Valgrind Helgrind soak (${{ matrix.server }}/${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 240
+    # amd64-only: valgrind memcheck/helgrind are arch-agnostic (they interpret
+    # the binary), so an arm64 cell re-runs the same analysis for ~no extra
+    # coverage while doubling deep-run minutes. arm64 *compilation* is proven
+    # by the build.yml matrix.
     strategy:
       fail-fast: false
       matrix:
         server: [nginx, angie]
-        arch: [amd64, arm64]
+        arch: [amd64]
         include:
           - arch: amd64
             runner: ubuntu-24.04
-          - arch: arm64
-            runner: ubuntu-24.04-arm
     steps:
       - name: Checkout module
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+      - name: Load version pins
+        run: bash .github/scripts/load-versions.sh
       # ccache + Go + source caches (key includes github.job so memcheck and
       # helgrind get distinct caches; both distinguished by server+arch).
       - name: ccache cache
@@ -292,22 +298,22 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: gobuild-cideep-${{ matrix.arch }}-${{ env.LIBCORAZA_VERSION }}
+          key: gobuild-cideep-${{ matrix.arch }}-${{ hashFiles('.github/versions.env') }}
           restore-keys: |
             gobuild-cideep-${{ matrix.arch }}-
       - name: Server source cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            ${{ github.workspace }}/nginx-${{ env.NGINX_VERSION }}.tar.gz
-            ${{ github.workspace }}/${{ env.ANGIE_VERSION }}.tar.gz
-          key: srv-src-${{ env.NGINX_VERSION }}-${{ env.ANGIE_VERSION }}
+            ${{ github.workspace }}/nginx-src.tar.gz
+            ${{ github.workspace }}/angie-src.tar.gz
+          key: srv-src-${{ matrix.server }}-${{ hashFiles('.github/versions.env') }}
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential curl git libpcre2-dev libssl-dev pkg-config \
-            valgrind wget zlib1g-dev unzip ccache eatmydata
+            valgrind wget zlib1g-dev unzip ccache eatmydata mold
           echo /usr/lib/ccache >> "$GITHUB_PATH"
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
@@ -335,21 +341,22 @@ jobs:
             --with-http_auth_request_module
             --add-dynamic-module="$GITHUB_WORKSPACE"
             --with-cc-opt="-DNGX_DEBUG_PALLOC=1 -g3 -O0 -fno-omit-frame-pointer -funwind-tables $(pkg-config --cflags libpcre2-8)"
-            --with-ld-opt="$(pkg-config --libs libpcre2-8)"
+            --with-ld-opt="-fuse-ld=mold $(pkg-config --libs libpcre2-8)"
           )
 
           case "${{ matrix.server }}" in
             nginx)
-              test -f "nginx-${NGINX_VERSION}.tar.gz" || wget -q -O "nginx-${NGINX_VERSION}.tar.gz" \
-                "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
-              echo "${NGINX_SHA256}  nginx-${NGINX_VERSION}.tar.gz" | sha256sum -c -
-              tar -xzf "nginx-${NGINX_VERSION}.tar.gz"
+              bash .github/scripts/fetch-verify.sh \
+                "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+                "$NGINX_VERSION_SHA256" nginx-src.tar.gz
+              tar -xzf nginx-src.tar.gz
               cd "nginx-${NGINX_VERSION}"
               ;;
             angie)
-              test -f "${ANGIE_VERSION}.tar.gz" || wget -q -O "${ANGIE_VERSION}.tar.gz" \
-                "https://github.com/webserver-llc/angie/archive/refs/tags/${ANGIE_VERSION}.tar.gz"
-              tar -xzf "${ANGIE_VERSION}.tar.gz"
+              bash .github/scripts/fetch-verify.sh \
+                "https://github.com/webserver-llc/angie/archive/refs/tags/${ANGIE_VERSION}.tar.gz" \
+                "$ANGIE_SHA256" angie-src.tar.gz
+              tar -xzf angie-src.tar.gz
               cd angie-*/
               ;;
             *)
@@ -390,24 +397,27 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      # NOTE: this job deliberately does NOT use ccache — the clang-tidy gate
-      # depends on a real `bear`-captured compile of every TU; ccache would
-      # short-circuit compilation and leave the compile DB empty/stale. Go +
-      # source caching are safe and still applied.
+      - name: Load version pins
+        run: bash .github/scripts/load-versions.sh
+      # NOTE: this job deliberately does NOT use ccache OR mold — the clang-tidy
+      # gate depends on a real `bear`-captured compile of every TU; ccache would
+      # short-circuit compilation and leave the compile DB empty/stale, and mold
+      # only touches the link step (no benefit here). Go + source caching are
+      # safe and still applied.
       - name: Go build cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: gobuild-cideep-scanners-${{ env.LIBCORAZA_VERSION }}
+          key: gobuild-cideep-scanners-${{ hashFiles('.github/versions.env') }}
           restore-keys: |
             gobuild-cideep-scanners-
       - name: nginx source cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ github.workspace }}/nginx-${{ env.NGINX_VERSION }}.tar.gz
-          key: nginx-src-${{ env.NGINX_VERSION }}
+          path: ${{ github.workspace }}/nginx-src.tar.gz
+          key: nginx-src-${{ hashFiles('.github/versions.env') }}
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -434,11 +444,10 @@ jobs:
       - name: Configure + bear-capture module compile (compile_commands.json)
         run: |
           set -euo pipefail
-          test -f "nginx-${NGINX_VERSION}.tar.gz" || \
-            wget -q -O "nginx-${NGINX_VERSION}.tar.gz" \
-              "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
-          echo "${NGINX_SHA256}  nginx-${NGINX_VERSION}.tar.gz" | sha256sum -c -
-          tar -xzf "nginx-${NGINX_VERSION}.tar.gz"
+          bash .github/scripts/fetch-verify.sh \
+            "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+            "$NGINX_VERSION_SHA256" nginx-src.tar.gz
+          tar -xzf nginx-src.tar.gz
           cd "nginx-${NGINX_VERSION}"
           CC=gcc ./configure --with-compat --with-debug \
             --add-dynamic-module="$GITHUB_WORKSPACE" >/dev/null
