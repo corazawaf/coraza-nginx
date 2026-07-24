@@ -45,15 +45,24 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     rc = ngx_str_to_char(in, &out, &pool);
 
     if (rc == NGX_OK) {
-        if (size == 0) {
-            assert(out == NULL);
-        } else {
-            assert(out != NULL);
+        /*
+         * On success the contract is the same for every length, including 0:
+         * ngx_str_to_char() allocates a.len + 1 bytes and NUL-terminates at
+         * a.len, so an empty input yields a valid pointer to "" -- never NULL.
+         * Every caller passes the result straight to the Coraza engine, where
+         * an empty C string is correct and NULL would be the actual bug, so
+         * asserting NULL-on-empty here would encode an invariant the function
+         * has never had (and does not want).
+         */
+        assert(out != NULL);
+
+        if (size > 0) {
             /* First `size` bytes copied faithfully... */
             assert(memcmp(out, data, size) == 0);
-            /* ...and NUL-terminated exactly one past the copy. */
-            assert(out[size] == '\0');
         }
+
+        /* ...and NUL-terminated exactly one past the copy. */
+        assert(out[size] == '\0');
     }
     /* NGX_ERROR is only the alloc-failure path (pool exhausted); nothing to
      * check but that we did not scribble a bogus pointer callers would use. */
