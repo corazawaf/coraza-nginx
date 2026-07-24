@@ -26,7 +26,7 @@ select STDOUT; $| = 1;
 
 my $root = "$FindBin::Bin/..";
 my $src = slurp("$root/src/ngx_http_coraza_body_filter.c");
-my $t = Test::Nginx->new()->has(qw/http/)->plan(10);
+my $t = Test::Nginx->new()->has(qw/http/)->plan(11);
 
 like($src,
     qr/!\s*ctx->response_body_processable\s*&&\s*!\s*ngx_buf_in_memory\(chain->buf\)\s*&&\s*chain->buf->in_file\s*&&\s*chain->buf->file\s*!=\s*NULL\s*&&\s*!\s*chain->buf->temp_file.*?\*b\s*=\s*\*chain->buf/s,
