@@ -158,32 +158,11 @@ jobs:
           fi
 
       - name: Fetch + verify + build libcoraza
-        run: |
-          set -euo pipefail
-          DEST="${{ github.workspace }}/libcoraza-build"
-          if [ "${{ steps.cache-libcoraza.outputs.cache-hit }}" = "true" ] && [ -f "$DEST/.built" ]; then
-            echo "libcoraza built-tree cache hit — installing only, no recompile."
-          else
-            # Cache miss: fetch (sha256-verified), build, and stage into $DEST so
-            # the cache action can persist the compiled tree for later runs.
-            bash .github/scripts/fetch-verify.sh \
-              "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip" \
-              "$LIBCORAZA_SHA256" libcoraza.zip
-            rm -rf "$DEST"
-            unzip -oq libcoraza.zip
-            # libcoraza-<ver>/ — normalise to the fixed cache path.
-            mv libcoraza-*/ "$DEST"
-            cd "$DEST"
-            ./build.sh
-            ./configure
-            eatmydata make -j"$(nproc)"
-            touch "$DEST/.built"
-            cd "${{ github.workspace }}"
-          fi
-          # make install is cheap (copy .so + headers); run on both paths so the
-          # lib lands under /usr/local regardless of cache state.
-          sudo eatmydata make -C "$DEST" install
-          sudo ldconfig
+        # Verified fetch (sha256) + build/install, single-sourced across all jobs.
+        env:
+          LIBCORAZA_CACHE_HIT: ${{ steps.cache-libcoraza.outputs.cache-hit }}
+          MAKE: eatmydata make
+        run: bash .github/scripts/build-libcoraza.sh
 
       - name: Configure compilation of dynamic module
         run: |

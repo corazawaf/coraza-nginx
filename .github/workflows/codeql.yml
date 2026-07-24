@@ -94,25 +94,11 @@ jobs:
           go-version: ^1.25.x
 
       - name: Build + install libcoraza
-        run: |
-          set -euo pipefail
-          DEST="$GITHUB_WORKSPACE/libcoraza-build"
-          if [ "${{ steps.cache-libcoraza.outputs.cache-hit }}" = "true" ] && [ -f "$DEST/.built" ]; then
-            echo "libcoraza built-tree cache hit — installing only, no recompile."
-          else
-            wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
-            rm -rf "$DEST"
-            unzip -oq "${LIBCORAZA_VERSION}.zip"
-            mv libcoraza-*/ "$DEST"
-            cd "$DEST"
-            ./build.sh
-            ./configure
-            eatmydata make -j"$(nproc)"
-            touch "$DEST/.built"
-            cd "$GITHUB_WORKSPACE"
-          fi
-          sudo eatmydata make -C "$DEST" install
-          sudo ldconfig
+        # Verified fetch (sha256) + build/install, single-sourced across all jobs.
+        env:
+          LIBCORAZA_CACHE_HIT: ${{ steps.cache-libcoraza.outputs.cache-hit }}
+          MAKE: eatmydata make
+        run: bash .github/scripts/build-libcoraza.sh
 
       # Configure the full nginx tree (needed for headers) but compile ONLY the
       # module (make modules) so CodeQL traces just the coraza connector.

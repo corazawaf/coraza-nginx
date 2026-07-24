@@ -207,22 +207,11 @@ jobs:
           path: ${{ github.workspace }}/libcoraza-build
           key: libcoraza-built-${{ matrix.arch }}-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
       - name: Build + install libcoraza
-        run: |
-          set -euo pipefail
-          DEST="$GITHUB_WORKSPACE/libcoraza-build"
-          if [ "${{ steps.cache-libcoraza.outputs.cache-hit }}" = "true" ] && [ -f "$DEST/.built" ]; then
-            echo "libcoraza built-tree cache hit — installing only, no recompile."
-          else
-            wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
-            rm -rf "$DEST"
-            unzip -oq "${LIBCORAZA_VERSION}.zip"
-            mv libcoraza-*/ "$DEST"
-            cd "$DEST"
-            ./build.sh && ./configure && eatmydata make -j"$(nproc)"
-            touch "$DEST/.built"
-            cd "$GITHUB_WORKSPACE"
-          fi
-          sudo eatmydata make -C "$DEST" install && sudo ldconfig
+        # Verified fetch (sha256) + build/install, single-sourced across all jobs.
+        env:
+          LIBCORAZA_CACHE_HIT: ${{ steps.cache-libcoraza.outputs.cache-hit }}
+          MAKE: eatmydata make
+        run: bash .github/scripts/build-libcoraza.sh
       - name: Build debug ${{ matrix.server }} + coraza module
         run: |
           set -euo pipefail
@@ -351,22 +340,11 @@ jobs:
           path: ${{ github.workspace }}/libcoraza-build
           key: libcoraza-built-${{ matrix.arch }}-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
       - name: Build + install libcoraza
-        run: |
-          set -euo pipefail
-          DEST="$GITHUB_WORKSPACE/libcoraza-build"
-          if [ "${{ steps.cache-libcoraza.outputs.cache-hit }}" = "true" ] && [ -f "$DEST/.built" ]; then
-            echo "libcoraza built-tree cache hit — installing only, no recompile."
-          else
-            wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
-            rm -rf "$DEST"
-            unzip -oq "${LIBCORAZA_VERSION}.zip"
-            mv libcoraza-*/ "$DEST"
-            cd "$DEST"
-            ./build.sh && ./configure && eatmydata make -j"$(nproc)"
-            touch "$DEST/.built"
-            cd "$GITHUB_WORKSPACE"
-          fi
-          sudo eatmydata make -C "$DEST" install && sudo ldconfig
+        # Verified fetch (sha256) + build/install, single-sourced across all jobs.
+        env:
+          LIBCORAZA_CACHE_HIT: ${{ steps.cache-libcoraza.outputs.cache-hit }}
+          MAKE: eatmydata make
+        run: bash .github/scripts/build-libcoraza.sh
       - name: Build debug ${{ matrix.server }} + coraza module
         run: |
           set -euo pipefail
@@ -467,20 +445,23 @@ jobs:
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: ^1.25.x
+      # Share the same built-tree cache key as every other libcoraza job so a warm
+      # run skips the cgo compile here too (was previously an uncached bare wget).
+      - name: libcoraza built-tree cache
+        id: cache-libcoraza
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/libcoraza-build
+          key: libcoraza-built-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
       # Real compile DB requires libcoraza's coraza.h + a genuine module compile.
-      # Build+install libcoraza (same recipe as build.yml), then bear-wrap
+      # Build+install libcoraza (verified fetch, shared script), then bear-wrap
       # `make modules` so clang-tidy sees the ACTUAL translation units.
-      - name: Build libcoraza (provides coraza.h)
-        run: |
-          set -euo pipefail
-          wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
-          unzip -qo "${LIBCORAZA_VERSION}.zip"
-          cd libcoraza-*
-          ./build.sh
-          ./configure
-          eatmydata make
-          sudo eatmydata make install
-          sudo ldconfig
+      - name: Build + install libcoraza (provides coraza.h)
+        # Verified fetch (sha256) + build/install, single-sourced across all jobs.
+        env:
+          LIBCORAZA_CACHE_HIT: ${{ steps.cache-libcoraza.outputs.cache-hit }}
+          MAKE: eatmydata make
+        run: bash .github/scripts/build-libcoraza.sh
       - name: Configure + bear-capture module compile (compile_commands.json)
         run: |
           set -euo pipefail
@@ -573,25 +554,11 @@ jobs:
           path: ${{ github.workspace }}/libcoraza-build
           key: libcoraza-built-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
       - name: Build + install libcoraza
-        run: |
-          set -euo pipefail
-          DEST="$GITHUB_WORKSPACE/libcoraza-build"
-          if [ "${{ steps.cache-libcoraza.outputs.cache-hit }}" = "true" ] && [ -f "$DEST/.built" ]; then
-            echo "libcoraza built-tree cache hit — installing only, no recompile."
-          else
-            wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
-            rm -rf "$DEST"
-            unzip -oq "${LIBCORAZA_VERSION}.zip"
-            mv libcoraza-*/ "$DEST"
-            cd "$DEST"
-            ./build.sh
-            ./configure
-            eatmydata make -j"$(nproc)"
-            touch "$DEST/.built"
-            cd "$GITHUB_WORKSPACE"
-          fi
-          sudo eatmydata make -C "$DEST" install
-          sudo ldconfig
+        # Verified fetch (sha256) + build/install, single-sourced across all jobs.
+        env:
+          LIBCORAZA_CACHE_HIT: ${{ steps.cache-libcoraza.outputs.cache-hit }}
+          MAKE: eatmydata make
+        run: bash .github/scripts/build-libcoraza.sh
 
       - name: Fetch + configure nginx, build module (traced)
         run: |
@@ -675,25 +642,11 @@ jobs:
           path: ${{ github.workspace }}/libcoraza-build
           key: libcoraza-built-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
       - name: Build + install libcoraza
-        run: |
-          set -euo pipefail
-          DEST="$GITHUB_WORKSPACE/libcoraza-build"
-          if [ "${{ steps.cache-libcoraza.outputs.cache-hit }}" = "true" ] && [ -f "$DEST/.built" ]; then
-            echo "libcoraza built-tree cache hit — installing only, no recompile."
-          else
-            wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
-            rm -rf "$DEST"
-            unzip -oq "${LIBCORAZA_VERSION}.zip"
-            mv libcoraza-*/ "$DEST"
-            cd "$DEST"
-            ./build.sh
-            ./configure
-            eatmydata make -j"$(nproc)"
-            touch "$DEST/.built"
-            cd "$GITHUB_WORKSPACE"
-          fi
-          sudo eatmydata make -C "$DEST" install
-          sudo ldconfig
+        # Verified fetch (sha256) + build/install, single-sourced across all jobs.
+        env:
+          LIBCORAZA_CACHE_HIT: ${{ steps.cache-libcoraza.outputs.cache-hit }}
+          MAKE: eatmydata make
+        run: bash .github/scripts/build-libcoraza.sh
 
       - name: Build ASan/UBSan nginx + coraza module
         run: |
