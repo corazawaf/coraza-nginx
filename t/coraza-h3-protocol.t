@@ -115,7 +115,7 @@ $t->run();
 
 is(get_status('/h3'), 403,
 	'HTTP/3 request is reported to the WAF as HTTP/3.0');
-isnt(get_status('/h1'), 401,
+is(get_status('/h1'), 200,
 	'HTTP/3 request is not reported to the WAF as HTTP/1.0');
 is(get_status('/none'), 200,
 	'no protocol rule matches, request is served');
