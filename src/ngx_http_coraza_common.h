@@ -151,13 +151,15 @@ typedef struct {
  *     a negative return is an engine error -> error iff ret < 0.
  *   - libcoraza < 1.6 has no enum and no interruption return from these calls:
  *     they return 1 on error, 0 on success -> error iff ret != 0.
- * CORAZA_INTERRUPTION is defined only by the >= 1.6 header, so its presence
- * selects the contract.
+ * CORAZA_INTERRUPTION is an enum *member*, not a #define, so it is invisible to
+ * the preprocessor and cannot be tested with #ifdef.  The addon `config` script
+ * greps the installed coraza.h and defines CORAZA_HAS_RESULT_ENUM when the enum
+ * is present; that macro selects the contract here.
  */
 static ngx_inline ngx_int_t
 ngx_http_coraza_process_body_failed(int ret)
 {
-#ifdef CORAZA_INTERRUPTION
+#ifdef CORAZA_HAS_RESULT_ENUM
     return ret < 0;
 #else
     return ret != 0;

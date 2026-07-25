@@ -9,6 +9,35 @@
 # path of libyajl.so's installation
 
 ngx_addon_name="ngx_http_coraza_module"
+
+# Detect the libcoraza result-code contract at build time.
+#
+# libcoraza >= 1.6 ships `typedef enum coraza_result_t { CORAZA_ERROR = -1,
+# CORAZA_OK = 0, CORAZA_INTERRUPTION = 1 }`.  On that contract the body-phase
+# process calls return -1 on engine error and 1 on interruption, so "failed"
+# means `ret < 0`.  Older libcoraza has no such enum and returns 1 on error,
+# 0 on success, so "failed" means `ret != 0`.
+#
+# CORAZA_INTERRUPTION is an *enum member*, not a #define, so it is invisible to
+# the preprocessor and cannot be tested with `#ifdef` in the C sources.  Grep
+# the installed header here and pass -DCORAZA_HAS_RESULT_ENUM so the connector
+# can select the correct contract.  ngx_http_coraza_process_body_failed() reads
+# this macro.
+coraza_result_hdr=""
+for _d in /usr/local/include /usr/include; do
+    if test -f "$_d/coraza/coraza.h"; then
+        coraza_result_hdr="$_d/coraza/coraza.h"
+        break
+    fi
+done
+if test -n "$coraza_result_hdr" \
+    && grep -q 'CORAZA_INTERRUPTION' "$coraza_result_hdr"; then
+    echo " + libcoraza result enum found ($coraza_result_hdr): CORAZA_HAS_RESULT_ENUM"
+    CFLAGS="$CFLAGS -DCORAZA_HAS_RESULT_ENUM=1"
+else
+    echo " + libcoraza result enum NOT found: using legacy ret!=0 contract"
+fi
+
 coraza_dependency="ngx_http_postpone_filter_module \
                    ngx_http_ssi_filter_module \
                    ngx_http_charset_filter_module \
