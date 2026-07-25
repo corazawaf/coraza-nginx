@@ -217,6 +217,8 @@ ngx_http_coraza_create_ctx(ngx_http_request_t *r)
 	if (cln == NULL)
 	{
 		dd("failed to create the CORAZA context cleanup");
+		(void) coraza_free_transaction(ctx->coraza_transaction);
+		ctx->coraza_transaction = 0;
 		return NULL;
 	}
 	cln->handler = ngx_http_coraza_cleanup;
