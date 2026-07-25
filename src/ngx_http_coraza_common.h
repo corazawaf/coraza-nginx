@@ -137,6 +137,34 @@ typedef struct {
 #endif
 
 
+/*
+ * coraza_process_request_body() / coraza_process_response_body() can fail to
+ * evaluate the phase at all (the Go engine returned an error, e.g. it could not
+ * parse the buffered body).  On such a failure NO interruption is recorded on
+ * the transaction, so the coraza_intervention() poll that follows returns
+ * nothing and the body phase is silently skipped while nginx still forwards the
+ * body -- a fail-open inspection bypass.  We must fail closed on that error.
+ *
+ * The error sentinel differs across libcoraza versions, so gate on the enum:
+ *   - libcoraza >= 1.6 ships coraza_result_t: CORAZA_OK(0), CORAZA_INTERRUPTION(1),
+ *     CORAZA_ERROR(-1).  Here 1 means "interrupted" (the poll handles it) and only
+ *     a negative return is an engine error -> error iff ret < 0.
+ *   - libcoraza < 1.6 has no enum and no interruption return from these calls:
+ *     they return 1 on error, 0 on success -> error iff ret != 0.
+ * CORAZA_INTERRUPTION is defined only by the >= 1.6 header, so its presence
+ * selects the contract.
+ */
+static ngx_inline ngx_int_t
+ngx_http_coraza_process_body_failed(int ret)
+{
+#ifdef CORAZA_INTERRUPTION
+    return ret < 0;
+#else
+    return ret != 0;
+#endif
+}
+
+
 extern ngx_module_t ngx_http_coraza_module;
 
 /* ngx_http_coraza_module.c */

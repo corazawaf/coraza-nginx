@@ -197,7 +197,24 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         if (is_request_processed) {
             int ret;
 
-            coraza_process_response_body(ctx->coraza_transaction);
+            if (ngx_http_coraza_process_body_failed(
+                    coraza_process_response_body(ctx->coraza_transaction)))
+            {
+                /*
+                 * Phase 4 could not be evaluated; no interruption is set, so
+                 * the poll below would let the response through uninspected.
+                 * Fail closed exactly like the poll-error branch does.
+                 */
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                    "coraza: response body phase processing failed");
+                if (ctx->headers_delayed) {
+                    ctx->intervention_triggered = 1;
+                    ctx->headers_delayed = 0;
+                    return NGX_HTTP_INTERNAL_SERVER_ERROR;
+                }
+                return ngx_http_filter_finalize_request(r,
+                    &ngx_http_coraza_module, NGX_HTTP_INTERNAL_SERVER_ERROR);
+            }
 
             ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
             if (ret > 0) {
