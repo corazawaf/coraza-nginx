@@ -142,14 +142,19 @@ like($benign, qr!^HTTP/\S+ 200!,
 # the symbols vanish — we branch: assert "yes" when the capability is present,
 # and SKIP explicitly (never silently pass) when it is absent.
 my $log = $t->read_file('error.log');
-like($log, qr/coraza: \S+ loaded via dynlib_open \(bulk headers: (yes|no)\)/,
-    'connector logs its bulk-header capability at load time');
 
-if ($log =~ /bulk headers: yes/) {
+# Gate on the actual capability. A blanket "(yes|no)" match can never fail, so
+# it would let the bulk path go silently untested if the symbols ever vanished.
+# Instead: assert "yes" (the assertions above really exercised the bulk path)
+# when present, and SKIP explicitly — never silently pass — when absent (e.g.
+# the libcoraza v1.4.0 the fallback CI job pins).
+if ($log =~ /coraza: \S+ loaded via dynlib_open \(bulk headers: yes\)/) {
     pass('bulk-header symbols resolved: the assertions above exercised the bulk path');
-} else {
+} elsif ($log =~ /coraza: \S+ loaded via dynlib_open \(bulk headers: no\)/) {
     SKIP: {
         skip('running libcoraza < 1.6 (no bulk symbols); assertions above ran '
              . 'via the per-header fallback, bulk path not exercised', 1);
     }
+} else {
+    fail('connector did not log its bulk-header capability at load time');
 }
