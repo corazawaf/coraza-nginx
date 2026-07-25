@@ -25,10 +25,16 @@ use Test::Nginx;
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->plan(2);
+my $t = Test::Nginx->new();
 
 my $nginx = defined $ENV{TEST_NGINX_BINARY} ? $ENV{TEST_NGINX_BINARY} : 'nginx';
 
+# The object's own nginx.conf is VALID and is actually started: this creates
+# error.log and the prefix layout Test::Nginx's teardown expects, so the run
+# tears down cleanly.  The arity check below runs `nginx -t` against a SEPARATE
+# hand-written conf -- an invalid conf that never starts, so it must NOT be the
+# object's conf (Test::Nginx would try to run it and its teardown would then
+# fail to open error.log, exit 255 with the asserts already passed).
 $t->write_file_expand('nginx.conf', <<'EOF');
 
 %%TEST_GLOBALS%%
@@ -41,8 +47,7 @@ events {
 http {
     %%TEST_GLOBALS_HTTP%%
 
-    # Two arguments where exactly one is allowed.
-    coraza_transaction_id "tid-A" "tid-B";
+    coraza_transaction_id "tid-A";
 
     server {
         listen       127.0.0.1:8080;
@@ -56,11 +61,33 @@ http {
 
 EOF
 
-# Config-test the written nginx.conf directly and capture the diagnostics.
-# The arity error is emitted during config parse, before the error_log file
-# is opened, so it lands on stderr -- capture combined output.
+$t->run();
+$t->plan(2);
+
 my $testdir = $t->testdir();
-my $out = `$nginx -t -p $testdir/ -c nginx.conf 2>&1`;
+
+# A second conf with two arguments where exactly one is allowed.  Expand
+# %%TEST_GLOBALS%% so the coraza module is load_module'd -- otherwise nginx
+# reports "unknown directive" instead of the arity error we assert on.
+$t->write_file_expand('bad.conf', <<'EOF');
+
+%%TEST_GLOBALS%%
+
+daemon off;
+
+events {
+}
+
+http {
+    # Two arguments where exactly one is allowed.
+    coraza_transaction_id "tid-A" "tid-B";
+}
+
+EOF
+
+# Config-test the bad conf and capture the diagnostics.  The arity error is
+# emitted during config parse and lands on stderr -- capture combined output.
+my $out = `$nginx -t -p $testdir/ -c bad.conf 2>&1`;
 my $rc = $?;
 
 isnt($rc, 0, 'nginx rejects two-argument coraza_transaction_id');
