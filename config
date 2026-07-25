@@ -19,22 +19,24 @@ ngx_addon_name="ngx_http_coraza_module"
 # 0 on success, so "failed" means `ret != 0`.
 #
 # CORAZA_INTERRUPTION is an *enum member*, not a #define, so it is invisible to
-# the preprocessor and cannot be tested with `#ifdef` in the C sources.  Grep
-# the installed header here and pass -DCORAZA_HAS_RESULT_ENUM so the connector
-# can select the correct contract.  ngx_http_coraza_process_body_failed() reads
-# this macro.
-coraza_result_hdr=""
-for _d in /usr/local/include /usr/include; do
-    if test -f "$_d/coraza/coraza.h"; then
-        coraza_result_hdr="$_d/coraza/coraza.h"
-        break
-    fi
-done
-if test -n "$coraza_result_hdr" \
-    && grep -q 'CORAZA_INTERRUPTION' "$coraza_result_hdr"; then
-    echo " + libcoraza result enum found ($coraza_result_hdr): CORAZA_HAS_RESULT_ENUM"
-    CFLAGS="$CFLAGS -DCORAZA_HAS_RESULT_ENUM=1"
-else
+# the preprocessor and cannot be tested with `#ifdef` in the C sources.  Detect
+# the enum with a real compile probe (nginx's auto/feature) so the check uses the
+# *same* compiler and include flags the module is built with — a fixed-path grep
+# of /usr/local/include and /usr/include would miss a coraza.h supplied via
+# --with-cc-opt=-I<dir>, leave CORAZA_HAS_RESULT_ENUM undefined, and wrongly apply
+# the legacy `ret != 0` contract (treating CORAZA_INTERRUPTION == 1 as a fatal
+# error → spurious HTTP 500).  On success -DCORAZA_HAS_RESULT_ENUM is passed to
+# the connector; ngx_http_coraza_process_body_failed() reads this macro.
+ngx_feature="libcoraza result enum (CORAZA_INTERRUPTION)"
+ngx_feature_name="CORAZA_HAS_RESULT_ENUM"
+ngx_feature_run=no
+ngx_feature_incs="#include <coraza/coraza.h>"
+ngx_feature_path=
+ngx_feature_libs=
+ngx_feature_test="int r = (int) CORAZA_INTERRUPTION; (void) r;"
+. auto/feature
+
+if test $ngx_found != yes; then
     echo " + libcoraza result enum NOT found: using legacy ret!=0 contract"
 fi
 
