@@ -66,8 +66,12 @@ http {
         # The error-page target is also coraza-on, so the internal request
         # re-runs the connector phases with r->error_page / intervention set.
         location /denied {
+            # A phase-1 deny that WOULD fire (status 418) if the internal
+            # error-page request were re-inspected. Because re-entry returns
+            # NGX_DECLINED, this rule must never run and the 403 below stands.
             coraza_rules '
                 SecRuleEngine On
+                SecRule REQUEST_URI "@streq /denied" "id:501,phase:1,deny,log,status:418"
             ';
             return 403 "denied by coraza\n";
         }
@@ -77,7 +81,7 @@ EOF
 
 $t->run();
 $t->todo_alerts();
-$t->plan(3);
+$t->plan(4);
 
 ###############################################################################
 
@@ -86,6 +90,10 @@ $t->plan(3);
 my $r = http_get('/trigger?x=boom');
 like($r, qr/^HTTP\S+ 403/, 'coraza denial served through the error_page handler');
 like($r, qr/denied by coraza/, 'error_page handler body delivered on re-entry');
+
+# Re-inspection would have rewritten the status to 418; proving it stayed 403
+# proves the error-page re-entry skipped phase-1 inspection (NGX_DECLINED).
+unlike($r, qr/^HTTP\S+ 418/, 'error-page re-entry did not re-inspect (no 418)');
 
 # Control: a clean request is not denied and never triggers the error page.
 like(http_get('/trigger?x=safe'), qr/^HTTP\S+ 200/,

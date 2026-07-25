@@ -49,7 +49,7 @@ http {
     ';
 
     server {
-        listen       127.0.0.1:8080;
+        listen       127.0.0.1:%%PORT_8080%%;
         server_name  localhost;
         default_type text/plain;
 
