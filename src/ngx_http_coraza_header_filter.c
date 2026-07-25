@@ -663,26 +663,6 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     }
 
     /*
-     * Proxies will not like this... but it is necessary to unset
-     * the content length in order to manipulate the content of
-     * response body in Coraza.
-     *
-     * This header may arrive at the client before Coraza had
-     * a change to make any modification. That is why it is necessary
-     * to set this to -1 here.
-     *
-     * We need to have some kind of flag the decide if Coraza
-     * will make a modification or not. If not, keep the content and
-     * make the proxy servers happy.
-     *
-     */
-
-    /*
-     * The line below is intentionally not executed to keep the spdy test
-     * working.
-     */
-
-    /*
      * Delay forwarding response headers until the body filter has finished
      * processing phase 4 (response body inspection).  This ensures that if
      * a phase-4 rule denies the request we can still return a clean error
