@@ -120,6 +120,9 @@ static dynlib_t dl_handle;
 #define DL_SYM_OPT(ptr, name)                                           \
     do {                                                                \
         *(void **)(&ptr) = dynlib_sym(dl_handle, #name);               \
+        if (ptr == NULL) {                                             \
+            (void) dynlib_error();  /* consume: absence is not fatal */ \
+        }                                                              \
     } while (0)
 
 
@@ -365,12 +368,18 @@ ngx_http_coraza_is_response_body_processable(coraza_transaction_t t)
 int coraza_add_request_headers(coraza_transaction_t t, char *packed,
                                int packed_len, int count)
 {
+    if (dl_add_request_headers == NULL) {
+        return -1;
+    }
     return dl_add_request_headers(t, packed, packed_len, count);
 }
 
 int coraza_add_response_headers(coraza_transaction_t t, char *packed,
                                 int packed_len, int count)
 {
+    if (dl_add_response_headers == NULL) {
+        return -1;
+    }
     return dl_add_response_headers(t, packed, packed_len, count);
 }
 

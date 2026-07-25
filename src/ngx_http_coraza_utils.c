@@ -40,7 +40,7 @@ ngx_str_to_char(ngx_str_t a, char **str, ngx_pool_t *p)
  *     [u16 name_len BE][name bytes][u32 value_len BE][value bytes]  x count
  *
  * The buffer is allocated from r->pool.  On success *out / *out_len describe
- * the packed bytes and *out_count the number of pairs; the caller passes them
+ * the packed bytes; the caller passes them, together with its own pair count,
  * straight to the bulk cgo entry point.
  *
  * Fails closed (NGX_ERROR) on any pair whose name exceeds the u16 range or

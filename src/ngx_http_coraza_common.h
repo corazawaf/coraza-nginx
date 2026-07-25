@@ -202,8 +202,7 @@ ngx_int_t ngx_http_coraza_dl_open(ngx_log_t *log);
 void ngx_http_coraza_dl_close(ngx_log_t *log);
 int ngx_http_coraza_is_response_body_processable(coraza_transaction_t t);
 /* Bulk header entry points (libcoraza 1.6+); guard every call with
- * ngx_http_coraza_bulk_headers_available(). */
-int ngx_http_coraza_bulk_headers_available(void);
+ * ngx_http_coraza_bulk_headers_available() (forward-declared above). */
 /* NOTE: `packed` is non-const to match libcoraza's SWIG-generated 1.6 header
  * (which declares `char *packed`); a `const char *` here trips -Werror
  * conflicting-types when the connector is built against the real 1.6 header. */
