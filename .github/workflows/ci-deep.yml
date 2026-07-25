@@ -486,3 +486,94 @@ jobs:
             ${{ github.workspace }}/semgrep.log
             ${{ github.workspace }}/compile_commands.json
           retention-days: 14
+
+  # Out-of-band fallback gate. build.yml/ci-fast pin libcoraza >=1.6 so the perf
+  # hot-path (bulk-header submit, OK-path intervention poll) is exercised; that
+  # leaves the pre-1.6 per-header fallback path (dlsym-resolved in
+  # ngx_http_coraza_dl.c) uncovered on PR CI. This job builds against v1.4.0 so
+  # the connector links WITHOUT the bulk symbols and the whole prove suite runs
+  # through the fallback branch, catching fallback regressions monthly.
+  fallback:
+    name: Pre-1.6 fallback suite (libcoraza v1.4.0)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      # renovate: depName=libcoraza packageName=corazawaf/libcoraza datasource=github-releases
+      # Pinned to 1.4.0 ON PURPOSE — this job's job is to exercise the pre-1.6
+      # per-header fallback, so it must NOT track the 1.6 floor the others use.
+      FALLBACK_LIBCORAZA_VERSION: v1.4.0
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 300M
+    steps:
+      - name: Checkout module
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: ccache cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-cideep-fallback-${{ github.sha }}
+          restore-keys: |
+            ccache-cideep-fallback-
+      - name: Go build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: gobuild-cideep-fallback-${{ env.FALLBACK_LIBCORAZA_VERSION }}
+          restore-keys: |
+            gobuild-cideep-fallback-
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential curl git libpcre2-dev libssl-dev pkg-config \
+            wget zlib1g-dev unzip ccache eatmydata autoconf automake libtool
+          echo /usr/lib/ccache >> "$GITHUB_PATH"
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: ^1.25.x
+      - name: Build + install libcoraza v1.4.0
+        run: |
+          set -euo pipefail
+          wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${FALLBACK_LIBCORAZA_VERSION}.zip"
+          unzip -oq "${FALLBACK_LIBCORAZA_VERSION}.zip"
+          cd libcoraza-*
+          ./build.sh && ./configure && eatmydata make -j"$(nproc)"
+          sudo eatmydata make install && sudo ldconfig
+      - name: Build module + nginx against v1.4.0
+        run: |
+          set -euo pipefail
+          test -f "nginx-${NGINX_VERSION}.tar.gz" || wget -q -O "nginx-${NGINX_VERSION}.tar.gz" \
+            "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
+          echo "${NGINX_SHA256}  nginx-${NGINX_VERSION}.tar.gz" | sha256sum -c -
+          tar -xzf "nginx-${NGINX_VERSION}.tar.gz"
+          cd "nginx-${NGINX_VERSION}"
+          ./configure \
+            --with-compat \
+            --add-dynamic-module="$GITHUB_WORKSPACE" \
+            --prefix=/etc/nginx \
+            --sbin-path=/usr/sbin/nginx \
+            --modules-path=/usr/lib/nginx/modules \
+            --http-log-path=/var/log/nginx/access.log \
+            --error-log-path=/var/log/nginx/error.log \
+            --pid-path=/run/nginx.pid \
+            --with-debug --with-threads \
+            --with-http_ssl_module --with-http_v2_module \
+            --with-http_realip_module --with-http_auth_request_module
+          eatmydata make -j"$(nproc)" modules
+          eatmydata make -j"$(nproc)"
+          sudo eatmydata make install
+      - name: Run prove suite through the fallback path
+        run: |
+          set -euo pipefail
+          curl -sSL https://github.com/nginx/nginx-tests/archive/refs/heads/master.zip -o nginx-tests.zip
+          unzip -q nginx-tests.zip
+          cd nginx-tests-*
+          cp ../t/* .
+          export TEST_NGINX_BINARY=/usr/sbin/nginx
+          export TEST_NGINX_GLOBALS="load_module \"/usr/lib/nginx/modules/ngx_http_coraza_module.so\";"
+          prove coraza*.t

@@ -25,7 +25,8 @@ jobs:
       # 1.6.0 is the floor the connector's perf path needs: the bulk-header submit
       # symbols and the OK-path intervention-poll gating only exist on >=1.6, so a
       # 1.4.x gate compiles/tests only the fallback. The per-header fallback code is
-      # retained for older prod runtimes but is exercised out-of-band, not here.
+      # retained for older prod runtimes and exercised out-of-band by the monthly
+      # `fallback` job in ci-deep.yml (builds against libcoraza v1.4.0), not here.
       LIBCORAZA_VERSION: v1.6.0
       # ccache object cache (compiled .o reuse across runs) — see cache step below.
       CCACHE_DIR: ${{ github.workspace }}/.ccache
