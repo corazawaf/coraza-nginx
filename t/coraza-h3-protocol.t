@@ -78,14 +78,16 @@ http {
         # Response side: the header filter reports the response protocol to
         # the WAF from r->http_version.  Before the fix it keyed on r->stream
         # (HTTP/2 only), so an HTTP/3 response was reported as HTTP/1.1 and a
-        # phase-5 RESPONSE_PROTOCOL rule never fired.  Deny on HTTP/3.0 proves
-        # the response-side mapping.
+        # RESPONSE_PROTOCOL rule never matched HTTP/3.0.  RESPONSE_PROTOCOL is
+        # a phase-3 (response-headers) variable and the connector applies
+        # response intervention in the header filter, so deny on HTTP/3.0 at
+        # phase:3 proves the response-side mapping.
         location /resp {
             coraza on;
             coraza_rules '
                 SecRuleEngine On
                 SecResponseBodyAccess On
-                SecRule RESPONSE_PROTOCOL "@streq HTTP/3.0" "id:35,phase:5,status:403,deny,log"
+                SecRule RESPONSE_PROTOCOL "@streq HTTP/3.0" "id:35,phase:3,status:403,deny,log"
             ';
         }
 
@@ -133,7 +135,7 @@ is(get_status('/h3'), 403,
 is(get_status('/h1'), 200,
 	'HTTP/3 request is not reported to the WAF as HTTP/1.0');
 is(get_status('/resp'), 403,
-	'HTTP/3 response is reported to the WAF as HTTP/3.0 (phase 5)');
+	'HTTP/3 response is reported to the WAF as HTTP/3.0 (phase 3)');
 is(get_status('/none'), 200,
 	'no protocol rule matches, request is served');
 
