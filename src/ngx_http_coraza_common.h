@@ -158,7 +158,6 @@ ngx_int_t ngx_http_coraza_header_filter(ngx_http_request_t *r);
 ngx_int_t ngx_http_coraza_forward_header(ngx_http_request_t *r);
 
 /* ngx_http_coraza_log.c */
-void ngx_http_coraza_log(void *log, const void* data);
 ngx_int_t ngx_http_coraza_log_handler(ngx_http_request_t *r);
 
 /* ngx_http_coraza_pre_access.c */
