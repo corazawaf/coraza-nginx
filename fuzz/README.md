@@ -50,14 +50,15 @@ cd fuzz
 ```
 
 `fuzz/run.sh` wraps a target with the shared breadth flags; point it at the
-second target with env vars:
+second target with env vars. Invoke from the repository root — `run.sh` `cd`s into
+`fuzz/` before running, so `FUZZ_BIN`/`CORPUS_DIR` are resolved relative to `fuzz/`:
 
 ```sh
 FUZZ_BIN=./fuzz_pack_headers CORPUS_DIR=./corpus_pack_headers bash fuzz/run.sh 60 1
 ```
 
-CI runs both targets per PR (`ci-fast.yml`, 60 s each) and for hours/month
-(`ci-deep.yml`).
+CI runs both targets per PR (`ci-fast.yml`, 60 s each) and monthly in
+`ci-deep.yml` (defaults to 600 s/target; manual dispatch can request longer).
 
 ## See also
 
