@@ -320,7 +320,12 @@ int coraza_update_status_code(coraza_transaction_t t, int code)
  * SecResponseBodyMimeType).  Must be called after
  * coraza_process_response_headers().
  *
- * Requires libcoraza >= 1.4.0.
+ * Requires libcoraza >= 1.4.0.  The symbol is resolved with the mandatory
+ * DL_SYM in ngx_http_coraza_dl_open(), so dl_is_response_body_processable is
+ * guaranteed non-NULL here: if the running library did not export it, dl_open
+ * failed and the worker never started.  No NULL guard is needed (and none must
+ * be relied upon) -- if this symbol is ever downgraded to DL_SYM_OPT, this
+ * wrapper and its callers must add an availability check first.
  */
 int
 ngx_http_coraza_is_response_body_processable(coraza_transaction_t t)
