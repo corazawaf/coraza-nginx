@@ -8,9 +8,18 @@
 #
 # The traffic mix deliberately exercises the WAF decision path in both
 # directions — benign requests that must pass (200) and attack requests the
-# in-config SecRules must block (403) — so allocation/free of the Coraza
-# transaction, header forwarding (ngx_str_to_char), and request/response
-# body inspection all run under the checker every iteration.
+# in-config SecRules must block (403) — across nine request shapes that drive
+# every attacker-reachable pure-C connector path under the checker:
+#   * URI-arg, request-body, and request-HEADER attacks (phase 1/2 deny)
+#   * benign GET, POST, and large response body (pass)
+#   * large CHUNKED request body -> file-backed body_filter buffer chain
+#   * 40 large request headers -> ngx_str_to_char loop across ngx_list parts
+#   * RESPONSE_BODY inspection, both pass and phase-4 deny (body_filter clone)
+# so allocation/free of the Coraza transaction, header forwarding
+# (ngx_str_to_char), and request/response body inspection all run every
+# iteration. Deep coverage of THIS connector lives here (memcheck/helgrind),
+# not in the fuzzer — the fuzzable pure-C leaf is just ngx_str_to_char; the
+# rest of the connector needs a live nginx request, which is what this drives.
 #
 # Requires libcoraza installed (dlopen'd at runtime; see README). The nginx
 # binary passed in must have been built --add-dynamic-module against this
@@ -41,6 +50,10 @@ mkdir -p "$WORK/conf" "$WORK/logs" "$WORK/html"
 
 echo "hello coraza" > "$WORK/html/index.html"
 head -c 200000 /dev/urandom | base64 > "$WORK/html/medium"
+# Benign response body scanned by the phase-4 RESPONSE_BODY rule (must pass).
+head -c 120000 /dev/urandom | base64 > "$WORK/html/respbody"
+# Response body carrying the leak marker (must be blocked 403 at phase 4).
+{ head -c 40000 /dev/urandom | base64; echo "leakmarker"; } > "$WORK/html/leak"
 
 # Locate the built module (.so). --add-dynamic-module builds it into objs/;
 # if the caller installed it, allow an override via $CORAZA_MODULE_SO.
@@ -60,10 +73,10 @@ cat > "$WORK/conf/nginx.conf" <<EOF
 $LOAD_MODULE_DIRECTIVE
 daemon off;
 master_process on;
-worker_processes 2;
+worker_processes 4;
 error_log $WORK/logs/error.log info;
 pid $WORK/logs/nginx.pid;
-events { worker_connections 256; }
+events { worker_connections 1024; }
 http {
     access_log off;
     server {
@@ -71,12 +84,20 @@ http {
         root $WORK/html;
         default_type text/plain;
 
+        # Small body buffer so the large chunked upload spills to a temp file,
+        # exercising the connector's file-backed request-body inspection path.
+        client_body_buffer_size 16k;
+        # Headroom for the many-large-headers traffic shape (40 headers).
+        large_client_header_buffers 8 16k;
         coraza on;
         coraza_rules 'SecRuleEngine On
                       SecRequestBodyAccess On
                       SecResponseBodyAccess On
+                      SecResponseBodyMimeType text/plain text/html
                       SecRule ARGS "@rx attackmarker" "id:100,phase:2,deny,status:403"
                       SecRule REQUEST_BODY "@rx evilbody" "id:101,phase:2,deny,status:403"
+                      SecRule REQUEST_HEADERS:X-Attack "@rx headermarker" "id:102,phase:1,deny,status:403"
+                      SecRule RESPONSE_BODY "@rx leakmarker" "id:103,phase:4,deny,status:403"
                       ';
 
         # The static handler rejects POST with 405; the soak POSTs benign
@@ -88,6 +109,16 @@ http {
 
         location / { }
         location /medium { alias $WORK/html/medium; }
+        # Response-body inspect target: served content is scanned by the
+        # phase-4 RESPONSE_BODY rule above, exercising the body_filter copy/
+        # clone + buffered-inspection path (pure-C connector code).
+        location /respbody { alias $WORK/html/respbody; }
+        # A response carrying the leak marker MUST be blocked at phase 4,
+        # driving the response-body deny path end to end.
+        location /leak { alias $WORK/html/leak; }
+        # Redirect path: exercises header_filter resolv_* + the entity-header
+        # clearing the connector does when Coraza rewrites Location.
+        location /redir { return 302 /medium; }
     }
 }
 EOF
@@ -151,14 +182,20 @@ echo "soak: ${DURATION}s, concurrency ${CONC}$( [ "${USE_VALGRIND:-0}" = 1 ] && 
 END=$(( $(date +%s) + DURATION ))
 fail=0
 
+# A large body forces nginx to buffer the request into a temp file, driving
+# the connector's body_filter temp-file/multi-buffer chain path (not just the
+# in-memory single-buffer case a tiny -d body hits).
+BIG_BODY="$WORK/html/bigreq"
+head -c 300000 /dev/urandom | base64 > "$BIG_BODY"
+
 worker() {
     while [ "$(date +%s)" -lt "$END" ]; do
-        case $((RANDOM % 5)) in
+        case $((RANDOM % 9)) in
         0)  # benign GET -> must pass
             code=$(curl -s -o /dev/null -w '%{http_code}' \
                    "http://127.0.0.1:18223/" 2>/dev/null || echo 000)
             [ "$code" = "200" ] || { echo "benign GET got $code"; return 1; } ;;
-        1)  # benign larger body -> must pass
+        1)  # benign larger response body -> must pass
             code=$(curl -s -o /dev/null -w '%{http_code}' \
                    "http://127.0.0.1:18223/medium" 2>/dev/null || echo 000)
             [ "$code" = "200" ] || { echo "benign /medium got $code"; return 1; } ;;
@@ -166,7 +203,7 @@ worker() {
             code=$(curl -s -o /dev/null -w '%{http_code}' \
                    "http://127.0.0.1:18223/?q=attackmarker" 2>/dev/null || echo 000)
             [ "$code" = "403" ] || { echo "URI attack got $code (want 403)"; return 1; } ;;
-        3)  # body attack -> must be blocked 403
+        3)  # request-body attack -> must be blocked 403
             code=$(curl -s -o /dev/null -w '%{http_code}' \
                    -d 'x=evilbody' \
                    "http://127.0.0.1:18223/" 2>/dev/null || echo 000)
@@ -176,6 +213,34 @@ worker() {
                    -d 'x=harmless' \
                    "http://127.0.0.1:18223/" 2>/dev/null || echo 000)
             [ "$code" = "200" ] || { echo "benign POST got $code"; return 1; } ;;
+        5)  # large chunked request body -> temp-file buffer chain, must pass
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+                   -H 'Transfer-Encoding: chunked' \
+                   --data-binary "@$BIG_BODY" \
+                   "http://127.0.0.1:18223/" 2>/dev/null || echo 000)
+            [ "$code" = "200" ] || { echo "large chunked body got $code"; return 1; } ;;
+        6)  # many + large request headers -> ngx_str_to_char per-header loop
+            #                                  across multiple ngx_list parts
+            hdrs=(); for i in $(seq 1 40); do hdrs+=(-H "X-H$i: v$i-$(head -c 64 /dev/zero | tr '\0' a)"); done
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+                   "${hdrs[@]}" \
+                   "http://127.0.0.1:18223/" 2>/dev/null || echo 000)
+            [ "$code" = "200" ] || { echo "many-headers got $code"; return 1; } ;;
+        7)  # request-header attack -> phase-1 header rule, must block 403
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+                   -H 'X-Attack: headermarker' \
+                   "http://127.0.0.1:18223/" 2>/dev/null || echo 000)
+            [ "$code" = "403" ] || { echo "header attack got $code (want 403)"; return 1; } ;;
+        8)  # response-body: benign scanned body passes, leak marker blocks 403
+            if [ $((RANDOM % 2)) -eq 0 ]; then
+                code=$(curl -s -o /dev/null -w '%{http_code}' \
+                       "http://127.0.0.1:18223/respbody" 2>/dev/null || echo 000)
+                [ "$code" = "200" ] || { echo "benign respbody got $code"; return 1; }
+            else
+                code=$(curl -s -o /dev/null -w '%{http_code}' \
+                       "http://127.0.0.1:18223/leak" 2>/dev/null || echo 000)
+                [ "$code" = "403" ] || { echo "resp leak got $code (want 403)"; return 1; }
+            fi ;;
         esac
     done
 }
