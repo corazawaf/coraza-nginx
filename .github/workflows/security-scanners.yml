@@ -39,7 +39,7 @@ permissions:
 jobs:
   scanners:
     name: Security scanners
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 25
     steps:
       - name: Checkout module
@@ -95,7 +95,7 @@ jobs:
           cd "nginx-${NGINX_VERSION}"
           ./configure \
             --with-compat --with-debug --with-threads \
-            --with-http_ssl_module --with-http_v2_module \
+            --with-http_ssl_module --with-http_v2_module --with-http_v3_module \
             --add-dynamic-module="$GITHUB_WORKSPACE"
 
       # clang-tidy must PARSE common.h's `#include "coraza/coraza.h"`. That header
@@ -125,7 +125,7 @@ jobs:
           N="$GITHUB_WORKSPACE/nginx-${NGINX_VERSION}"
           INCLUDES="-I$N/src/core -I$N/src/event -I$N/src/event/modules \
             -I$N/src/os/unix -I$N/objs -I$N/src/http -I$N/src/http/modules \
-            -I$N/src/http/v2 -I$GITHUB_WORKSPACE/src \
+            -I$N/src/http/v2 -I$N/src/http/v3 -I$N/src/event/quic -I$GITHUB_WORKSPACE/src \
             -I/usr/local/include -I/usr/include"
           status=0
           for src in "$GITHUB_WORKSPACE"/src/*.c; do
