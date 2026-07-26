@@ -65,8 +65,12 @@ http {
             ';
         }
 
-        # Negative control: denies when the WAF sees HTTP/1.0. Before the fix
-        # this fired on an HTTP/3 request, which is the bug itself.
+        # Negative control: denies when the WAF sees HTTP/1.0, the value the
+        # switch's default arm produces. Restoring the missing HTTP/3 case
+        # makes an HTTP/3 request fall through to that default and 401 here,
+        # so this location fails if the mapping regresses. (It only proves
+        # that once the mapping emits the slash-delimited form -- against a
+        # bare "1.0" the @streq cannot match and this passes vacuously.)
         location /h1 {
             coraza on;
             coraza_rules '

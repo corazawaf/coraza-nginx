@@ -115,10 +115,12 @@ unless ($? == 0) {
 
 my %got = map { /^(\w+)=(.*)$/ ? ($1 => $2) : () } split /\n/, `$tmp/map`;
 
-is($got{9},  '0.9', 'HTTP/0.9 maps to 0.9');
-is($got{11}, '1.1', 'HTTP/1.1 maps to 1.1');
-is($got{20}, '2.0', 'HTTP/2 maps to 2.0');
-is($got{xx}, '1.0', 'unknown version falls back to 1.0');
+# Coraza sets REQUEST_PROTOCOL to this string verbatim, so the mapping must
+# emit the slash-delimited form a rule can @streq against, not a bare "1.1".
+is($got{9},  'HTTP/0.9', 'HTTP/0.9 maps to HTTP/0.9');
+is($got{11}, 'HTTP/1.1', 'HTTP/1.1 maps to HTTP/1.1');
+is($got{20}, 'HTTP/2.0', 'HTTP/2 maps to HTTP/2.0');
+is($got{xx}, 'HTTP/1.0', 'unknown version falls back to HTTP/1.0');
 
 # The module guards its HTTP/3 case on nginx >= 1.25.0, so on an older
 # nginx the case is compiled out and HTTP/3 legitimately maps to the
@@ -126,7 +128,7 @@ is($got{xx}, '1.0', 'unknown version falls back to 1.0');
 SKIP: {
 	skip "nginx $got{ver} predates HTTP/3", 1 if $got{ver} < 1025000;
 
-	is($got{30}, '3.0', 'HTTP/3 maps to 3.0, not the 1.0 default');
+	is($got{30}, 'HTTP/3.0', 'HTTP/3 maps to HTTP/3.0, not the HTTP/1.0 default');
 }
 
 ###############################################################################
