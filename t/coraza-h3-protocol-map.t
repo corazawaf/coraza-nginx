@@ -98,6 +98,10 @@ my @includes = map { "-I$_" } (
 	"$nginx/src/http",
 	"$nginx/src/http/modules",
 	"$nginx/src/http/v2",
+	# ngx_http.h includes <ngx_http_v3.h> when NGX_HTTP_V3 is set, which the
+	# nginx cells enable via --with-http_v3_module. Required there, harmless
+	# on builds where the directory or the define is absent.
+	"$nginx/src/http/v3",
 );
 
 my @cmd = ('cc', @includes, '-o', "$tmp/map", $csrc);
