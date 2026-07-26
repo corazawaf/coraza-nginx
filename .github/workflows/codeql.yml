@@ -1,0 +1,124 @@
+name: CodeQL
+
+# CodeQL over the coraza module TU only.
+#
+# The critical detail is the build mode: `make modules`, never a full nginx
+# build. For COMPILED languages CodeQL populates its database from whatever the
+# traced build actually compiles — the `paths` / `paths-ignore` filters are
+# silently IGNORED. Tracing a full nginx build would pull all of upstream nginx
+# into the database and flood the Security tab with alerts against code we
+# neither own nor patch. Scope is enforced by the build (make modules only), so
+# the nginx core is configured but never compiled and never traced.
+#
+# ccache is deliberately NOT used here. CodeQL's tracer only sees a compile that
+# actually invokes the compiler; a warm ccache serves a hit without running cc,
+# producing a database CodeQL can't populate ("no source code seen during
+# build") while the build itself looks green. Tracing needs a real compile.
+#
+# NOTE: the SARIF upload (analyze step) requires GitHub Advanced Security /
+# Code Scanning to be ENABLED on the repository (Settings > Security > Code
+# security). Without it the analyze step hard-fails with "Resource not
+# accessible by integration" even though security-events: write is granted.
+# If Code Scanning is off on this fork, drop the push/pull_request triggers and
+# keep only workflow_dispatch, or enable Code Scanning. See the workspace lesson
+# feedback-codeql-sarif-needs-code-security.
+#
+# Version pins (NGINX_VERSION / NGINX_VERSION_SHA256 / LIBCORAZA_VERSION) come
+# from .github/versions.env via load-versions.sh — single source of truth.
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  push:
+    branches: [main, master, dev, "[0-9][0-9]-*"]
+  pull_request: {}
+  workflow_dispatch: {}
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze C
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      security-events: write   # required to upload the SARIF results
+    steps:
+      - name: Checkout module
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Load version pins
+        run: bash .github/scripts/load-versions.sh
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential curl git libpcre2-dev pkg-config \
+            wget zlib1g-dev unzip eatmydata
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        with:
+          languages: c-cpp
+          queries: security-extended
+          # Deliberately no paths/paths-ignore: they do nothing for C/C++ (see
+          # the header comment). The `make modules` build below is what scopes
+          # the traced compile to the coraza connector.
+
+      # libcoraza built-tree cache: it only supplies coraza.h + libcoraza.so for
+      # the module link — it is NOT the traced translation unit (CodeQL traces
+      # `make modules`, the C connector), so caching its prebuilt tree does not
+      # taint the database. Skip the cgo compile on a hit; only `make install`.
+      # (No ccache in this job — the tracer needs a real cc invocation; that
+      # constraint does not apply to libcoraza, which CodeQL never analyses.)
+      - name: libcoraza built-tree cache
+        id: cache-libcoraza
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/libcoraza-build
+          key: libcoraza-built-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: ^1.25.x
+
+      - name: Build + install libcoraza
+        # Verified fetch (sha256) + build/install, single-sourced across all jobs.
+        env:
+          LIBCORAZA_CACHE_HIT: ${{ steps.cache-libcoraza.outputs.cache-hit }}
+          MAKE: eatmydata make
+        run: bash .github/scripts/build-libcoraza.sh
+
+      # Configure the full nginx tree (needed for headers) but compile ONLY the
+      # module (make modules) so CodeQL traces just the coraza connector.
+      - name: Fetch + configure nginx, build module (traced)
+        run: |
+          set -euo pipefail
+          bash .github/scripts/fetch-verify.sh \
+            "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+            "$NGINX_VERSION_SHA256" nginx-src.tar.gz
+          tar -xzf nginx-src.tar.gz
+          cd "nginx-${NGINX_VERSION}"
+          ./configure \
+            --with-compat --with-debug --with-threads \
+            --with-http_ssl_module --with-http_v2_module \
+            --add-dynamic-module="$GITHUB_WORKSPACE"
+          # make modules only — nginx core is never compiled, so CodeQL's
+          # database contains only our TUs.
+          make modules
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        with:
+          category: /language:c-cpp

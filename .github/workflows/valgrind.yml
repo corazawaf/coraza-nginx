@@ -1,0 +1,95 @@
+name: Valgrind
+
+# Memcheck over the pure-C fuzz target, replaying its seed corpus.
+#
+# WHY NOT A LIVE-MODULE SOAK (unlike the skeleton module's valgrind.yml):
+# libcoraza is a cgo (Go) shared object. The Go runtime aborts at init under
+# valgrind — it probes CPU features / mmaps arenas in ways valgrind rejects — so
+# nginx never comes up and a memcheck soak of the running module is impossible
+# (this is the same reason ci-fast runs an ASan/UBSan soak, NOT valgrind, for
+# the live module). See the sanitizer-lite comment in asan.yml.
+#
+# What valgrind CAN cover here that ASan cannot: the pure-C parser
+# (ngx_str_to_char) has no Go in it, so it runs clean under memcheck. Memcheck
+# on the raw malloc layer catches uninitialised reads and invalid accesses that
+# ASan's redzone model can miss, and confirms the corpus replays leak-free. The
+# target is built WITHOUT ASan/UBSan (they conflict with valgrind) — plain
+# -g -O1 — and libFuzzer replays each corpus file as one run then exits.
+#
+# This is a fast PR gate (replay only, no fresh mutation). Long fuzz DISCOVERY
+# lives in ci-deep.yml; the 120s regression fuzz lives in fuzzing.yml.
+#
+# NGINX pins are not needed here — the fuzz target is self-contained pure C.
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  push:
+    branches: [main, master, dev, "[0-9][0-9]-*"]
+  pull_request: {}
+  workflow_dispatch: {}
+
+concurrency:
+  group: valgrind-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  memcheck-fuzz-corpus:
+    name: Memcheck (fuzz corpus replay)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout module
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang valgrind
+
+      # Plain -g -O1, NO sanitizers: ASan/UBSan instrumentation conflicts with
+      # valgrind's own memory tracking. libFuzzer is still linked (it provides
+      # main + the corpus-replay-from-argv behaviour) but adds no memory
+      # instrumentation of its own.
+      - name: Build fuzz target (no sanitizers, for valgrind)
+        env:
+          CFLAGS: "-g -O1"
+        run: bash fuzz/build.sh "$GITHUB_WORKSPACE/fuzz/fuzz_valgrind"
+
+      - name: Memcheck replay of the seed corpus
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          corpus=(fuzz/corpus/*)
+          if [ "${#corpus[@]}" -eq 0 ]; then
+            echo "::error::fuzz/corpus is empty — nothing to replay" >&2
+            exit 1
+          fi
+          echo "replaying ${#corpus[@]} corpus inputs under memcheck"
+          # --error-exitcode=1: any memcheck error fails the job. libFuzzer
+          # given corpus files as argv replays each once and exits 0; valgrind
+          # wraps that single process. runs=1 (default) keeps it a replay, not
+          # a mutation run.
+          valgrind \
+            --error-exitcode=1 \
+            --leak-check=full \
+            --show-leak-kinds=definite,indirect \
+            --errors-for-leak-kinds=definite,indirect \
+            --track-origins=yes \
+            "$GITHUB_WORKSPACE/fuzz/fuzz_valgrind" "${corpus[@]}" \
+            2>&1 | tee valgrind.log
+          echo "✓ memcheck: corpus replay clean"
+
+      - name: Upload valgrind log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: valgrind-log
+          path: ${{ github.workspace }}/valgrind.log
+          retention-days: 14

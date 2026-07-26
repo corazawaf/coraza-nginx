@@ -1,4 +1,10 @@
-[![Compile module](https://github.com/corazawaf/coraza-nginx/actions/workflows/build.yml/badge.svg)](https://github.com/corazawaf/coraza-nginx/actions/workflows/build.yml)
+[![Build&Test](https://github.com/corazawaf/coraza-nginx/actions/workflows/build-test.yml/badge.svg)](https://github.com/corazawaf/coraza-nginx/actions/workflows/build-test.yml)
+[![Security Scanners](https://github.com/corazawaf/coraza-nginx/actions/workflows/security-scanners.yml/badge.svg)](https://github.com/corazawaf/coraza-nginx/actions/workflows/security-scanners.yml)
+[![Fuzzing](https://github.com/corazawaf/coraza-nginx/actions/workflows/fuzzing.yml/badge.svg)](https://github.com/corazawaf/coraza-nginx/actions/workflows/fuzzing.yml)
+[![Valgrind](https://github.com/corazawaf/coraza-nginx/actions/workflows/valgrind.yml/badge.svg)](https://github.com/corazawaf/coraza-nginx/actions/workflows/valgrind.yml)
+[![CodeQL](https://github.com/corazawaf/coraza-nginx/actions/workflows/codeql.yml/badge.svg)](https://github.com/corazawaf/coraza-nginx/actions/workflows/codeql.yml)
+[![A/UBSan](https://github.com/corazawaf/coraza-nginx/actions/workflows/asan.yml/badge.svg)](https://github.com/corazawaf/coraza-nginx/actions/workflows/asan.yml)
+[![CI Deep](https://github.com/corazawaf/coraza-nginx/actions/workflows/ci-deep.yml/badge.svg)](https://github.com/corazawaf/coraza-nginx/actions/workflows/ci-deep.yml)
 
 # Coraza NGINX Connector
 
@@ -19,7 +25,7 @@ This pulls in libcoraza automatically. Built for Ubuntu 24.04 (noble), 25.10 (qu
 
 # Compilation
 
-If you have any doubts, please read the [GitHub build Action](https://github.com/corazawaf/coraza-nginx/blob/main/.github/workflows/build.yml) for additional information.
+If you have any doubts, please read the [GitHub build Action](https://github.com/corazawaf/coraza-nginx/blob/main/.github/workflows/build-test.yml) for additional information.
 
 Before compiling this software make sure that you have libcoraza >= 1.4.0 installed.
 You can download it from the [libcoraza git repository](https://github.com/corazawaf/libcoraza). For information pertaining to the compilation and installation of libcoraza please consult the documentation provided along with it.
