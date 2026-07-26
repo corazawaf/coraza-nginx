@@ -29,7 +29,12 @@ jobs:
       contents: read
 
     name: ${{ matrix.label }}
-    runs-on: ubuntu-24.04
+    # ubuntu-26.04 ships OpenSSL 3.5, giving nginx native server-side QUIC for
+    # the http_v3_module below (and 0-RTT/early-data, which needs 3.5.1+).
+    # nginx CAN build HTTP/3 on older OpenSSL via its QUIC compatibility layer
+    # (verified: builds fine on 24.04's OpenSSL 3.0.13) -- we run on 26.04 to
+    # exercise the native QUIC path production uses, not the compat shim.
+    runs-on: ubuntu-26.04
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 500M
@@ -200,6 +205,7 @@ jobs:
           --with-http_realip_module \
           --with-http_auth_request_module \
           --with-http_v2_module \
+          --with-http_v3_module \
           --with-http_sub_module
 
       - name: Compile dynamic module and install

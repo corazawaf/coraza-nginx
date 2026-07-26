@@ -61,7 +61,7 @@ jobs:
     # connector correctness is already exercised by the arm64 memcheck/helgrind
     # soaks below.
     name: Fuzz (ngx_str_to_char)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -155,7 +155,7 @@ jobs:
         arch: [amd64]
         include:
           - arch: amd64
-            runner: ubuntu-24.04
+            runner: ubuntu-26.04
     steps:
       - name: Checkout module
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -222,6 +222,7 @@ jobs:
             --with-threads
             --with-http_ssl_module
             --with-http_v2_module
+            --with-http_v3_module
             --with-http_realip_module
             --with-http_auth_request_module
             --add-dynamic-module="$GITHUB_WORKSPACE"
@@ -288,7 +289,7 @@ jobs:
         arch: [amd64]
         include:
           - arch: amd64
-            runner: ubuntu-24.04
+            runner: ubuntu-26.04
     steps:
       - name: Checkout module
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -355,6 +356,7 @@ jobs:
             --with-threads
             --with-http_ssl_module
             --with-http_v2_module
+            --with-http_v3_module
             --with-http_realip_module
             --with-http_auth_request_module
             --add-dynamic-module="$GITHUB_WORKSPACE"
@@ -408,7 +410,7 @@ jobs:
 
   scanners:
     name: Security scanners
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
       - name: Checkout module
@@ -509,7 +511,7 @@ jobs:
 
   codeql:
     name: CodeQL (deep)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 40
     permissions:
       contents: read
@@ -570,7 +572,7 @@ jobs:
           cd "nginx-${NGINX_VERSION}"
           ./configure \
             --with-compat --with-debug --with-threads \
-            --with-http_ssl_module --with-http_v2_module \
+            --with-http_ssl_module --with-http_v2_module --with-http_v3_module \
             --add-dynamic-module="$GITHUB_WORKSPACE"
           make modules
 
@@ -581,7 +583,7 @@ jobs:
 
   asan:
     name: ASan/UBSan soak (deep, 300s)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 90
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -662,7 +664,7 @@ jobs:
           SAN_CC="$SAN_LD -fno-sanitize=nonnull-attribute,null -fno-sanitize-recover=address"
           ./configure \
             --with-compat --with-debug --with-threads \
-            --with-http_ssl_module --with-http_v2_module \
+            --with-http_ssl_module --with-http_v2_module --with-http_v3_module \
             --with-http_realip_module --with-http_auth_request_module \
             --add-dynamic-module="$GITHUB_WORKSPACE" \
             --with-cc-opt="-DNGX_DEBUG_PALLOC=1 -g3 -O0 -fno-omit-frame-pointer -funwind-tables $SAN_CC $(pkg-config --cflags libpcre2-8)" \

@@ -27,11 +27,11 @@ jobs:
         arch: [amd64, arm64]
         include:
           - arch: amd64
-            runner: ubuntu-24.04
+            runner: ubuntu-26.04
             deb_arch: amd64
             rpm_arch: x86_64
           - arch: arm64
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-26.04-arm
             deb_arch: arm64
             rpm_arch: aarch64
 
@@ -128,6 +128,7 @@ jobs:
           --with-http_realip_module \
           --with-http_auth_request_module \
           --with-http_v2_module \
+          --with-http_v3_module \
           --with-http_sub_module
 
       - name: Compile dynamic module
@@ -230,9 +231,9 @@ jobs:
         pkg_type: [deb, rpm]
         include:
           - arch: amd64
-            runner: ubuntu-24.04
+            runner: ubuntu-26.04
           - arch: arm64
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-26.04-arm
 
     steps:
       - name: Download packages artifact
