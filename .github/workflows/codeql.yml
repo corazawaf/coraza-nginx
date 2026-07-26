@@ -45,7 +45,7 @@ permissions:
 jobs:
   analyze:
     name: Analyze C
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 40
     permissions:
       contents: read
@@ -112,7 +112,7 @@ jobs:
           cd "nginx-${NGINX_VERSION}"
           ./configure \
             --with-compat --with-debug --with-threads \
-            --with-http_ssl_module --with-http_v2_module \
+            --with-http_ssl_module --with-http_v2_module --with-http_v3_module \
             --add-dynamic-module="$GITHUB_WORKSPACE"
           # make modules only — nginx core is never compiled, so CodeQL's
           # database contains only our TUs.

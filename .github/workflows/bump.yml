@@ -28,7 +28,7 @@ concurrency:
 jobs:
   bump:
     name: Recompute pins + open PR
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: write        # create the bump branch
       pull-requests: write   # open the PR

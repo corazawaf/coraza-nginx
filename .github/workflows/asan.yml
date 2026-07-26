@@ -31,7 +31,7 @@ permissions:
 jobs:
   sanitizer-lite:
     name: Sanitizer lite (60s soak)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -120,7 +120,7 @@ jobs:
           SAN_CC="$SAN_LD -fno-sanitize=nonnull-attribute,null -fno-sanitize-recover=address"
           ./configure \
             --with-compat --with-debug --with-threads \
-            --with-http_ssl_module --with-http_v2_module \
+            --with-http_ssl_module --with-http_v2_module --with-http_v3_module \
             --with-http_realip_module --with-http_auth_request_module \
             --add-dynamic-module="$GITHUB_WORKSPACE" \
             --with-cc-opt="-DNGX_DEBUG_PALLOC=1 -g3 -O0 -fno-omit-frame-pointer -funwind-tables $SAN_CC $(pkg-config --cflags libpcre2-8)" \
