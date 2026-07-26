@@ -9,6 +9,37 @@
 # path of libyajl.so's installation
 
 ngx_addon_name="ngx_http_coraza_module"
+
+# Detect the libcoraza result-code contract at build time.
+#
+# libcoraza >= 1.6 ships `typedef enum coraza_result_t { CORAZA_ERROR = -1,
+# CORAZA_OK = 0, CORAZA_INTERRUPTION = 1 }`.  On that contract the body-phase
+# process calls return -1 on engine error and 1 on interruption, so "failed"
+# means `ret < 0`.  Older libcoraza has no such enum and returns 1 on error,
+# 0 on success, so "failed" means `ret != 0`.
+#
+# CORAZA_INTERRUPTION is an *enum member*, not a #define, so it is invisible to
+# the preprocessor and cannot be tested with `#ifdef` in the C sources.  Detect
+# the enum with a real compile probe (nginx's auto/feature) so the check uses the
+# *same* compiler and include flags the module is built with — a fixed-path grep
+# of /usr/local/include and /usr/include would miss a coraza.h supplied via
+# --with-cc-opt=-I<dir>, leave CORAZA_HAS_RESULT_ENUM undefined, and wrongly apply
+# the legacy `ret != 0` contract (treating CORAZA_INTERRUPTION == 1 as a fatal
+# error → spurious HTTP 500).  On success -DCORAZA_HAS_RESULT_ENUM is passed to
+# the connector; ngx_http_coraza_process_body_failed() reads this macro.
+ngx_feature="libcoraza result enum (CORAZA_INTERRUPTION)"
+ngx_feature_name="CORAZA_HAS_RESULT_ENUM"
+ngx_feature_run=no
+ngx_feature_incs="#include <coraza/coraza.h>"
+ngx_feature_path=
+ngx_feature_libs=
+ngx_feature_test="int r = (int) CORAZA_INTERRUPTION; (void) r;"
+. auto/feature
+
+if test $ngx_found != yes; then
+    echo " + libcoraza result enum NOT found: using legacy ret!=0 contract"
+fi
+
 coraza_dependency="ngx_http_postpone_filter_module \
                    ngx_http_ssi_filter_module \
                    ngx_http_charset_filter_module \
@@ -34,7 +65,8 @@ if test -n "$ngx_module_link"; then
                      $ngx_addon_dir/src/ngx_http_coraza_utils.c \
                      $ngx_addon_dir/src/ngx_http_coraza_dl.c";
 
-	ngx_module_deps="$ngx_addon_dir/src/ddebug.h";
+	ngx_module_deps="$ngx_addon_dir/src/ddebug.h \
+                     $ngx_addon_dir/src/ngx_http_coraza_common.h";
     ngx_module_libs="-ldl"
 
     ngx_module_order="ngx_http_chunked_filter_module \
@@ -52,6 +84,12 @@ else
 	CORE_INCS="$CORE_INCS $ngx_feature_path"
 	CORE_LIBS="$CORE_LIBS $ngx_feature_libs"
 
+	# Appending here places the coraza filter immediately before
+	# ngx_http_copy_filter_module in objs/ngx_modules.c, i.e. after the
+	# chunked/range/postpone filters -- the same effective position the
+	# dynamic build gets from $ngx_module_order above.  $ngx_module_order
+	# has no effect on this branch (it is only consumed by auto/module),
+	# so the ordering here is positional and must not be reordered.
 	HTTP_FILTER_MODULES="$HTTP_FILTER_MODULES ngx_http_coraza_module"
 	NGX_ADDON_SRCS="$NGX_ADDON_SRCS \
                     $ngx_addon_dir/src/ngx_http_coraza_module.c \
