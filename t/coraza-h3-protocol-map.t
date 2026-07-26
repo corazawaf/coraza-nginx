@@ -158,20 +158,39 @@ sub find_root {
 	return undef;
 }
 
-# Find any configured nginx build tree near the workspace. The version is
-# not pinned here: CI has built 1.24.0 and may move later, and this test
-# only needs the NGX_HTTP_VERSION_* constants plus ngx_auto_config.h.
+# Find the configured nginx build tree this test should compile against.
+#
+# TEST_NGINX_SOURCE wins when set: the CI matrix builds more than one server
+# in the same workspace, and picking the wrong tree silently changes the
+# answer -- resolving to a pre-1.25 tree would skip the HTTP/3 assertion
+# instead of proving it. Fall back to a glob for local runs, newest version
+# first so a stale older tree does not win.
 sub find_nginx {
 	my ($root) = @_;
+
+	if (defined $ENV{TEST_NGINX_SOURCE}) {
+		my $dir = $ENV{TEST_NGINX_SOURCE};
+		return -f "$dir/objs/ngx_auto_config.h" ? $dir : undef;
+	}
+
 	return undef unless defined $root;
 
 	for my $base ($root, "$root/..") {
-		for my $cand (sort glob("$base/nginx-*")) {
+		for my $cand (sort { version_key($b) <=> version_key($a) }
+				glob("$base/nginx-*")) {
 			return $cand if -f "$cand/objs/ngx_auto_config.h";
 		}
 	}
 
 	return undef;
+}
+
+# Sortable integer for an "nginx-1.31.3" path, so 1.31.3 outranks 1.9.5
+# (a plain string sort gets that backwards).
+sub version_key {
+	my ($path) = @_;
+	return 0 unless $path =~ /nginx-(\d+)\.(\d+)\.(\d+)/;
+	return $1 * 1000000 + $2 * 1000 + $3;
 }
 
 sub command_exists {
