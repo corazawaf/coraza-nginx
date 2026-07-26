@@ -1,0 +1,372 @@
+# Build + test the coraza dynamic module on every push/PR across the three
+# server targets we ship for:
+#   * nginx mainline  (odd minor)  — full: compile + prove + go-ftw/CRS
+#   * nginx stable     (even minor) — build-only (full prove/go-ftw runs on the
+#                                     mainline cell; stable just proves it compiles)
+#   * Angie            (nginx fork) — build-only (soak/prove of Angie lives in
+#                                     ci-deep; here we just prove it compiles)
+# All versions + sha256 pins come from .github/versions.env (single source of
+# truth, bumped monthly by bump.yml). Every source archive is sha256-verified
+# after download. Caching: actions/cache for source archives + ccache object
+# cache + Go build cache; ccache/eatmydata/mold cut wall-clock.
+name: Build&Test
+
+on:
+  push:
+    branches: [main, master, dev, "[0-9][0-9]-*"]
+  pull_request: {}
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    permissions:
+      contents: read
+
+    name: ${{ matrix.label }}
+    runs-on: ubuntu-24.04
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - server: nginx
+            channel: mainline
+            label: nginx mainline (full)
+            full_tests: true
+            debug_build: false
+          # The stable cell doubles as the debug-logging compile gate: the dd()
+          # call sites (src/ddebug.h) are compiled OUT of every release build, so
+          # a broken dd() ships unnoticed (PR #37). Building stable with
+          # -DCORAZA_DDEBUG=1 --with-debug under -Werror type-checks those live
+          # call sites here instead of a separate job.
+          - server: nginx
+            channel: stable
+            label: nginx stable (debug build)
+            full_tests: false
+            debug_build: true
+          - server: angie
+            channel: angie
+            label: Angie (build-only)
+            full_tests: false
+            debug_build: false
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Load version pins
+        run: bash .github/scripts/load-versions.sh
+
+      # Resolve this cell's server version + sha + download URL from the pins.
+      - name: Resolve source coordinates
+        run: |
+          set -euo pipefail
+          case "${{ matrix.channel }}" in
+            mainline)
+              echo "SRC_VER=$NGINX_MAINLINE" >> "$GITHUB_ENV"
+              echo "SRC_SHA=$NGINX_MAINLINE_SHA256" >> "$GITHUB_ENV"
+              echo "SRC_URL=https://nginx.org/download/nginx-${NGINX_MAINLINE}.tar.gz" >> "$GITHUB_ENV"
+              echo "SRC_DIR=nginx-${NGINX_MAINLINE}" >> "$GITHUB_ENV"
+              ;;
+            stable)
+              echo "SRC_VER=$NGINX_STABLE" >> "$GITHUB_ENV"
+              echo "SRC_SHA=$NGINX_STABLE_SHA256" >> "$GITHUB_ENV"
+              echo "SRC_URL=https://nginx.org/download/nginx-${NGINX_STABLE}.tar.gz" >> "$GITHUB_ENV"
+              echo "SRC_DIR=nginx-${NGINX_STABLE}" >> "$GITHUB_ENV"
+              ;;
+            angie)
+              echo "SRC_VER=$ANGIE_VERSION" >> "$GITHUB_ENV"
+              echo "SRC_SHA=$ANGIE_SHA256" >> "$GITHUB_ENV"
+              echo "SRC_URL=https://github.com/webserver-llc/angie/archive/refs/tags/${ANGIE_VERSION}.tar.gz" >> "$GITHUB_ENV"
+              echo "SRC_DIR=angie" >> "$GITHUB_ENV"
+              ;;
+          esac
+
+      # ---- caches ----------------------------------------------------------
+      - name: Source archive cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/src.tar.gz
+          key: src-${{ matrix.server }}-${{ env.SRC_VER }}-${{ hashFiles('.github/versions.env') }}
+      # Cache the fully-BUILT libcoraza tree, not just the archive. libcoraza is
+      # a cgo (Go) shared object — the build.sh/configure/make chain is the
+      # slowest single step and is identical across all three matrix cells for a
+      # given LIBCORAZA_VERSION. On a hit we skip the compile and only re-run the
+      # (cheap) `make install` to place the .so + headers under /usr/local.
+      # LIBCORAZA_VERSION is an immutable release tag, so the version + the pins
+      # file hash fully key the artifact.
+      - name: libcoraza built-tree cache
+        id: cache-libcoraza
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/libcoraza-build
+          key: libcoraza-built-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
+      # ccache primary key is the pins hash (stable across commits that only
+      # touch module source), so successive PRs hit the primary rather than only
+      # the restore-keys prefix — fewer redundant save-slots + less LRU churn.
+      # github.sha stays in the key so each commit still writes back its own warm
+      # cache for its own reruns; restore-keys walks back to any prior build.
+      - name: ccache cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-build-${{ matrix.channel }}-${{ hashFiles('.github/versions.env') }}-${{ github.sha }}
+          restore-keys: |
+            ccache-build-${{ matrix.channel }}-${{ hashFiles('.github/versions.env') }}-
+            ccache-build-${{ matrix.channel }}-
+      - name: Go build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: gobuild-build-${{ env.LIBCORAZA_VERSION }}
+          restore-keys: |
+            gobuild-build-
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -y -qq --no-install-recommends install \
+            gcc make ccache eatmydata mold autoconf automake libtool
+          # Route gcc/cc through ccache for every later step.
+          echo /usr/lib/ccache >> "$GITHUB_PATH"
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: ^1.25.x
+
+      - name: Fetch + verify server source
+        run: |
+          bash .github/scripts/fetch-verify.sh "$SRC_URL" "$SRC_SHA" src.tar.gz
+          tar -xzf src.tar.gz
+          # Angie's tag tarball unpacks to angie-Angie-<ver>/ — normalise to $SRC_DIR.
+          if [ "${{ matrix.server }}" = "angie" ]; then
+            d="$(find . -maxdepth 1 -type d -name 'angie-*' | head -1)"
+            [ -n "$d" ] && mv "$d" "$SRC_DIR"
+          fi
+
+      - name: Fetch + verify + build libcoraza
+        # Verified fetch (sha256) + build/install, single-sourced across all jobs.
+        env:
+          LIBCORAZA_CACHE_HIT: ${{ steps.cache-libcoraza.outputs.cache-hit }}
+          MAKE: eatmydata make
+        run: bash .github/scripts/build-libcoraza.sh
+
+      - name: Configure compilation of dynamic module
+        run: |
+          cd "${{ github.workspace }}/$SRC_DIR"
+          # Debug cell (stable): fold in the debug-logging compile gate —
+          # -DCORAZA_DDEBUG=1 turns the connector's dd() macro into real code and
+          # -Werror makes any format-string / undeclared-identifier mistake in
+          # those newly-live call sites a hard failure. --with-debug below already
+          # enables nginx's own debug logging on every cell.
+          EXTRA_CC=""
+          if [ "${{ matrix.debug_build }}" = "true" ]; then
+            EXTRA_CC=" -DCORAZA_DDEBUG=1 -Werror"
+          fi
+          ./configure \
+          --with-compat \
+          --add-dynamic-module=${{ github.workspace }}/ \
+          --with-cc-opt="-g -O2 -fstack-protector-strong -Wformat -Werror=format-security -Wno-unused-function -fPIC -Wdate-time -D_FORTIFY_SOURCE=2${EXTRA_CC}" \
+          --with-ld-opt='-fuse-ld=mold -Wl,-Bsymbolic-functions -Wl,-z,relro -Wl,-z,now -fPIC' \
+          --prefix=/etc/nginx \
+          --sbin-path=/usr/sbin/nginx \
+          --conf-path=/etc/nginx/nginx.conf \
+          --http-log-path=/var/log/nginx/access.log \
+          --error-log-path=/var/log/nginx/error.log \
+          --lock-path=/var/lock/nginx.lock \
+          --pid-path=/run/nginx.pid \
+          --modules-path=/usr/lib/nginx/modules \
+          --http-client-body-temp-path=/var/cache/nginx/client_temp \
+          --http-proxy-temp-path=/var/cache/nginx/proxy_temp \
+          --http-fastcgi-temp-path=/var/cache/nginx/fastcgi_temp \
+          --http-uwsgi-temp-path=/var/cache/nginx/uwsgi_temp \
+          --http-scgi-temp-path=/var/cache/nginx/scgi_temp \
+          --with-debug \
+          --with-threads \
+          --with-http_ssl_module \
+          --with-http_realip_module \
+          --with-http_auth_request_module \
+          --with-http_v2_module \
+          --with-http_sub_module
+
+      - name: Compile dynamic module and install
+        run: |
+          cd "${{ github.workspace }}/$SRC_DIR"
+          eatmydata make -j"$(nproc)" modules
+          eatmydata make -j"$(nproc)"
+          sudo eatmydata make install
+
+      # ---- config lint (mainline cell): nginx -t the SHIPPED coraza.conf ----
+      # Cheap directive-name/arg gate on the snippet we actually ship (the t/
+      # inline configs are exercised by the prove suite; the go-ftw run uses its
+      # own nginx-test.conf, so neither lints coraza.conf). Reuses the installed
+      # binary + module — no extra compile. (Folded in from config-lint.yml.)
+      - name: Lint shipped coraza.conf (nginx -t)
+        if: matrix.full_tests
+        run: |
+          set -euo pipefail
+          PREFIX="${{ github.workspace }}/_lint"
+          mkdir -p "$PREFIX/logs" "$PREFIX/tmp"
+          cat > "$PREFIX/nginx.conf" <<EOF
+          load_module "/usr/lib/nginx/modules/ngx_http_coraza_module.so";
+          events { worker_connections 64; }
+          error_log $PREFIX/logs/error.log;
+          pid $PREFIX/nginx.pid;
+          http {
+            # Redirect all temp/scratch paths under the writable prefix — the
+            # binary is configured with absolute /var/cache/nginx defaults the
+            # unprivileged runner can't mkdir (nginx -t creates them eagerly).
+            client_body_temp_path $PREFIX/tmp/client;
+            proxy_temp_path $PREFIX/tmp/proxy;
+            fastcgi_temp_path $PREFIX/tmp/fastcgi;
+            uwsgi_temp_path $PREFIX/tmp/uwsgi;
+            scgi_temp_path $PREFIX/tmp/scgi;
+            # nginx -t opens the compile-time default access_log
+            # (/var/log/nginx/access.log) too — not writable on the runner.
+            access_log off;
+            server {
+              listen 8080;
+              include ${{ github.workspace }}/coraza.conf;
+              location / { return 200; }
+            }
+          }
+          EOF
+          /usr/sbin/nginx -t -p "$PREFIX" -e "$PREFIX/logs/error.log" -c "$PREFIX/nginx.conf"
+
+      # ---- debug cell: confirm the --with-debug/DDEBUG module loads ---------
+      # nginx -t a minimal coraza-on config under `error_log ... debug;` so the
+      # debug logging paths are exercised at load time, not just compiled.
+      # (Folded in from debug-build.yml; the compile gate itself is the
+      # -DCORAZA_DDEBUG=1 -Werror build above.)
+      - name: Confirm the debug module loads
+        if: matrix.debug_build
+        run: |
+          set -euo pipefail
+          PREFIX="${{ github.workspace }}/_dbg"
+          mkdir -p "$PREFIX/logs" "$PREFIX/tmp"
+          cat > "$PREFIX/nginx.conf" <<EOF
+          load_module "/usr/lib/nginx/modules/ngx_http_coraza_module.so";
+          events { worker_connections 64; }
+          error_log $PREFIX/logs/error.log debug;
+          pid $PREFIX/nginx.pid;
+          http {
+            # See the lint step: redirect temp paths off the absolute
+            # /var/cache/nginx defaults the unprivileged runner can't create.
+            client_body_temp_path $PREFIX/tmp/client;
+            proxy_temp_path $PREFIX/tmp/proxy;
+            fastcgi_temp_path $PREFIX/tmp/fastcgi;
+            uwsgi_temp_path $PREFIX/tmp/uwsgi;
+            scgi_temp_path $PREFIX/tmp/scgi;
+            # See the lint step: -t opens the default access_log too.
+            access_log off;
+            server {
+              listen 8080;
+              location / { coraza on; coraza_rules 'SecRuleEngine On'; return 200; }
+            }
+          }
+          EOF
+          /usr/sbin/nginx -t -p "$PREFIX" -e "$PREFIX/logs/error.log" -c "$PREFIX/nginx.conf"
+
+      # ---- full test suite: nginx cells only -------------------------------
+      - name: Run prove tests
+        if: matrix.full_tests
+        run: |
+          # Pinned to an immutable commit + sha256 (see versions.env), not the
+          # mutable master ref — consistent with every other fetched archive.
+          bash .github/scripts/fetch-verify.sh \
+            "https://github.com/nginx/nginx-tests/archive/${NGINX_TESTS_REF}.tar.gz" \
+            "$NGINX_TESTS_SHA256" nginx-tests.tar.gz
+          tar xzf nginx-tests.tar.gz
+          cd nginx-tests-*
+          cp ../t/* .
+          export TEST_NGINX_BINARY=/usr/sbin/nginx
+          export TEST_NGINX_GLOBALS="load_module \"/usr/lib/nginx/modules/ngx_http_coraza_module.so\";"
+          prove coraza*.t
+
+      - name: Install go-ftw
+        if: matrix.full_tests
+        run: go install "github.com/coreruleset/go-ftw/v2@${GO_FTW_VERSION}"
+
+      - name: Setup CRS and run go-ftw tests
+        if: matrix.full_tests
+        run: |
+          set -euo pipefail
+          # Create directories owned by runner (avoids sudo for file operations)
+          sudo mkdir -p /opt/coraza /var/cache/nginx/client_temp /var/log/nginx
+          sudo chown -R "$(id -u):$(id -g)" /opt/coraza /var/cache/nginx /var/log/nginx
+          mkdir -p /opt/coraza/{owasp-crs,config,config.d,plugins,rules,rules.d,overrides} /tmp/empty
+
+          # Download + verify CRS (LTS), pinned via versions.env.
+          bash .github/scripts/fetch-verify.sh \
+            "https://github.com/coreruleset/coreruleset/archive/refs/tags/v${CRS_VERSION}.tar.gz" \
+            "$CRS_SHA256" /tmp/crs.tar.gz
+          tar xzf /tmp/crs.tar.gz -C /tmp
+          cp -r /tmp/coreruleset-${CRS_VERSION}/rules   /opt/coraza/owasp-crs/
+          cp -r /tmp/coreruleset-${CRS_VERSION}/plugins /opt/coraza/owasp-crs/
+          cp /tmp/coreruleset-${CRS_VERSION}/crs-setup.conf.example /opt/coraza/config/crs-setup.conf
+
+          printf '%s\n' \
+            'SecRuleEngine On' \
+            'SecRequestBodyAccess On' \
+            'SecResponseBodyAccess Off' \
+            'SecAuditEngine Off' \
+            > /opt/coraza/config/coraza.conf
+
+          printf '%s\n' \
+            'Include /opt/coraza/config/coraza.conf' \
+            'Include /opt/coraza/config.d/*.conf' \
+            'Include /opt/coraza/config/crs-setup.conf' \
+            'Include /opt/coraza/owasp-crs/plugins/*-config.conf' \
+            'Include /opt/coraza/owasp-crs/plugins/*-before.conf' \
+            'Include /opt/coraza/owasp-crs/rules/*.conf' \
+            'Include /opt/coraza/owasp-crs/plugins/*-after.conf' \
+            'Include /opt/coraza/plugins/*-config.conf' \
+            'Include /opt/coraza/plugins/*-before.conf' \
+            'Include /opt/coraza/plugins/*-after.conf' \
+            'Include /opt/coraza/rules/*.conf' \
+            'Include /opt/coraza/rules.d/*.conf' \
+            'Include /opt/coraza/overrides/*.conf' \
+            > /opt/coraza/config/coraza-rules.conf
+
+          sudo cp tests/ftw/nginx-test.conf /etc/nginx/nginx.conf
+          echo "OK" > /tmp/empty/index.html
+
+          sudo /usr/sbin/nginx
+          for _ in $(seq 1 10); do
+            [ -f /tmp/nginx.pid ] && break
+            sleep 1
+          done
+          if [ ! -f /tmp/nginx.pid ]; then
+            echo "::error::nginx did not start (no pid after 10s)" >&2
+            sudo journalctl -xe --no-pager | tail -50 || true
+            sudo /usr/sbin/nginx -t || true
+            exit 1
+          fi
+
+          printf 'testoverride:\n  input:\n    dest_addr: "127.0.0.1"\n    port: 80\n' > /tmp/.ftw.yaml
+          ~/go/bin/go-ftw run --cloud --config /tmp/.ftw.yaml -d tests/ftw/
+
+          ~/go/bin/go-ftw run --cloud --config tests/ftw-crs.yml \
+            -d /tmp/coreruleset-${CRS_VERSION}/tests/regression/tests/ --exclude "^920"
+
+          sudo /usr/sbin/nginx -s stop
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coraza-module-${{ matrix.channel }}
+          path: |
+            ${{ github.workspace }}/${{ env.SRC_DIR }}/objs/ngx_http_coraza_module.so
