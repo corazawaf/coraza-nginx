@@ -182,6 +182,64 @@ ngx_http_coraza_resolv_header_content_type(ngx_http_request_t *r, ngx_str_t name
 }
 
 
+/*
+ * A streaming response has no meaningful end-of-body: the origin emits events
+ * indefinitely and never sends a last_buf, so the header-delay flush (which
+ * fires on last_buf) holds the response headers until the delayed-body cap
+ * (NGX_HTTP_CORAZA_MAX_DELAYED_BODY) is reached.  A real SSE endpoint emits a
+ * few bytes per event, so that cap is reached only after minutes or hours --
+ * in practice the client receives nothing (issue #81).
+ *
+ * Detect Server-Sent Events (Content-Type: text/event-stream) so the caller
+ * can skip the delay, exactly as it does for 101 Switching Protocols.
+ *
+ * SECURITY TRADE-OFF: Content-Type is chosen by the upstream, so an origin
+ * that emits text/event-stream opts this response out of the phase-4 header
+ * delay.  Phase 4 still RUNS on such a response (the body filter always calls
+ * coraza_process_response_body()), and phase 1-3 are untouched -- what is lost
+ * is only the ability to turn a phase-4 match into a clean error page, because
+ * the headers are already on the wire.  A late match degrades to a connection
+ * reset instead.  That is the same trade-off 101 Switching Protocols already
+ * accepts, and it is inherent: streaming and full-response WAF buffering are
+ * mutually exclusive by construction.  Operators who do not proxy untrusted
+ * origins and want the delay unconditionally can leave their upstreams from
+ * emitting text/event-stream, or disable streaming endpoints at the proxy.
+ */
+static ngx_int_t
+ngx_http_coraza_is_sse_response(ngx_http_request_t *r)
+{
+    ngx_str_t *ct = &r->headers_out.content_type;
+    static const u_char sse[] = "text/event-stream";
+    size_t sse_len = sizeof(sse) - 1;
+    size_t i;
+
+    if (ct->len < sse_len) {
+        return 0;
+    }
+
+    /* Match the media type; tolerate a trailing "; charset=..." etc. */
+    if (ngx_strncasecmp(ct->data, (u_char *) sse, sse_len) != 0) {
+        return 0;
+    }
+
+    /*
+     * The media type must be followed by end-of-value or a semicolon-
+     * delimited parameter list, with optional OWS (SP / HTAB, RFC 9110
+     * 5.6.3) before the semicolon.  Anything else ("text/event-streamx",
+     * "text/event-stream application/json") is NOT SSE and must keep the
+     * phase-4 header delay.
+     */
+    for (i = sse_len; i < ct->len; i++) {
+        if (ct->data[i] == ' ' || ct->data[i] == '\t') {
+            continue;
+        }
+        return ct->data[i] == ';';
+    }
+
+    return 1;
+}
+
+
 static ngx_int_t
 ngx_http_coraza_resolv_header_last_modified(ngx_http_request_t *r, ngx_str_t name, off_t offset)
 {
@@ -315,6 +373,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     ngx_int_t rc;
     ngx_uint_t status;
     char *http_response_ver;
+    ngx_http_coraza_conf_t *mcf;
 
 
     /* 304 Not Modified responses are still processed for header inspection
@@ -327,6 +386,8 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     {
         return ngx_http_next_header_filter(r);
     }
+
+    mcf = ngx_http_get_module_loc_conf(r, ngx_http_coraza_module);
 
     if (ctx->intervention_triggered) {
         return ngx_http_next_header_filter(r);
@@ -418,11 +479,16 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * first so the library can evaluate SecResponseBodyAccess and the
      * Content-Type against SecResponseBodyMimeType.
      *
-     * With libcoraza 1.4+ the library answers this directly:
+     * The library answers this directly:
      *   - SecResponseBodyAccess Off  → 0 (no inspection needed)
      *   - Content-Type not in SecResponseBodyMimeType → 0
      *   - Otherwise → 1
-     * With older libcoraza the helper always returns 1 (conservative).
+     *
+     * coraza_is_response_body_processable is a required symbol (libcoraza
+     * >= 1.4.0, pinned in debian/control) resolved with the mandatory DL_SYM:
+     * a library that does not export it fails ngx_http_coraza_dl_open() and the
+     * worker never starts, so there is no runtime "old library" fallback here
+     * and the pointer is never NULL by the time this runs.
      */
     ctx->response_body_processable =
         ngx_http_coraza_is_response_body_processable(ctx->coraza_transaction);
@@ -504,10 +570,14 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * page because the original 200 headers have not yet been sent to the
      * client.
      *
-     * We skip the delay for HEAD requests (no body to inspect; nginx's final
-     * header filter sets r->header_only for HEAD, but check r->method
-     * explicitly so a delayed HEAD can never stall), error pages (already an
-     * error response), and subrequests (handled independently).
+     * We skip the delay when coraza_delay_response_headers is off (operators
+     * who know their loaded ruleset has no phase-4 response rules can restore
+     * normal header streaming and accept that late phase-4 interventions can
+     * no longer produce a clean error page after headers are sent), for HEAD
+     * requests (no body to inspect; nginx's final header filter sets
+     * r->header_only for HEAD, but check r->method explicitly so a delayed HEAD
+     * can never stall), error pages (already an error response), and
+     * subrequests (handled independently).
      * We also skip the delay when body inspection is not needed
      * (SecResponseBodyAccess Off or Content-Type mismatch): in that case
      * there is no phase-4 buffering and the response must not be held back.
@@ -517,10 +587,19 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * body, so the body filter never sees a last_buf to trigger the flush.
      * Delaying the 101 would hold the handshake forever and the upgrade
      * would never complete.
+     *
+     * We likewise skip Server-Sent Events (Content-Type: text/event-stream):
+     * an SSE stream emits events indefinitely and never sends a last_buf, so
+     * the headers would be held until the delayed-body cap forces a flush --
+     * minutes or hours on a real event stream, i.e. the client gets nothing
+     * (issue #81).  See ngx_http_coraza_is_sse_response() above for the
+     * security trade-off this accepts.
      */
-    if (r->method != NGX_HTTP_HEAD && !r->header_only && !r->error_page
+    if (mcf->delay_response_headers
+        && r->method != NGX_HTTP_HEAD && !r->header_only && !r->error_page
         && r == r->main
-        && r->headers_out.status != NGX_HTTP_SWITCHING_PROTOCOLS)
+        && r->headers_out.status != NGX_HTTP_SWITCHING_PROTOCOLS
+        && !ngx_http_coraza_is_sse_response(r))
     {
         /*
          * Delay sending headers until phase 4 completes so that

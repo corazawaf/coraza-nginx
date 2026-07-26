@@ -1,0 +1,183 @@
+# Valgrind memcheck + helgrind suppressions for coraza-nginx soaks.
+#
+# Two classes of noise we deliberately ignore:
+#   1. nginx-core startup/event-loop churn (cycle init, epoll, sock_ntop,
+#      env, crc32 table) — module-agnostic, matches every nginx dynamic
+#      module we ship.
+#   2. libcoraza / cgo Go runtime — the WAF is Go compiled to a C shared
+#      library and dlopen'd at runtime. The Go runtime's scheduler, GC and
+#      thread pool trip both memcheck (uninit reads it manages itself) and
+#      helgrind (its own lock-free sync) in ways valgrind cannot reason
+#      about. We suppress the Go/cgo/dl frames wholesale — we are checking
+#      OUR connector, not re-validating the Go runtime.
+#
+# Keep entries specific to frames; a real leak/race in ngx_http_coraza_*
+# must still surface.
+
+# ---------------------------------------------------------------------------
+# 1. nginx core
+# ---------------------------------------------------------------------------
+{
+   nginx-cycle-init-addr1
+   Memcheck:Addr1
+   fun:ngx_init_cycle
+   fun:ngx_master_process_cycle
+   fun:main
+}
+{
+   nginx-cycle-init-addr4
+   Memcheck:Addr4
+   fun:ngx_init_cycle
+   fun:ngx_master_process_cycle
+   fun:main
+}
+{
+   nginx-cycle-init-cond
+   Memcheck:Cond
+   fun:ngx_init_cycle
+   fun:ngx_master_process_cycle
+   fun:main
+}
+{
+   nginx-sock-ntop-cond
+   Memcheck:Cond
+   fun:ngx_vslprintf
+   fun:ngx_snprintf
+   fun:ngx_sock_ntop
+   ...
+}
+{
+   nginx-sock-ntop-addr1
+   Memcheck:Addr1
+   fun:ngx_vslprintf
+   fun:ngx_snprintf
+   fun:ngx_sock_ntop
+   ...
+}
+{
+   nginx-conf-flush
+   Memcheck:Cond
+   fun:ngx_conf_flush_files
+   ...
+}
+{
+   nginx-set-environment-leak
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   fun:ngx_alloc
+   fun:ngx_set_environment
+   ...
+}
+{
+   nginx-create-pool-leak
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   fun:ngx_alloc
+   fun:ngx_create_pool
+   fun:main
+}
+{
+   nginx-event-init-leak
+   Memcheck:Leak
+   fun:malloc
+   fun:ngx_alloc
+   fun:ngx_event_process_init
+}
+{
+   nginx-crc32-table
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:malloc
+   fun:ngx_alloc
+   fun:ngx_crc32_table_init
+   fun:main
+}
+{
+   nginx-epoll-pwait-sigmask
+   Memcheck:Param
+   epoll_pwait(sigmask)
+   fun:epoll_pwait
+   ...
+}
+{
+   nginx-epoll-ctl
+   Memcheck:Param
+   epoll_ctl(event)
+   fun:epoll_ctl
+   ...
+}
+
+# ---------------------------------------------------------------------------
+# 2. dynamic loader (dlopen of libcoraza)
+# ---------------------------------------------------------------------------
+{
+   dl-open-cond
+   Memcheck:Cond
+   ...
+   fun:_dl_catch_error
+   ...
+}
+{
+   dl-open-leak
+   Memcheck:Leak
+   ...
+   obj:*/ld-*.so*
+}
+{
+   dlopen-libcoraza-leak
+   Memcheck:Leak
+   ...
+   fun:dlopen*
+}
+
+# ---------------------------------------------------------------------------
+# 3. libcoraza / cgo Go runtime (memcheck) — suppress the runtime wholesale.
+# ---------------------------------------------------------------------------
+{
+   coraza-go-runtime-cond
+   Memcheck:Cond
+   ...
+   obj:*/libcoraza.so*
+}
+{
+   coraza-go-runtime-value8
+   Memcheck:Value8
+   ...
+   obj:*/libcoraza.so*
+}
+{
+   coraza-go-runtime-leak
+   Memcheck:Leak
+   ...
+   obj:*/libcoraza.so*
+}
+{
+   coraza-go-runtime-addr
+   Memcheck:Addr8
+   ...
+   obj:*/libcoraza.so*
+}
+
+# ---------------------------------------------------------------------------
+# 4. Go runtime under helgrind — its own lock-free scheduler/GC sync.
+# ---------------------------------------------------------------------------
+{
+   coraza-go-helgrind-race
+   Helgrind:Race
+   ...
+   obj:*/libcoraza.so*
+}
+{
+   coraza-go-helgrind-race-libc-clone
+   Helgrind:Race
+   ...
+   fun:clone
+}
+{
+   coraza-go-helgrind-misc
+   Helgrind:Misc
+   ...
+   obj:*/libcoraza.so*
+}

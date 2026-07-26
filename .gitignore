@@ -1,1 +1,14 @@
 .vscode/
+
+# fuzz build artifacts
+fuzz/fuzz_str_to_char
+fuzz/generated_parser.inc
+fuzz/crash-*
+fuzz/corpus-min/
+fuzz/fuzz-*.log
+
+# soak/local nginx build artifacts (CI fetches these fresh)
+/nginx-*.tar.gz
+/nginx-*/
+compile_commands.json
+_lint/

@@ -330,6 +330,12 @@ static ngx_command_t ngx_http_coraza_commands[] = {
 	 NGX_HTTP_LOC_CONF_OFFSET,
 	 0,
 	 NULL},
+	{ngx_string("coraza_delay_response_headers"),
+	 NGX_HTTP_LOC_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_MAIN_CONF | NGX_CONF_FLAG,
+	 ngx_conf_set_flag_slot,
+	 NGX_HTTP_LOC_CONF_OFFSET,
+	 offsetof(ngx_http_coraza_conf_t, delay_response_headers),
+	 NULL},
 	ngx_null_command};
 
 static ngx_http_module_t ngx_http_coraza_ctx = {
@@ -502,9 +508,11 @@ ngx_http_coraza_create_conf(ngx_conf_t *cf)
 	 *     conf->pool = NULL;
 	 *     conf->transaction_id = NULL;
 	 *     conf->has_rules = 0;
+	 *     conf->delay_response_headers = 0;
 	 */
 
 	conf->enable = NGX_CONF_UNSET;
+	conf->delay_response_headers = NGX_CONF_UNSET;
 	conf->waf = 0;
 	conf->pool = cf->pool;
 	conf->transaction_id = NGX_CONF_UNSET_PTR;
@@ -541,6 +549,8 @@ ngx_http_coraza_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 	   (int)c->enable, (int)p->enable);
 
 	ngx_conf_merge_value(c->enable, p->enable, 0);
+	ngx_conf_merge_value(c->delay_response_headers,
+						 p->delay_response_headers, 1);
 	ngx_conf_merge_ptr_value(c->transaction_id, p->transaction_id, NULL);
 	/*
 	 * Prepend parent rules to child rules — this produces the same rule

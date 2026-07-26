@@ -1,0 +1,478 @@
+name: CI Deep
+
+# Exhaustive dynamic analysis — monthly cron + on-demand only, NEVER on PR.
+# Jobs: fuzz (600s) · memcheck soak · helgrind soak · scanners.
+#   * scanners GATE: flawfinder (--error-level=4), clang-tidy against a real
+#     bear-captured compile DB (cert-*/security warnings-as-errors), semgrep
+#     (--error). libcoraza is built here so coraza.h resolves for clang-tidy.
+#   * fuzz runs the SAME breadth flags as ci-fast (fuzz/run.sh: value-profile,
+#     large max_len, dict, rss ceiling), just longer. ngx_str_to_char() is
+#     trivial, so 600s already exhausts it — the connector's real depth is in
+#     the memcheck/helgrind soak below, which is where long wall-clock pays off.
+#   * memcheck AND helgrind run under tools/soak.sh, which passes
+#     --suppressions=valgrind.suppress and --error-exitcode=99 for BOTH tools.
+#   * libcoraza is a cgo Go shared lib dlopen'd at runtime; its runtime noise
+#     is suppressed wholesale in valgrind.suppress (we check OUR connector).
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # renovate: depName=libcoraza packageName=corazawaf/libcoraza datasource=github-releases
+  LIBCORAZA_VERSION: v1.4.0
+  NGINX_VERSION: "1.30.3"
+  NGINX_SHA256: "e5823dc6f45610993def93ebf6cfce68264af4958c77e874b7d20f3709001b8f"
+  # renovate: depName=angie datasource=github-tags packageName=webserver-llc/angie
+  ANGIE_VERSION: Angie-1.11.8
+
+on:
+  schedule:
+    # Monthly, 1st @ 03:30 UTC.
+    - cron: "30 3 1 * *"
+  workflow_dispatch:
+    inputs:
+      fuzz_seconds:
+        # ngx_str_to_char() is a trivial pure-C fn (one branch, alloc+memcpy+NUL,
+        # no loops/sub-parsing): with value-profile the state-space is exhausted
+        # in minutes — ~306k exec/s locally, new_units flatlines almost at once.
+        # 600s is already generous; longer is pure repetition. Deeper coverage of
+        # this connector lives in the memcheck/helgrind SOAK, not here.
+        description: "Fuzz wall-clock (seconds) — 600 already exhausts this fn"
+        required: false
+        default: "600"
+      fuzz_jobs:
+        description: "Parallel libFuzzer jobs (1 is plenty for this tiny fn)"
+        required: false
+        default: "1"
+
+concurrency:
+  group: ci-deep-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    # amd64-only: the target (ngx_str_to_char) is arch-agnostic pure C
+    # (alloc+memcpy+NUL) — an arm64 fuzz cell adds ~no coverage, and arm64
+    # connector correctness is already exercised by the arm64 memcheck/helgrind
+    # soaks below.
+    name: Fuzz (ngx_str_to_char)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 200M
+    steps:
+      - name: Checkout module
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: ccache cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-cideep-fuzz-${{ github.sha }}
+          restore-keys: |
+            ccache-cideep-fuzz-
+
+      - name: Install clang + libFuzzer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ccache eatmydata
+          echo /usr/lib/ccache >> "$GITHUB_PATH"
+
+      - name: Select fuzz duration + parallelism
+        env:
+          # Dispatch inputs enter via env so the shell only ever sees them as
+          # data, never as script text.
+          FUZZ_SECONDS_INPUT: ${{ github.event.inputs.fuzz_seconds }}
+          FUZZ_JOBS_INPUT: ${{ github.event.inputs.fuzz_jobs }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SECS="$FUZZ_SECONDS_INPUT"
+            JOBS="$FUZZ_JOBS_INPUT"
+          else
+            # Monthly: 600s single-job. This fn's state-space is exhausted well
+            # inside that; more time/cores is repetition (see input comment).
+            SECS="600"
+            JOBS="1"
+          fi
+          [ "$JOBS" = "0" ] && JOBS="$(nproc)"
+          echo "FUZZ_SECS=$SECS" >> "$GITHUB_ENV"
+          echo "FUZZ_JOBS=$JOBS" >> "$GITHUB_ENV"
+
+      - name: Build fuzz target
+        run: bash fuzz/build.sh "$GITHUB_WORKSPACE/fuzz/fuzz_str_to_char"
+
+      - name: Fuzz (parallel, deep-parity breadth)
+        run: bash fuzz/run.sh "$FUZZ_SECS" "$FUZZ_JOBS"
+
+      - name: Minimize + persist corpus
+        if: success()
+        run: |
+          cd fuzz
+          mkdir -p corpus-min
+          ./fuzz_str_to_char -merge=1 corpus-min/ corpus/
+          echo "merged: $(find corpus-min -type f | wc -l) units"
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-deep-crashes
+          path: ${{ github.workspace }}/fuzz/crash-*
+          retention-days: 30
+
+      - name: Upload minimized corpus
+        if: success()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-corpus
+          path: ${{ github.workspace }}/fuzz/corpus-min
+          retention-days: 30
+
+  memcheck:
+    name: Valgrind Memcheck soak (${{ matrix.server }}/${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
+    strategy:
+      fail-fast: false
+      matrix:
+        server: [nginx, angie]
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Checkout module
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      # ccache + Go + source caches (key includes github.job so memcheck and
+      # helgrind get distinct caches; both distinguished by server+arch).
+      - name: ccache cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-${{ github.sha }}
+          restore-keys: |
+            ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-
+      - name: Go build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: gobuild-cideep-${{ matrix.arch }}-${{ env.LIBCORAZA_VERSION }}
+          restore-keys: |
+            gobuild-cideep-${{ matrix.arch }}-
+      - name: Server source cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ github.workspace }}/nginx-${{ env.NGINX_VERSION }}.tar.gz
+            ${{ github.workspace }}/${{ env.ANGIE_VERSION }}.tar.gz
+          key: srv-src-${{ env.NGINX_VERSION }}-${{ env.ANGIE_VERSION }}
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential curl git libpcre2-dev libssl-dev pkg-config \
+            valgrind wget zlib1g-dev unzip ccache eatmydata
+          echo /usr/lib/ccache >> "$GITHUB_PATH"
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: ^1.25.x
+      - name: Build + install libcoraza
+        run: |
+          set -euo pipefail
+          wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
+          unzip -oq "${LIBCORAZA_VERSION}.zip"
+          cd libcoraza-*
+          ./build.sh && ./configure && eatmydata make -j"$(nproc)"
+          sudo eatmydata make install && sudo ldconfig
+      - name: Build debug ${{ matrix.server }} + coraza module
+        run: |
+          set -euo pipefail
+
+          configure_flags=(
+            --with-compat
+            --with-debug
+            --with-threads
+            --with-http_ssl_module
+            --with-http_v2_module
+            --with-http_realip_module
+            --with-http_auth_request_module
+            --add-dynamic-module="$GITHUB_WORKSPACE"
+            --with-cc-opt="-DNGX_DEBUG_PALLOC=1 -g3 -O0 -fno-omit-frame-pointer -funwind-tables $(pkg-config --cflags libpcre2-8)"
+            --with-ld-opt="$(pkg-config --libs libpcre2-8)"
+          )
+
+          case "${{ matrix.server }}" in
+            nginx)
+              test -f "nginx-${NGINX_VERSION}.tar.gz" || wget -q -O "nginx-${NGINX_VERSION}.tar.gz" \
+                "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
+              echo "${NGINX_SHA256}  nginx-${NGINX_VERSION}.tar.gz" | sha256sum -c -
+              tar -xzf "nginx-${NGINX_VERSION}.tar.gz"
+              cd "nginx-${NGINX_VERSION}"
+              ;;
+            angie)
+              test -f "${ANGIE_VERSION}.tar.gz" || wget -q -O "${ANGIE_VERSION}.tar.gz" \
+                "https://github.com/webserver-llc/angie/archive/refs/tags/${ANGIE_VERSION}.tar.gz"
+              tar -xzf "${ANGIE_VERSION}.tar.gz"
+              cd angie-*/
+              ;;
+            *)
+              echo "unknown server: ${{ matrix.server }}" >&2
+              exit 2
+              ;;
+          esac
+
+          ./configure "${configure_flags[@]}"
+          eatmydata make -j"$(nproc)" modules
+          eatmydata make -j"$(nproc)"
+
+          if [ "${{ matrix.server }}" = "nginx" ]; then
+            server_bin="objs/nginx"
+          else
+            server_bin=""
+            for cand in objs/nginx objs/angie; do
+              [ -f "$cand" ] && server_bin="$cand" && break
+            done
+          fi
+          test -n "$server_bin"
+          test -f "$server_bin"
+          test -f objs/ngx_http_coraza_module.so
+          echo "SERVER_BIN=$PWD/$server_bin" >> "$GITHUB_ENV"
+          echo "CORAZA_MODULE_SO=$PWD/objs/ngx_http_coraza_module.so" >> "$GITHUB_ENV"
+      - name: Memcheck soak (300s @ 4 conc, WITH suppressions)
+        env:
+          USE_VALGRIND: "1"
+        run: |
+          bash tools/soak.sh "$SERVER_BIN" 300 4
+
+  helgrind:
+    name: Valgrind Helgrind soak (${{ matrix.server }}/${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        server: [nginx, angie]
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Checkout module
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      # ccache + Go + source caches (key includes github.job so memcheck and
+      # helgrind get distinct caches; both distinguished by server+arch).
+      - name: ccache cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-${{ github.sha }}
+          restore-keys: |
+            ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-
+      - name: Go build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: gobuild-cideep-${{ matrix.arch }}-${{ env.LIBCORAZA_VERSION }}
+          restore-keys: |
+            gobuild-cideep-${{ matrix.arch }}-
+      - name: Server source cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ github.workspace }}/nginx-${{ env.NGINX_VERSION }}.tar.gz
+            ${{ github.workspace }}/${{ env.ANGIE_VERSION }}.tar.gz
+          key: srv-src-${{ env.NGINX_VERSION }}-${{ env.ANGIE_VERSION }}
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential curl git libpcre2-dev libssl-dev pkg-config \
+            valgrind wget zlib1g-dev unzip ccache eatmydata
+          echo /usr/lib/ccache >> "$GITHUB_PATH"
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: ^1.25.x
+      - name: Build + install libcoraza
+        run: |
+          set -euo pipefail
+          wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
+          unzip -oq "${LIBCORAZA_VERSION}.zip"
+          cd libcoraza-*
+          ./build.sh && ./configure && eatmydata make -j"$(nproc)"
+          sudo eatmydata make install && sudo ldconfig
+      - name: Build debug ${{ matrix.server }} + coraza module
+        run: |
+          set -euo pipefail
+
+          configure_flags=(
+            --with-compat
+            --with-debug
+            --with-threads
+            --with-http_ssl_module
+            --with-http_v2_module
+            --with-http_realip_module
+            --with-http_auth_request_module
+            --add-dynamic-module="$GITHUB_WORKSPACE"
+            --with-cc-opt="-DNGX_DEBUG_PALLOC=1 -g3 -O0 -fno-omit-frame-pointer -funwind-tables $(pkg-config --cflags libpcre2-8)"
+            --with-ld-opt="$(pkg-config --libs libpcre2-8)"
+          )
+
+          case "${{ matrix.server }}" in
+            nginx)
+              test -f "nginx-${NGINX_VERSION}.tar.gz" || wget -q -O "nginx-${NGINX_VERSION}.tar.gz" \
+                "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
+              echo "${NGINX_SHA256}  nginx-${NGINX_VERSION}.tar.gz" | sha256sum -c -
+              tar -xzf "nginx-${NGINX_VERSION}.tar.gz"
+              cd "nginx-${NGINX_VERSION}"
+              ;;
+            angie)
+              test -f "${ANGIE_VERSION}.tar.gz" || wget -q -O "${ANGIE_VERSION}.tar.gz" \
+                "https://github.com/webserver-llc/angie/archive/refs/tags/${ANGIE_VERSION}.tar.gz"
+              tar -xzf "${ANGIE_VERSION}.tar.gz"
+              cd angie-*/
+              ;;
+            *)
+              echo "unknown server: ${{ matrix.server }}" >&2
+              exit 2
+              ;;
+          esac
+
+          ./configure "${configure_flags[@]}"
+          eatmydata make -j"$(nproc)" modules
+          eatmydata make -j"$(nproc)"
+
+          if [ "${{ matrix.server }}" = "nginx" ]; then
+            server_bin="objs/nginx"
+          else
+            server_bin=""
+            for cand in objs/nginx objs/angie; do
+              [ -f "$cand" ] && server_bin="$cand" && break
+            done
+          fi
+          test -n "$server_bin"
+          test -f "$server_bin"
+          test -f objs/ngx_http_coraza_module.so
+          echo "SERVER_BIN=$PWD/$server_bin" >> "$GITHUB_ENV"
+          echo "CORAZA_MODULE_SO=$PWD/objs/ngx_http_coraza_module.so" >> "$GITHUB_ENV"
+      - name: Helgrind soak (300s @ 4 conc, --error-exitcode=99, WITH suppressions)
+        env:
+          USE_HELGRIND: "1"
+        run: |
+          bash tools/soak.sh "$SERVER_BIN" 300 4
+
+  scanners:
+    name: Security scanners
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout module
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      # NOTE: this job deliberately does NOT use ccache — the clang-tidy gate
+      # depends on a real `bear`-captured compile of every TU; ccache would
+      # short-circuit compilation and leave the compile DB empty/stale. Go +
+      # source caching are safe and still applied.
+      - name: Go build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: gobuild-cideep-scanners-${{ env.LIBCORAZA_VERSION }}
+          restore-keys: |
+            gobuild-cideep-scanners-
+      - name: nginx source cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/nginx-${{ env.NGINX_VERSION }}.tar.gz
+          key: nginx-src-${{ env.NGINX_VERSION }}
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flawfinder clang-tidy bear python3 python3-pip gcc make eatmydata
+          pip3 install --quiet semgrep
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: ^1.25.x
+      # Real compile DB requires libcoraza's coraza.h + a genuine module compile.
+      # Build+install libcoraza (same recipe as build.yml), then bear-wrap
+      # `make modules` so clang-tidy sees the ACTUAL translation units.
+      - name: Build libcoraza (provides coraza.h)
+        run: |
+          set -euo pipefail
+          wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
+          unzip -qo "${LIBCORAZA_VERSION}.zip"
+          cd libcoraza-*
+          ./build.sh
+          ./configure
+          eatmydata make
+          sudo eatmydata make install
+          sudo ldconfig
+      - name: Configure + bear-capture module compile (compile_commands.json)
+        run: |
+          set -euo pipefail
+          test -f "nginx-${NGINX_VERSION}.tar.gz" || \
+            wget -q -O "nginx-${NGINX_VERSION}.tar.gz" \
+              "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
+          echo "${NGINX_SHA256}  nginx-${NGINX_VERSION}.tar.gz" | sha256sum -c -
+          tar -xzf "nginx-${NGINX_VERSION}.tar.gz"
+          cd "nginx-${NGINX_VERSION}"
+          CC=gcc ./configure --with-compat --with-debug \
+            --add-dynamic-module="$GITHUB_WORKSPACE" >/dev/null
+          bear --output "$GITHUB_WORKSPACE/compile_commands.json" -- make modules
+          echo "NGINX_SRC_TREE=$PWD" >> "$GITHUB_ENV"
+      - name: flawfinder (gating)
+        run: |
+          set -o pipefail
+          # --error-level=4 fails the job on level>=4 (writes/format-string/etc).
+          flawfinder --minlevel=1 --error-level=4 "$GITHUB_WORKSPACE/src/" 2>&1 | tee flawfinder.log
+      - name: clang-tidy (cert-*, security.*, GATING — real compile DB)
+        run: |
+          set -uo pipefail
+          FAIL=0
+          for f in "$GITHUB_WORKSPACE"/src/*.c; do
+            clang-tidy -p "$GITHUB_WORKSPACE" "$f" \
+              --warnings-as-errors='cert-*,clang-analyzer-security.*' \
+              --checks='-*,cert-*,clang-analyzer-security.*,-clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling' \
+              2>&1 | tee -a clang-tidy.log || FAIL=1
+          done
+          [ "$FAIL" -eq 0 ]
+      - name: semgrep (gating)
+        run: |
+          set -o pipefail
+          semgrep scan --error --config p/c --config p/security-audit \
+            "$GITHUB_WORKSPACE/src/" 2>&1 | tee semgrep.log
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-reports
+          path: |
+            ${{ github.workspace }}/flawfinder.log
+            ${{ github.workspace }}/clang-tidy.log
+            ${{ github.workspace }}/semgrep.log
+            ${{ github.workspace }}/compile_commands.json
+          retention-days: 14
