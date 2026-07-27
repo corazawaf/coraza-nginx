@@ -81,6 +81,23 @@ ngx_fuzz_pool_reset(ngx_pool_t *pool)
 /* src/core/ngx_string.h: ngx_memcpy() — thin wrapper over memcpy(). */
 #define ngx_memcpy(dst, src, n)  (void) memcpy(dst, src, n)
 
+/*
+ * Slice needed by ngx_http_coraza_pack_headers(): it only ever reads
+ * r->pool and the pairs[] array, so a request stub carrying just the pool
+ * is faithful. ngx_http_coraza_header_t mirrors the real struct in
+ * ngx_http_coraza_common.h (two ngx_str_t: name, value).
+ */
+#include <limits.h>  /* INT_MAX used by the packed-length overflow guards */
+
+typedef struct {
+    ngx_pool_t *pool;
+} ngx_http_request_t;
+
+typedef struct {
+    ngx_str_t name;
+    ngx_str_t value;
+} ngx_http_coraza_header_t;
+
 /* src/core/ddebug.h: dd() is compiled out unless CORAZA_DDEBUG. */
 #ifndef dd
 #define dd(...) (void) 0

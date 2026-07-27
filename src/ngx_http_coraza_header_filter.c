@@ -74,6 +74,44 @@ ngx_http_coraza_add_response_header(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
+    /*
+     * Bulk path: buffer the pair for a single coraza_add_response_headers()
+     * crossing later, rather than one cgo call per header.  The collector is
+     * armed by the header filter only when libcoraza exposes the bulk symbol.
+     *
+     * Copy name and value into r->pool: several resolvers synthesize their
+     * value in a function-local stack buffer (Content-Length, Last-Modified,
+     * the Keep-Alive timeout), which would dangle by the time the collected
+     * set is flushed.  The duplication cost is paid only on the bulk path and
+     * only for headers that are actually inspected.
+     */
+    if (ctx->resp_hdr_collect != NULL) {
+        ngx_http_coraza_header_t *pair = ngx_array_push(ctx->resp_hdr_collect);
+        if (pair == NULL) {
+            return NGX_ERROR;
+        }
+
+        pair->name.len = name->len;
+        pair->name.data = name->len ? ngx_pnalloc(r->pool, name->len) : NULL;
+        if (name->len && pair->name.data == NULL) {
+            return NGX_ERROR;
+        }
+        if (name->len) {
+            ngx_memcpy(pair->name.data, name->data, name->len);
+        }
+
+        pair->value.len = value->len;
+        pair->value.data = value->len ? ngx_pnalloc(r->pool, value->len) : NULL;
+        if (value->len && pair->value.data == NULL) {
+            return NGX_ERROR;
+        }
+        if (value->len) {
+            ngx_memcpy(pair->value.data, value->data, value->len);
+        }
+
+        return NGX_OK;
+    }
+
     if (coraza_add_response_header(ctx->coraza_transaction,
         (char *) name->data,
         name->len,
@@ -147,15 +185,18 @@ ngx_http_coraza_resolv_header_content_length(ngx_http_request_t *r, ngx_str_t na
 {
     ngx_http_coraza_ctx_t *ctx = NULL;
     ngx_str_t value;
-    char buf[NGX_INT64_LEN+2];
+    u_char buf[NGX_INT64_LEN+2];
+    u_char *p;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
     if (r->headers_out.content_length_n >= 0)
     {
-        ngx_sprintf((u_char *)buf, "%O%Z", r->headers_out.content_length_n);
-        value.data = (unsigned char *)buf;
-        value.len = strlen(buf);
+        /* ngx_sprintf returns a pointer past the last byte written, so the
+         * length is (p - buf) -- no strlen() rescan of the buffer. */
+        p = ngx_sprintf(buf, "%O", r->headers_out.content_length_n);
+        value.data = buf;
+        value.len = (size_t) (p - buf);
 
         return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
     }
@@ -370,6 +411,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     ngx_table_elt_t *data = part->elts;
     ngx_uint_t i = 0;
     int ret = 0;
+    int pret = 0;
     ngx_int_t rc;
     ngx_uint_t status;
     char *http_response_ver;
@@ -400,6 +442,22 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     }
 
     ctx->processed = 1;
+
+    /*
+     * Arm the bulk collector when libcoraza can take all response headers in
+     * one cgo crossing (1.6+).  Every ngx_http_coraza_add_response_header()
+     * below then buffers into ctx->resp_hdr_collect instead of crossing per
+     * header; we flush the whole set once, just before
+     * coraza_process_response_headers().  If arming fails (allocation) or the
+     * symbol is absent, resp_hdr_collect stays NULL and the per-header path is
+     * used unchanged.
+     */
+    if (ngx_http_coraza_bulk_headers_available()) {
+        ctx->resp_hdr_collect = ngx_array_create(r->pool, 16,
+            sizeof(ngx_http_coraza_header_t));
+        /* NULL on failure is fine: falls back to the direct path. */
+    }
+
     /*
      *
      * Assuming Coraza module is running immediately before the
@@ -453,6 +511,57 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
         }
     }
 
+    /*
+     * Flush the collected response headers in a single cgo crossing.  Detach
+     * the collector first so this loop's own submissions go direct rather than
+     * re-buffering, and so a fallback replay after a pack failure also takes
+     * the direct path.
+     */
+    if (ctx->resp_hdr_collect != NULL) {
+        ngx_array_t              *collected = ctx->resp_hdr_collect;
+        ngx_http_coraza_header_t *hp = collected->elts;
+        u_char                   *packed;
+        size_t                    packed_len;
+
+        ctx->resp_hdr_collect = NULL;
+
+        ngx_int_t bulk_ok = 0;
+
+        if (collected->nelts > 0
+            && ngx_http_coraza_pack_headers(r, hp, collected->nelts,
+                   &packed, &packed_len) == NGX_OK)
+        {
+            /*
+             * A negative return means Coraza rejected the whole batch; treat
+             * it like a pack failure and replay per-header below, so a batch
+             * failure never degrades to zero response headers inspected.
+             */
+            if (coraza_add_response_headers(ctx->coraza_transaction,
+                    (char *) packed, (int) packed_len,
+                    (int) collected->nelts) >= 0)
+            {
+                bulk_ok = 1;
+            } else {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                    "coraza: bulk response-header submission failed, "
+                    "falling back to per-header path");
+            }
+        }
+
+        if (!bulk_ok) {
+            /* Pack failed (over-range header), empty, or the bulk submission
+             * was rejected: replay directly. The pairs were copied into
+             * r->pool when collected, so they are safe to submit now. */
+            for (i = 0; i < collected->nelts; i++) {
+                rc = ngx_http_coraza_add_response_header(r, ctx,
+                    &hp[i].name, &hp[i].value);
+                if (rc != NGX_OK) {
+                    return rc;
+                }
+            }
+        }
+    }
+
     /* prepare extra paramters for msc_process_response_headers() */
     if (r->err_status) {
         status = r->err_status;
@@ -481,7 +590,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     }
 #endif
 
-    coraza_process_response_headers(ctx->coraza_transaction, status, http_response_ver);
+    pret = coraza_process_response_headers(ctx->coraza_transaction, status, http_response_ver);
 
     /*
      * Determine whether response-body inspection is needed for this
@@ -503,7 +612,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     ctx->response_body_processable =
         ngx_http_coraza_is_response_body_processable(ctx->coraza_transaction);
 
-    ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
+    ret = ngx_http_coraza_poll_after_process(ctx, r, 0, pret);
     if (r->error_page) {
         return ngx_http_next_header_filter(r);
     }

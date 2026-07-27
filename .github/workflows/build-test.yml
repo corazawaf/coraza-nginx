@@ -145,7 +145,7 @@ jobs:
           # libcryptx-perl + openssl back the HTTP/3 prove tests: Test::Nginx's
           # HTTP3 helper needs CryptX, and the tests generate their own certs.
           sudo apt-get -y -qq --no-install-recommends install \
-            gcc make ccache eatmydata mold libcryptx-perl openssl
+            gcc make ccache eatmydata mold autoconf automake libtool libcryptx-perl openssl
           # Route gcc/cc through ccache for every later step.
           echo /usr/lib/ccache >> "$GITHUB_PATH"
 

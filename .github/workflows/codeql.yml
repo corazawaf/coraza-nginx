@@ -64,7 +64,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential curl git libpcre2-dev pkg-config \
-            wget zlib1g-dev unzip eatmydata
+            wget zlib1g-dev unzip eatmydata autoconf automake libtool
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4

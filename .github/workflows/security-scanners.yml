@@ -69,7 +69,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             flawfinder clang-tidy python3 python3-pip pipx curl \
-            build-essential libpcre2-dev zlib1g-dev pkg-config wget
+            build-essential libpcre2-dev zlib1g-dev pkg-config wget \
+            autoconf automake libtool
           # semgrep via pipx: PEP 668 blocks a bare `pip3 install` into the
           # system Python on Ubuntu 24.04.
           # PINNED for a reproducible, non-moving supply chain (bump

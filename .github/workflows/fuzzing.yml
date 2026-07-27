@@ -55,14 +55,21 @@ jobs:
           sudo apt-get install -y clang ccache eatmydata
           echo /usr/lib/ccache >> "$GITHUB_PATH"
 
-      - name: Build fuzz target
-        run: bash fuzz/build.sh "$GITHUB_WORKSPACE/fuzz/fuzz_str_to_char"
+      - name: Build fuzz targets
+        # No-arg build.sh builds every target next to the script
+        # (fuzz_str_to_char + fuzz_pack_headers).
+        run: bash fuzz/build.sh
 
-      - name: Run fuzzer (120s regression, deep-parity breadth)
+      - name: Run fuzzers (120s regression total, deep-parity breadth)
         # Same breadth flags as ci-deep (value-profile, large max_len, dict,
         # rss ceiling) via the shared fuzz/run.sh — only the duration differs.
         # jobs=1 keeps PR wall-clock short; ci-deep fans out across all cores.
-        run: bash fuzz/run.sh 120 1
+        # Two targets: split the budget so total PR wall-clock is unchanged.
+        run: |
+          bash fuzz/run.sh 60 1
+          FUZZ_BIN="$GITHUB_WORKSPACE/fuzz/fuzz_pack_headers" \
+          CORPUS_DIR="$GITHUB_WORKSPACE/fuzz/corpus_pack_headers" \
+            bash fuzz/run.sh 60 1
 
       - name: Upload crash artifacts
         if: failure()

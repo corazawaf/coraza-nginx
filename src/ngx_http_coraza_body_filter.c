@@ -189,7 +189,7 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                 coraza_append_response_body(ctx->coraza_transaction, data, len);
             }
 
-            ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
+            ret = ngx_http_coraza_process_intervention(ctx, r, 0);
             if (ret > 0) {
                 if (ctx->headers_delayed) {
                     ctx->intervention_triggered = 1;
@@ -224,9 +224,10 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
          */
         if (is_last) {
             int ret;
+            int pret;
 
-            if (ngx_http_coraza_process_body_failed(
-                    coraza_process_response_body(ctx->coraza_transaction)))
+            pret = coraza_process_response_body(ctx->coraza_transaction);
+            if (ngx_http_coraza_process_body_failed(pret))
             {
                 /*
                  * Phase 4 could not be evaluated; no interruption is set, so
@@ -244,7 +245,7 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                     &ngx_http_coraza_module, NGX_HTTP_INTERNAL_SERVER_ERROR);
             }
 
-            ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
+            ret = ngx_http_coraza_poll_after_process(ctx, r, 0, pret);
             if (ret > 0) {
                 if (ctx->headers_delayed) {
                     ctx->intervention_triggered = 1;

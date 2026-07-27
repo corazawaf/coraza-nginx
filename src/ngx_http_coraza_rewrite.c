@@ -42,6 +42,7 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
     if (ctx == NULL)
     {
         int ret = 0;
+        int pret = 0;
 
         ngx_connection_t *connection = r->connection;
 
@@ -102,12 +103,15 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
         if (ret != 1){
             dd("Was not able to extract connection information.");
         }
-        dd("Processing intervention with the connection information filled in");
-        ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 1);
-        if (ret > 0) {
-            ctx->intervention_triggered = 1;
-            return ret;
-        }
+        /*
+         * No intervention poll here: coraza_process_connection only populates
+         * connection variables (REMOTE_ADDR/PORT, SERVER_ADDR/PORT) and runs no
+         * rule phase, so tx.Interruption() is provably nil at this point on
+         * every libcoraza version (coraza core sets tx.interruption only inside
+         * phase evaluation, first reached at ProcessRequestHeaders). A phase-1
+         * REMOTE_ADDR deny still fires at the post-request-headers poll below.
+         */
+        dd("connection variables filled in; first rule phase is request headers");
 
         /* Coraza sets REQUEST_PROTOCOL to this string verbatim
          * (Transaction.ProcessURI -> requestProtocol.Set), and every
@@ -154,12 +158,13 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
         
         coraza_process_uri(ctx->coraza_transaction, uri, method, http_version);
 
-        dd("Processing intervention with the transaction information filled in (uri, method and version)");
-        ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 1);
-        if (ret > 0) {
-            ctx->intervention_triggered = 1;
-            return ret;
-        }
+        /*
+         * No intervention poll here either: coraza_process_uri only populates
+         * URI-derived variables (REQUEST_URI, REQUEST_METHOD, ARGS, …) and runs
+         * no rule phase, so tx.Interruption() is still provably nil. A phase-1
+         * REQUEST_URI deny fires at ProcessRequestHeaders → the poll below.
+         */
+        dd("uri/method/version variables filled in");
 
         /**
          * Since incoming request headers are already in place, lets send it to Coraza
@@ -168,7 +173,92 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
         ngx_list_part_t *part = &r->headers_in.headers.part;
         ngx_table_elt_t *data = part->elts;
         ngx_uint_t i = 0;
-        for (i = 0 ; /* void */ ; i++) {
+        ngx_int_t  bulk_done = 0;
+
+        /*
+         * Fast path (libcoraza 1.6+): pack every request header into one
+         * buffer and hand Coraza the whole set in a single cgo crossing,
+         * instead of one crossing per header.  Falls through to the
+         * per-header loop below if the bulk symbol is absent or the pack
+         * fails (e.g. an over-range header length -- treated as fail-closed
+         * there too).
+         */
+        if (ngx_http_coraza_bulk_headers_available()) {
+            ngx_http_coraza_header_t *pairs;
+            ngx_uint_t nheaders = 0;
+            ngx_list_part_t *cp = part;
+            ngx_table_elt_t *cd = cp->elts;
+
+            for (i = 0; ; i++) {
+                if (i >= cp->nelts) {
+                    if (cp->next == NULL) {
+                        break;
+                    }
+                    cp = cp->next;
+                    cd = cp->elts;
+                    i = 0;
+                }
+                if (cd[i].hash != 0) {
+                    nheaders++;
+                }
+            }
+
+            if (nheaders == 0) {
+                bulk_done = 1;   /* nothing to add, skip the fallback loop */
+            } else {
+                pairs = ngx_palloc(r->pool,
+                    nheaders * sizeof(ngx_http_coraza_header_t));
+                if (pairs != NULL) {
+                    ngx_uint_t k = 0;
+                    u_char    *packed;
+                    size_t     packed_len;
+
+                    cp = part;
+                    cd = cp->elts;
+                    for (i = 0; ; i++) {
+                        if (i >= cp->nelts) {
+                            if (cp->next == NULL) {
+                                break;
+                            }
+                            cp = cp->next;
+                            cd = cp->elts;
+                            i = 0;
+                        }
+                        if (cd[i].hash == 0) {
+                            continue;
+                        }
+                        pairs[k].name = cd[i].key;
+                        pairs[k].value = cd[i].value;
+                        k++;
+                    }
+
+                    if (ngx_http_coraza_pack_headers(r, pairs, k,
+                            &packed, &packed_len) == NGX_OK)
+                    {
+                        /*
+                         * A negative return means Coraza rejected the whole
+                         * batch (bad framing, count mismatch, allocation
+                         * failure).  Do NOT commit to the bulk path in that
+                         * case -- leaving bulk_done == 0 lets the per-header
+                         * loop below replay every header, so a batch failure
+                         * degrades to the same coverage as the fallback path
+                         * rather than to zero headers inspected.
+                         */
+                        if (coraza_add_request_headers(ctx->coraza_transaction,
+                                (char *) packed, (int) packed_len, (int) k) >= 0)
+                        {
+                            bulk_done = 1;
+                        } else {
+                            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                                "coraza: bulk request-header submission failed, "
+                                "falling back to per-header path");
+                        }
+                    }
+                }
+            }
+        }
+
+        for (i = 0 ; !bulk_done ; i++) {
             if (i >= part->nelts) {
                 if (part->next == NULL) {
                     break;
@@ -219,9 +309,9 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
          * to process this information.
          */
 
-        coraza_process_request_headers(ctx->coraza_transaction);
+        pret = coraza_process_request_headers(ctx->coraza_transaction);
         dd("Processing intervention with the request headers information filled in");
-        ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 1);
+        ret = ngx_http_coraza_poll_after_process(ctx, r, 1, pret);
         if (r->error_page) {
             return NGX_DECLINED;
             }
