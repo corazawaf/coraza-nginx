@@ -142,8 +142,10 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -qq update
+          # libcryptx-perl + openssl back the HTTP/3 prove tests: Test::Nginx's
+          # HTTP3 helper needs CryptX, and the tests generate their own certs.
           sudo apt-get -y -qq --no-install-recommends install \
-            gcc make ccache eatmydata mold
+            gcc make ccache eatmydata mold libcryptx-perl openssl
           # Route gcc/cc through ccache for every later step.
           echo /usr/lib/ccache >> "$GITHUB_PATH"
 
@@ -181,7 +183,16 @@ jobs:
           if [ "${{ matrix.debug_build }}" = "true" ]; then
             EXTRA_CC=" -DCORAZA_DDEBUG=1 -Werror"
           fi
+          # HTTP/3 so the QUIC prove tests (t/coraza-h3-protocol.t) have a
+          # listener to talk to; without it Test::Nginx's has(http_v3) guard
+          # skips them and the HTTP/3 protocol mapping ships uncovered. Both
+          # nginx cells are >= 1.25.0, where the flag exists.
+          EXTRA_CONF=""
+          if [ "${{ matrix.server }}" = "nginx" ]; then
+            EXTRA_CONF="--with-http_v3_module"
+          fi
           ./configure \
+          $EXTRA_CONF \
           --with-compat \
           --add-dynamic-module=${{ github.workspace }}/ \
           --with-cc-opt="-g -O2 -fstack-protector-strong -Wformat -Werror=format-security -Wno-unused-function -fPIC -Wdate-time -D_FORTIFY_SOURCE=2${EXTRA_CC}" \
@@ -300,6 +311,9 @@ jobs:
           cp ../t/* .
           export TEST_NGINX_BINARY=/usr/sbin/nginx
           export TEST_NGINX_GLOBALS="load_module \"/usr/lib/nginx/modules/ngx_http_coraza_module.so\";"
+          # Pin the protocol-map test to the tree this cell built, rather than
+          # letting it glob for any nginx-* in the workspace.
+          export TEST_NGINX_SOURCE="${{ github.workspace }}/$SRC_DIR"
           prove coraza*.t
 
       - name: Install go-ftw

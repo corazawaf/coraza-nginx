@@ -461,13 +461,23 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     }
 
     /*
-     * NGINX always sends HTTP response with HTTP/1.1, except cases when
-     * HTTP V2 module is enabled, and request has been posted with HTTP/2.0.
+     * Report the response protocol version to the WAF from r->http_version,
+     * not r->stream.  r->stream is set only for HTTP/2, so the old
+     * "#if NGX_HTTP_V2 && r->stream" test reported every HTTP/3 response as
+     * HTTP/1.1 -- any rule keyed on the response protocol mis-fired on QUIC
+     * traffic.  A version check covers h2 and h3 alike and matches
+     * ngx_http_coraza_resolv_header_connection() above, which already keys on
+     * r->http_version >= NGX_HTTP_VERSION_20 for the same reason.
      */
-    http_response_ver = "HTTP 1.1";
+    http_response_ver = "HTTP/1.1";
 #if (NGX_HTTP_V2)
-    if (r->stream) {
-        http_response_ver = "HTTP 2.0";
+    if (r->http_version == NGX_HTTP_VERSION_20) {
+        http_response_ver = "HTTP/2.0";
+    }
+#endif
+#if defined(nginx_version) && nginx_version >= 1025000
+    if (r->http_version == NGX_HTTP_VERSION_30) {
+        http_response_ver = "HTTP/3.0";
     }
 #endif
 
