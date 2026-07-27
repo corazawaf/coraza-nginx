@@ -26,7 +26,7 @@ select STDOUT; $| = 1;
 
 my $root = "$FindBin::Bin/..";
 my $src = slurp("$root/src/ngx_http_coraza_body_filter.c");
-my $t = Test::Nginx->new()->has(qw/http/)->plan(11);
+my $t = Test::Nginx->new()->has(qw/http/)->plan(12);
 
 like($src,
     qr/!\s*ctx->response_body_processable\s*&&\s*!\s*ngx_buf_in_memory\(chain->buf\)\s*&&\s*chain->buf->in_file\s*&&\s*chain->buf->file\s*!=\s*NULL\s*&&\s*!\s*chain->buf->temp_file.*?\*b\s*=\s*\*chain->buf/s,
@@ -164,6 +164,24 @@ like($r, qr/^HTTP\S+ 200/,
 ($body) = $r =~ /\r\n\r\n(.*)$/s;
 is(length($body // ''), $cap_size,
     'body past the delay cap is streamed through intact');
+
+# The status/length assertions above pass whether or not the cap tripped, so
+# assert the early-flush warning explicitly.
+#
+# NOTE: this pins the cap + intact-body behaviour on the in-memory path only.
+# It does NOT cover the file-backed clone branch this change fixes: with
+# sendfile off nginx copies the file into memory buffers, so the cap trips via
+# the pre-existing "ctx->pending_bytes += len" path, and this assertion still
+# passes with the file-range charge reverted. Covering the clone branch needs a
+# producer of repeated *non-final* non-temp file buffers -- ngx_http_static
+# cannot do it (it emits the whole file as one last_buf buffer, see
+# ngx_http_static_module.c: b->file_last = of.size; b->last_buf = 1), and
+# upstream temp files are excluded by the !temp_file guard. Until such a
+# producer exists here, the file-range charge is pinned by the source-shape
+# assertion near the top of this file.
+like($t->read_file('error.log'),
+    qr/coraza: delayed response body exceeded \d+ bytes; flushing headers early/,
+    'oversized delayed response tripped the delayed-body cap (in-memory path)');
 
 ###############################################################################
 
