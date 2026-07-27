@@ -184,27 +184,57 @@ ngx_http_coraza_create_ctx(ngx_http_request_t *r)
 			return NULL;
 		}
 		ctx->coraza_transaction = coraza_new_transaction_with_id(waf, (char *)s.data);
-		ctx->transaction_id.data = ngx_pstrdup(r->pool, &s);
-		ctx->transaction_id.len = s.len;
 	}
 	else
 	{
 		ctx->coraza_transaction = coraza_new_transaction(waf);
-		ngx_str_null(&ctx->transaction_id);
+		ngx_str_null(&s);
+	}
+
+	/*
+	 * Validate the transaction handle before use. A NULL handle would make
+	 * every subsequent coraza_process and coraza_add call inspect nothing
+	 * (fail-open) and would be passed on to coraza_free_transaction() in the
+	 * cleanup. Fail closed instead: the caller turns a NULL ctx into a 500.
+	 */
+	if (ctx->coraza_transaction == 0)
+	{
+		dd("failed to create the CORAZA transaction");
+		return NULL;
 	}
 
 	dd("transaction created");
 
 	ngx_http_set_ctx(r, ctx, ngx_http_coraza_module);
 
+	/*
+	 * Register the cleanup now that the transaction exists, so that any
+	 * failure below (e.g. the ngx_pstrdup) still frees the transaction.
+	 */
 	cln = ngx_pool_cleanup_add(r->pool, 0);
 	if (cln == NULL)
 	{
 		dd("failed to create the CORAZA context cleanup");
+		(void) coraza_free_transaction(ctx->coraza_transaction);
+		ctx->coraza_transaction = 0;
 		return NULL;
 	}
 	cln->handler = ngx_http_coraza_cleanup;
 	cln->data = ctx;
+
+	if (mcf->transaction_id)
+	{
+		ctx->transaction_id.data = ngx_pstrdup(r->pool, &s);
+		if (ctx->transaction_id.data == NULL)
+		{
+			return NULL;
+		}
+		ctx->transaction_id.len = s.len;
+	}
+	else
+	{
+		ngx_str_null(&ctx->transaction_id);
+	}
 
 	return ctx;
 }
