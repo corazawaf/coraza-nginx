@@ -1,7 +1,14 @@
 name: CI Deep
 
 # Exhaustive dynamic analysis — monthly cron + on-demand only, NEVER on PR.
-# Jobs: fuzz (600s) · memcheck soak · helgrind soak · scanners.
+# Jobs: fuzz (600s) · memcheck soak · helgrind soak · scanners · codeql ·
+#       asan (300s deep soak).
+#   * The fast PR path runs cheaper versions of several of these: fuzzing.yml
+#     (120s), asan.yml (60s), security-scanners.yml, codeql.yml. This file is
+#     the deep counterpart — longer soaks, gating scanners, full CodeQL.
+#   * valgrind IS the memcheck + helgrind soaks below; security-scanners IS the
+#     `scanners` job below — both already live here, so "add valgrind/scanners
+#     to ci-deep" needed no new job. codeql + a deep asan soak are the additions.
 #   * scanners GATE: flawfinder (--error-level=4), clang-tidy against a real
 #     bear-captured compile DB (cert-*/security warnings-as-errors), semgrep
 #     (--error). libcoraza is built here so coraza.h resolves for clang-tidy.
@@ -16,12 +23,9 @@ name: CI Deep
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  # renovate: depName=libcoraza packageName=corazawaf/libcoraza datasource=github-releases
-  LIBCORAZA_VERSION: v1.4.0
-  NGINX_VERSION: "1.30.3"
-  NGINX_SHA256: "e5823dc6f45610993def93ebf6cfce68264af4958c77e874b7d20f3709001b8f"
-  # renovate: depName=angie datasource=github-tags packageName=webserver-llc/angie
-  ANGIE_VERSION: Angie-1.11.8
+  # NGINX_VERSION / NGINX_VERSION_SHA256 / LIBCORAZA_VERSION / ANGIE_VERSION / ANGIE_SHA256
+  # come from .github/versions.env, loaded per job via load-versions.sh (first
+  # step). Single source of truth (bump.yml owns versions.env).
 
 on:
   schedule:
@@ -57,7 +61,7 @@ jobs:
     # connector correctness is already exercised by the arm64 memcheck/helgrind
     # soaks below.
     name: Fuzz (ngx_str_to_char)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -72,8 +76,9 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-cideep-fuzz-${{ github.sha }}
+          key: ccache-cideep-fuzz-${{ hashFiles('.github/versions.env') }}-${{ github.sha }}
           restore-keys: |
+            ccache-cideep-fuzz-${{ hashFiles('.github/versions.env') }}-
             ccache-cideep-fuzz-
 
       - name: Install clang + libFuzzer
@@ -139,29 +144,34 @@ jobs:
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 500M
+    # amd64-only: valgrind memcheck/helgrind are arch-agnostic (they interpret
+    # the binary), so an arm64 cell re-runs the same analysis for ~no extra
+    # coverage while doubling deep-run minutes. arm64 *compilation* is proven
+    # by the build.yml matrix.
     strategy:
       fail-fast: false
       matrix:
         server: [nginx, angie]
-        arch: [amd64, arm64]
+        arch: [amd64]
         include:
           - arch: amd64
-            runner: ubuntu-24.04
-          - arch: arm64
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-26.04
     steps:
       - name: Checkout module
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+      - name: Load version pins
+        run: bash .github/scripts/load-versions.sh
       # ccache + Go + source caches (key includes github.job so memcheck and
       # helgrind get distinct caches; both distinguished by server+arch).
       - name: ccache cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-${{ github.sha }}
+          key: ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-${{ hashFiles('.github/versions.env') }}-${{ github.sha }}
           restore-keys: |
+            ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-${{ hashFiles('.github/versions.env') }}-
             ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-
       - name: Go build cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -169,35 +179,39 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: gobuild-cideep-${{ matrix.arch }}-${{ env.LIBCORAZA_VERSION }}
+          key: gobuild-cideep-${{ matrix.arch }}-${{ hashFiles('.github/versions.env') }}
           restore-keys: |
             gobuild-cideep-${{ matrix.arch }}-
       - name: Server source cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            ${{ github.workspace }}/nginx-${{ env.NGINX_VERSION }}.tar.gz
-            ${{ github.workspace }}/${{ env.ANGIE_VERSION }}.tar.gz
-          key: srv-src-${{ env.NGINX_VERSION }}-${{ env.ANGIE_VERSION }}
+            ${{ github.workspace }}/nginx-src.tar.gz
+            ${{ github.workspace }}/angie-src.tar.gz
+          key: srv-src-${{ matrix.server }}-${{ hashFiles('.github/versions.env') }}
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential curl git libpcre2-dev libssl-dev pkg-config \
-            valgrind wget zlib1g-dev unzip ccache eatmydata
+            valgrind wget zlib1g-dev unzip ccache eatmydata mold
           echo /usr/lib/ccache >> "$GITHUB_PATH"
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: ^1.25.x
+      - name: libcoraza built-tree cache
+        id: cache-libcoraza
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/libcoraza-build
+          key: libcoraza-built-${{ matrix.arch }}-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
       - name: Build + install libcoraza
-        run: |
-          set -euo pipefail
-          wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
-          unzip -oq "${LIBCORAZA_VERSION}.zip"
-          cd libcoraza-*
-          ./build.sh && ./configure && eatmydata make -j"$(nproc)"
-          sudo eatmydata make install && sudo ldconfig
+        # Verified fetch (sha256) + build/install, single-sourced across all jobs.
+        env:
+          LIBCORAZA_CACHE_HIT: ${{ steps.cache-libcoraza.outputs.cache-hit }}
+          MAKE: eatmydata make
+        run: bash .github/scripts/build-libcoraza.sh
       - name: Build debug ${{ matrix.server }} + coraza module
         run: |
           set -euo pipefail
@@ -208,25 +222,27 @@ jobs:
             --with-threads
             --with-http_ssl_module
             --with-http_v2_module
+            --with-http_v3_module
             --with-http_realip_module
             --with-http_auth_request_module
             --add-dynamic-module="$GITHUB_WORKSPACE"
             --with-cc-opt="-DNGX_DEBUG_PALLOC=1 -g3 -O0 -fno-omit-frame-pointer -funwind-tables $(pkg-config --cflags libpcre2-8)"
-            --with-ld-opt="$(pkg-config --libs libpcre2-8)"
+            --with-ld-opt="-fuse-ld=mold $(pkg-config --libs libpcre2-8)"
           )
 
           case "${{ matrix.server }}" in
             nginx)
-              test -f "nginx-${NGINX_VERSION}.tar.gz" || wget -q -O "nginx-${NGINX_VERSION}.tar.gz" \
-                "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
-              echo "${NGINX_SHA256}  nginx-${NGINX_VERSION}.tar.gz" | sha256sum -c -
-              tar -xzf "nginx-${NGINX_VERSION}.tar.gz"
+              bash .github/scripts/fetch-verify.sh \
+                "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+                "$NGINX_VERSION_SHA256" nginx-src.tar.gz
+              tar -xzf nginx-src.tar.gz
               cd "nginx-${NGINX_VERSION}"
               ;;
             angie)
-              test -f "${ANGIE_VERSION}.tar.gz" || wget -q -O "${ANGIE_VERSION}.tar.gz" \
-                "https://github.com/webserver-llc/angie/archive/refs/tags/${ANGIE_VERSION}.tar.gz"
-              tar -xzf "${ANGIE_VERSION}.tar.gz"
+              bash .github/scripts/fetch-verify.sh \
+                "https://github.com/webserver-llc/angie/archive/refs/tags/${ANGIE_VERSION}.tar.gz" \
+                "$ANGIE_SHA256" angie-src.tar.gz
+              tar -xzf angie-src.tar.gz
               cd angie-*/
               ;;
             *)
@@ -252,39 +268,44 @@ jobs:
           test -f objs/ngx_http_coraza_module.so
           echo "SERVER_BIN=$PWD/$server_bin" >> "$GITHUB_ENV"
           echo "CORAZA_MODULE_SO=$PWD/objs/ngx_http_coraza_module.so" >> "$GITHUB_ENV"
-      - name: Memcheck soak (300s @ 4 conc, WITH suppressions)
+      - name: Memcheck soak (300s @ 8 conc, WITH suppressions)
         env:
           USE_VALGRIND: "1"
         run: |
-          bash tools/soak.sh "$SERVER_BIN" 300 4
+          bash tools/soak.sh "$SERVER_BIN" 300 8
 
   helgrind:
     name: Valgrind Helgrind soak (${{ matrix.server }}/${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 240
+    # amd64-only: valgrind memcheck/helgrind are arch-agnostic (they interpret
+    # the binary), so an arm64 cell re-runs the same analysis for ~no extra
+    # coverage while doubling deep-run minutes. arm64 *compilation* is proven
+    # by the build.yml matrix.
     strategy:
       fail-fast: false
       matrix:
         server: [nginx, angie]
-        arch: [amd64, arm64]
+        arch: [amd64]
         include:
           - arch: amd64
-            runner: ubuntu-24.04
-          - arch: arm64
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-26.04
     steps:
       - name: Checkout module
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+      - name: Load version pins
+        run: bash .github/scripts/load-versions.sh
       # ccache + Go + source caches (key includes github.job so memcheck and
       # helgrind get distinct caches; both distinguished by server+arch).
       - name: ccache cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-${{ github.sha }}
+          key: ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-${{ hashFiles('.github/versions.env') }}-${{ github.sha }}
           restore-keys: |
+            ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-${{ hashFiles('.github/versions.env') }}-
             ccache-cideep-${{ github.job }}-${{ matrix.server }}-${{ matrix.arch }}-
       - name: Go build cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -292,35 +313,39 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: gobuild-cideep-${{ matrix.arch }}-${{ env.LIBCORAZA_VERSION }}
+          key: gobuild-cideep-${{ matrix.arch }}-${{ hashFiles('.github/versions.env') }}
           restore-keys: |
             gobuild-cideep-${{ matrix.arch }}-
       - name: Server source cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            ${{ github.workspace }}/nginx-${{ env.NGINX_VERSION }}.tar.gz
-            ${{ github.workspace }}/${{ env.ANGIE_VERSION }}.tar.gz
-          key: srv-src-${{ env.NGINX_VERSION }}-${{ env.ANGIE_VERSION }}
+            ${{ github.workspace }}/nginx-src.tar.gz
+            ${{ github.workspace }}/angie-src.tar.gz
+          key: srv-src-${{ matrix.server }}-${{ hashFiles('.github/versions.env') }}
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential curl git libpcre2-dev libssl-dev pkg-config \
-            valgrind wget zlib1g-dev unzip ccache eatmydata
+            valgrind wget zlib1g-dev unzip ccache eatmydata mold
           echo /usr/lib/ccache >> "$GITHUB_PATH"
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: ^1.25.x
+      - name: libcoraza built-tree cache
+        id: cache-libcoraza
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/libcoraza-build
+          key: libcoraza-built-${{ matrix.arch }}-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
       - name: Build + install libcoraza
-        run: |
-          set -euo pipefail
-          wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
-          unzip -oq "${LIBCORAZA_VERSION}.zip"
-          cd libcoraza-*
-          ./build.sh && ./configure && eatmydata make -j"$(nproc)"
-          sudo eatmydata make install && sudo ldconfig
+        # Verified fetch (sha256) + build/install, single-sourced across all jobs.
+        env:
+          LIBCORAZA_CACHE_HIT: ${{ steps.cache-libcoraza.outputs.cache-hit }}
+          MAKE: eatmydata make
+        run: bash .github/scripts/build-libcoraza.sh
       - name: Build debug ${{ matrix.server }} + coraza module
         run: |
           set -euo pipefail
@@ -331,25 +356,27 @@ jobs:
             --with-threads
             --with-http_ssl_module
             --with-http_v2_module
+            --with-http_v3_module
             --with-http_realip_module
             --with-http_auth_request_module
             --add-dynamic-module="$GITHUB_WORKSPACE"
             --with-cc-opt="-DNGX_DEBUG_PALLOC=1 -g3 -O0 -fno-omit-frame-pointer -funwind-tables $(pkg-config --cflags libpcre2-8)"
-            --with-ld-opt="$(pkg-config --libs libpcre2-8)"
+            --with-ld-opt="-fuse-ld=mold $(pkg-config --libs libpcre2-8)"
           )
 
           case "${{ matrix.server }}" in
             nginx)
-              test -f "nginx-${NGINX_VERSION}.tar.gz" || wget -q -O "nginx-${NGINX_VERSION}.tar.gz" \
-                "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
-              echo "${NGINX_SHA256}  nginx-${NGINX_VERSION}.tar.gz" | sha256sum -c -
-              tar -xzf "nginx-${NGINX_VERSION}.tar.gz"
+              bash .github/scripts/fetch-verify.sh \
+                "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+                "$NGINX_VERSION_SHA256" nginx-src.tar.gz
+              tar -xzf nginx-src.tar.gz
               cd "nginx-${NGINX_VERSION}"
               ;;
             angie)
-              test -f "${ANGIE_VERSION}.tar.gz" || wget -q -O "${ANGIE_VERSION}.tar.gz" \
-                "https://github.com/webserver-llc/angie/archive/refs/tags/${ANGIE_VERSION}.tar.gz"
-              tar -xzf "${ANGIE_VERSION}.tar.gz"
+              bash .github/scripts/fetch-verify.sh \
+                "https://github.com/webserver-llc/angie/archive/refs/tags/${ANGIE_VERSION}.tar.gz" \
+                "$ANGIE_SHA256" angie-src.tar.gz
+              tar -xzf angie-src.tar.gz
               cd angie-*/
               ;;
             *)
@@ -375,39 +402,42 @@ jobs:
           test -f objs/ngx_http_coraza_module.so
           echo "SERVER_BIN=$PWD/$server_bin" >> "$GITHUB_ENV"
           echo "CORAZA_MODULE_SO=$PWD/objs/ngx_http_coraza_module.so" >> "$GITHUB_ENV"
-      - name: Helgrind soak (300s @ 4 conc, --error-exitcode=99, WITH suppressions)
+      - name: Helgrind soak (300s @ 8 conc, --error-exitcode=99, WITH suppressions)
         env:
           USE_HELGRIND: "1"
         run: |
-          bash tools/soak.sh "$SERVER_BIN" 300 4
+          bash tools/soak.sh "$SERVER_BIN" 300 8
 
   scanners:
     name: Security scanners
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
       - name: Checkout module
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      # NOTE: this job deliberately does NOT use ccache — the clang-tidy gate
-      # depends on a real `bear`-captured compile of every TU; ccache would
-      # short-circuit compilation and leave the compile DB empty/stale. Go +
-      # source caching are safe and still applied.
+      - name: Load version pins
+        run: bash .github/scripts/load-versions.sh
+      # NOTE: this job deliberately does NOT use ccache OR mold — the clang-tidy
+      # gate depends on a real `bear`-captured compile of every TU; ccache would
+      # short-circuit compilation and leave the compile DB empty/stale, and mold
+      # only touches the link step (no benefit here). Go + source caching are
+      # safe and still applied.
       - name: Go build cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: gobuild-cideep-scanners-${{ env.LIBCORAZA_VERSION }}
+          key: gobuild-cideep-scanners-${{ hashFiles('.github/versions.env') }}
           restore-keys: |
             gobuild-cideep-scanners-
       - name: nginx source cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ github.workspace }}/nginx-${{ env.NGINX_VERSION }}.tar.gz
-          key: nginx-src-${{ env.NGINX_VERSION }}
+          path: ${{ github.workspace }}/nginx-src.tar.gz
+          key: nginx-src-${{ hashFiles('.github/versions.env') }}
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -417,28 +447,30 @@ jobs:
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: ^1.25.x
+      # Share the same built-tree cache key as every other libcoraza job so a warm
+      # run skips the cgo compile here too (was previously an uncached bare wget).
+      - name: libcoraza built-tree cache
+        id: cache-libcoraza
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/libcoraza-build
+          key: libcoraza-built-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
       # Real compile DB requires libcoraza's coraza.h + a genuine module compile.
-      # Build+install libcoraza (same recipe as build.yml), then bear-wrap
+      # Build+install libcoraza (verified fetch, shared script), then bear-wrap
       # `make modules` so clang-tidy sees the ACTUAL translation units.
-      - name: Build libcoraza (provides coraza.h)
-        run: |
-          set -euo pipefail
-          wget -q "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA_VERSION}.zip"
-          unzip -qo "${LIBCORAZA_VERSION}.zip"
-          cd libcoraza-*
-          ./build.sh
-          ./configure
-          eatmydata make
-          sudo eatmydata make install
-          sudo ldconfig
+      - name: Build + install libcoraza (provides coraza.h)
+        # Verified fetch (sha256) + build/install, single-sourced across all jobs.
+        env:
+          LIBCORAZA_CACHE_HIT: ${{ steps.cache-libcoraza.outputs.cache-hit }}
+          MAKE: eatmydata make
+        run: bash .github/scripts/build-libcoraza.sh
       - name: Configure + bear-capture module compile (compile_commands.json)
         run: |
           set -euo pipefail
-          test -f "nginx-${NGINX_VERSION}.tar.gz" || \
-            wget -q -O "nginx-${NGINX_VERSION}.tar.gz" \
-              "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz"
-          echo "${NGINX_SHA256}  nginx-${NGINX_VERSION}.tar.gz" | sha256sum -c -
-          tar -xzf "nginx-${NGINX_VERSION}.tar.gz"
+          bash .github/scripts/fetch-verify.sh \
+            "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+            "$NGINX_VERSION_SHA256" nginx-src.tar.gz
+          tar -xzf nginx-src.tar.gz
           cd "nginx-${NGINX_VERSION}"
           CC=gcc ./configure --with-compat --with-debug \
             --add-dynamic-module="$GITHUB_WORKSPACE" >/dev/null
@@ -476,3 +508,278 @@ jobs:
             ${{ github.workspace }}/semgrep.log
             ${{ github.workspace }}/compile_commands.json
           retention-days: 14
+
+  codeql:
+    name: CodeQL (deep)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      security-events: write   # required to upload the SARIF results
+    # Full CodeQL analysis, scoped to the connector TU via `make modules` (nginx
+    # core never compiled/traced). The fast PR gate (codeql.yml) runs the same
+    # analysis on every push; this deep copy guarantees a monthly run even if the
+    # PR path is skipped. NO ccache — the tracer only populates its database from
+    # a real compile (a warm ccache hit produces "no source seen during build").
+    # SARIF upload needs Code Scanning enabled on the repo (see codeql.yml).
+    steps:
+      - name: Checkout module
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Load version pins
+        run: bash .github/scripts/load-versions.sh
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential curl git libpcre2-dev pkg-config \
+            wget zlib1g-dev unzip eatmydata
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        with:
+          languages: c-cpp
+          queries: security-extended
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: ^1.25.x
+
+      - name: libcoraza built-tree cache
+        id: cache-libcoraza
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/libcoraza-build
+          key: libcoraza-built-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
+      - name: Build + install libcoraza
+        # Verified fetch (sha256) + build/install, single-sourced across all jobs.
+        env:
+          LIBCORAZA_CACHE_HIT: ${{ steps.cache-libcoraza.outputs.cache-hit }}
+          MAKE: eatmydata make
+        run: bash .github/scripts/build-libcoraza.sh
+
+      - name: Fetch + configure nginx, build module (traced)
+        run: |
+          set -euo pipefail
+          bash .github/scripts/fetch-verify.sh \
+            "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+            "$NGINX_VERSION_SHA256" nginx-src.tar.gz
+          tar -xzf nginx-src.tar.gz
+          cd "nginx-${NGINX_VERSION}"
+          ./configure \
+            --with-compat --with-debug --with-threads \
+            --with-http_ssl_module --with-http_v2_module --with-http_v3_module \
+            --add-dynamic-module="$GITHUB_WORKSPACE"
+          make modules
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        with:
+          category: /language:c-cpp
+
+  asan:
+    name: ASan/UBSan soak (deep, 300s)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 90
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
+    # Deep counterpart to the 60s asan.yml PR gate: a 300s ASan/UBSan soak of the
+    # running module. Same build recipe and sanitizer scoping as asan.yml; only
+    # the soak duration differs. (Not valgrind — cgo Go aborts under it; the
+    # valgrind memcheck/helgrind soaks are the separate jobs above.)
+    steps:
+      - name: Checkout module
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Load version pins
+        run: bash .github/scripts/load-versions.sh
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential curl git libpcre2-dev pkg-config \
+            wget zlib1g-dev unzip ccache eatmydata mold
+          echo /usr/lib/ccache >> "$GITHUB_PATH"
+
+      - name: ccache cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-cideep-asan-${{ hashFiles('.github/versions.env') }}-${{ github.sha }}
+          restore-keys: |
+            ccache-cideep-asan-${{ hashFiles('.github/versions.env') }}-
+            ccache-cideep-asan-
+      - name: Go build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: gobuild-cideep-asan-${{ hashFiles('.github/versions.env') }}
+          restore-keys: |
+            gobuild-cideep-asan-
+      - name: nginx source cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/nginx-src.tar.gz
+          key: nginx-src-${{ hashFiles('.github/versions.env') }}
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: ^1.25.x
+
+      - name: libcoraza built-tree cache
+        id: cache-libcoraza
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/libcoraza-build
+          key: libcoraza-built-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
+      - name: Build + install libcoraza
+        # Verified fetch (sha256) + build/install, single-sourced across all jobs.
+        env:
+          LIBCORAZA_CACHE_HIT: ${{ steps.cache-libcoraza.outputs.cache-hit }}
+          MAKE: eatmydata make
+        run: bash .github/scripts/build-libcoraza.sh
+
+      - name: Build ASan/UBSan nginx + coraza module
+        run: |
+          set -euo pipefail
+          bash .github/scripts/fetch-verify.sh \
+            "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+            "$NGINX_VERSION_SHA256" nginx-src.tar.gz
+          tar -xzf nginx-src.tar.gz
+          cd "nginx-${NGINX_VERSION}"
+          # See asan.yml for the -fno-sanitize rationale (benign nginx-core init
+          # UB that would otherwise kill nginx before it listens).
+          SAN_LD="-fsanitize=address,undefined"
+          SAN_CC="$SAN_LD -fno-sanitize=nonnull-attribute,null -fno-sanitize-recover=address"
+          ./configure \
+            --with-compat --with-debug --with-threads \
+            --with-http_ssl_module --with-http_v2_module --with-http_v3_module \
+            --with-http_realip_module --with-http_auth_request_module \
+            --add-dynamic-module="$GITHUB_WORKSPACE" \
+            --with-cc-opt="-DNGX_DEBUG_PALLOC=1 -g3 -O0 -fno-omit-frame-pointer -funwind-tables $SAN_CC $(pkg-config --cflags libpcre2-8)" \
+            --with-ld-opt="-fuse-ld=mold $SAN_LD $(pkg-config --libs libpcre2-8)"
+          eatmydata make -j"$(nproc)" modules
+          eatmydata make -j"$(nproc)"
+
+      - name: Sanitizer soak (300s @ 8 conc)
+        env:
+          ASAN_OPTIONS: "verify_asan_link_order=0"
+          CORAZA_MODULE_SO: ${{ github.workspace }}/nginx-${{ env.NGINX_VERSION }}/objs/ngx_http_coraza_module.so
+        run: |
+          bash tools/soak.sh \
+            "$GITHUB_WORKSPACE/nginx-${NGINX_VERSION}/objs/nginx" 300 4
+
+  # Out-of-band fallback gate. build-test.yml pins libcoraza >=1.6 so the perf
+  # hot-path (bulk-header submit, OK-path intervention poll) is exercised; that
+  # leaves the pre-1.6 per-header fallback path (dlsym-resolved in
+  # ngx_http_coraza_dl.c) uncovered on PR CI. This job builds against v1.4.0 so
+  # the connector links WITHOUT the bulk symbols and the whole prove suite runs
+  # through the fallback branch, catching fallback regressions monthly.
+  fallback:
+    name: Pre-1.6 fallback suite (libcoraza v1.4.0)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      # FALLBACK_LIBCORAZA_VERSION / _SHA256 come from versions.env (pinned to
+      # 1.4.x ON PURPOSE — this job exists to exercise the pre-1.6 per-header
+      # fallback, so it must NOT track the >=1.6 floor the other jobs use).
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 300M
+    steps:
+      - name: Checkout module
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Load version pins
+        # Supplies NGINX_VERSION / NGINX_VERSION_SHA256 / NGINX_TESTS_* only;
+        # LIBCORAZA_VERSION from here is intentionally ignored (see env above).
+        run: bash .github/scripts/load-versions.sh
+
+      - name: ccache cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-cideep-fallback-${{ hashFiles('.github/versions.env') }}-${{ github.sha }}
+          restore-keys: |
+            ccache-cideep-fallback-${{ hashFiles('.github/versions.env') }}-
+            ccache-cideep-fallback-
+      - name: Go build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: gobuild-cideep-fallback-${{ env.FALLBACK_LIBCORAZA_VERSION }}
+          restore-keys: |
+            gobuild-cideep-fallback-
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential curl git libpcre2-dev libssl-dev pkg-config \
+            wget zlib1g-dev unzip ccache eatmydata mold autoconf automake libtool
+          echo /usr/lib/ccache >> "$GITHUB_PATH"
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: ^1.25.x
+      - name: Build + install the pre-1.6 libcoraza
+        # Reuses the shared build recipe by overriding LIBCORAZA_VERSION/_SHA256
+        # with the fallback pin for this job only — keeps the sha256 verification
+        # in one place instead of open-coding a second fetch here.
+        # FALLBACK_* are shell vars from $GITHUB_ENV (load-versions.sh), so they
+        # are re-exported here rather than via `${{ env.* }}`, which is evaluated
+        # before that step runs and would expand empty.
+        run: |
+          set -euo pipefail
+          export LIBCORAZA_VERSION="$FALLBACK_LIBCORAZA_VERSION"
+          export LIBCORAZA_SHA256="$FALLBACK_LIBCORAZA_SHA256"
+          export MAKE="eatmydata make"
+          bash .github/scripts/build-libcoraza.sh
+      - name: Build module + nginx against v1.4.0
+        run: |
+          set -euo pipefail
+          bash .github/scripts/fetch-verify.sh \
+            "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+            "$NGINX_VERSION_SHA256" nginx-src.tar.gz
+          tar -xzf nginx-src.tar.gz
+          cd "nginx-${NGINX_VERSION}"
+          ./configure \
+            --with-compat \
+            --add-dynamic-module="$GITHUB_WORKSPACE" \
+            --prefix=/etc/nginx \
+            --sbin-path=/usr/sbin/nginx \
+            --modules-path=/usr/lib/nginx/modules \
+            --http-log-path=/var/log/nginx/access.log \
+            --error-log-path=/var/log/nginx/error.log \
+            --pid-path=/run/nginx.pid \
+            --with-debug --with-threads \
+            --with-http_ssl_module --with-http_v2_module \
+            --with-http_realip_module --with-http_auth_request_module
+          eatmydata make -j"$(nproc)" modules
+          eatmydata make -j"$(nproc)"
+          sudo eatmydata make install
+      - name: Run prove suite through the fallback path
+        run: |
+          set -euo pipefail
+          bash .github/scripts/fetch-verify.sh \
+            "https://github.com/nginx/nginx-tests/archive/${NGINX_TESTS_REF}.tar.gz" \
+            "$NGINX_TESTS_SHA256" nginx-tests.tar.gz
+          tar xzf nginx-tests.tar.gz
+          cd nginx-tests-*
+          cp ../t/* .
+          export TEST_NGINX_BINARY=/usr/sbin/nginx
+          export TEST_NGINX_GLOBALS="load_module \"/usr/lib/nginx/modules/ngx_http_coraza_module.so\";"
+          prove coraza*.t

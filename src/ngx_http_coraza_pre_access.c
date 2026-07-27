@@ -113,6 +113,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
     if (ctx->waiting_more_body == 0)
     {
         int ret = 0;
+        int pret = 0;
         int already_inspected = 0;
         char *file_name = NULL;
 
@@ -168,7 +169,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
             chain = chain->next;
 
             /* Check for intervention after each chunk for prompt detection */
-            ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
+            ret = ngx_http_coraza_process_intervention(ctx, r, 0);
             if (ret > 0) {
                 ctx->intervention_triggered = 1;
                 return ret;
@@ -183,7 +184,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
          */
 
         /* Check for body limit intervention before processing rules */
-        ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
+        ret = ngx_http_coraza_process_intervention(ctx, r, 0);
         if (r->error_page) {
             return NGX_DECLINED;
         }
@@ -192,9 +193,21 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
             return ret;
         }
 
-        coraza_process_request_body(ctx->coraza_transaction);
+        pret = coraza_process_request_body(ctx->coraza_transaction);
+        if (ngx_http_coraza_process_body_failed(pret))
+        {
+            /*
+             * The engine could not evaluate phase 2; no interruption is set,
+             * so the poll below would let the body through uninspected.  Fail
+             * closed rather than inspect nothing while nginx forwards the body.
+             */
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "coraza: request body phase processing failed");
+            ctx->intervention_triggered = 1;
+            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        }
 
-        ret = ngx_http_coraza_process_intervention(ctx->coraza_transaction, r, 0);
+        ret = ngx_http_coraza_poll_after_process(ctx, r, 0, pret);
         if (r->error_page) {
             return NGX_DECLINED;
         }

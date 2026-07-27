@@ -28,19 +28,17 @@ static ngx_int_t ngx_http_coraza_init_process(ngx_cycle_t *cycle);
 static void ngx_http_coraza_exit_process(ngx_cycle_t *cycle);
 
 ngx_inline ngx_int_t
-ngx_http_coraza_process_intervention(coraza_transaction_t transaction, ngx_http_request_t *r, ngx_int_t early_log)
+ngx_http_coraza_process_intervention(ngx_http_coraza_ctx_t *ctx, ngx_http_request_t *r, ngx_int_t early_log)
 {
 	coraza_intervention_t *intervention;
-	ngx_http_coraza_ctx_t *ctx = NULL;
 
 	dd("processing intervention");
 
-	ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 	if (ctx == NULL)
 	{
 		return NGX_HTTP_INTERNAL_SERVER_ERROR;
 	}
-	intervention = coraza_intervention(transaction);
+	intervention = coraza_intervention(ctx->coraza_transaction);
 
 	if (intervention == NULL)
 	{
@@ -325,7 +323,7 @@ static ngx_command_t ngx_http_coraza_commands[] = {
 	 offsetof(ngx_http_coraza_conf_t, enable),
 	 NULL},
 	{ngx_string("coraza_transaction_id"),
-	 NGX_HTTP_LOC_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_MAIN_CONF | NGX_CONF_1MORE,
+	 NGX_HTTP_LOC_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_MAIN_CONF | NGX_CONF_TAKE1,
 	 ngx_conf_set_transaction_id,
 	 NGX_HTTP_LOC_CONF_OFFSET,
 	 0,
