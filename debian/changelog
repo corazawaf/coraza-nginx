@@ -1,3 +1,25 @@
+libnginx-mod-http-coraza (0.20.0-1) unstable; urgency=low
+
+  * New upstream release 0.20.0.
+  * Security: fail closed when request-body, response-body, or body-phase
+    processing fails in Coraza, and on NGX_ERROR from the intervention handler;
+    always set the intervention flag when one fires; validate the transaction
+    handle in create_ctx.
+  * Bound worker memory: cap delayed response-body buffering, bound buffering of
+    uninspected file-backed streams, and skip the header delay for SSE streams
+    (upstream #81) and HEAD responses.
+  * Correctness: report REQUEST_PROTOCOL/RESPONSE_PROTOCOL in slash-delimited
+    form and report HTTP/3 to the WAF; sanitize synthesized redirect and
+    HTTP/2/3 response headers; guard size_t-to-int narrowing at the cgo boundary.
+  * Performance: submit request/response headers in a single cgo call with a
+    per-header fallback, and cut per-request CGO crossings on the hot path;
+    configurable response-header delay via coraza_delay_response_headers.
+  * Build: require libcoraza 1.4 ABI, keep libcoraza loaded for the worker
+    lifetime, and probe the libcoraza result-code contract at configure time.
+  * The bulk of this release was contributed by Thijs Eilander (@eilandert).
+
+ -- Pierre Pomes <pierre.pomes@gmail.com>  Mon, 27 Jul 2026 12:00:00 +0000
+
 libnginx-mod-http-coraza (0.11.4-1) unstable; urgency=low
 
   * New upstream release 0.11.4.
