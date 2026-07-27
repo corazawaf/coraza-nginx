@@ -495,10 +495,5 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         return NGX_OK;
     }
 
-    if (!is_request_processed)
-    {
-        //dd("buffer was not fully loaded! ctx: %p", ctx);
-    }
-
     return ngx_http_next_body_filter(r, in);
 }
