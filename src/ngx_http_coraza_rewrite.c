@@ -113,23 +113,38 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
          */
         dd("connection variables filled in; first rule phase is request headers");
 
+        /* Coraza sets REQUEST_PROTOCOL to this string verbatim
+         * (Transaction.ProcessURI -> requestProtocol.Set), and every
+         * Coraza-native caller hands it the slash-delimited form: the Go
+         * middleware passes net/http's req.Proto ("HTTP/1.1"), as do
+         * libcoraza's own tests. Emitting a bare "1.1" here means the
+         * documented rule form -- SecRule REQUEST_PROTOCOL "@streq HTTP/1.1"
+         * -- can never match. The ModSecurity-nginx connector strips the
+         * "HTTP/" prefix instead, which is a ModSecurity v2 convention; do
+         * not copy it. Keep this in sync with the response-side string built
+         * in ngx_http_coraza_header_filter.c, which is already prefixed. */
         switch (r->http_version) {
             case NGX_HTTP_VERSION_9 :
-                http_version = "0.9";
+                http_version = "HTTP/0.9";
                 break;
             case NGX_HTTP_VERSION_10 :
-                http_version = "1.0";
+                http_version = "HTTP/1.0";
                 break;
             case NGX_HTTP_VERSION_11 :
-                http_version = "1.1";
+                http_version = "HTTP/1.1";
                 break;
 #if defined(nginx_version) && nginx_version >= 1009005
             case NGX_HTTP_VERSION_20 :
-                http_version = "2.0";
+                http_version = "HTTP/2.0";
+                break;
+#endif
+#if defined(nginx_version) && nginx_version >= 1025000
+            case NGX_HTTP_VERSION_30 :
+                http_version = "HTTP/3.0";
                 break;
 #endif
             default :
-                http_version = "1.0";
+                http_version = "HTTP/1.0";
                 break;
         }
 
