@@ -137,7 +137,20 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
              */
             dd("request body inspection: file -- %s", file_name);
 
-            coraza_request_body_from_file(ctx->coraza_transaction, file_name);
+            /*
+             * A non-zero return means libcoraza could not read/submit the
+             * body file, so the engine would evaluate phase 2 against no (or
+             * a partial) body while nginx forwards the full body upstream.
+             * Fail closed rather than inspect less than we forward.
+             * (libcoraza signals failure with a positive sentinel, so test
+             * != 0, not < 0.)
+             */
+            if (coraza_request_body_from_file(ctx->coraza_transaction, file_name) != 0) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                    "coraza: failed to submit file-buffered request body for inspection");
+                ctx->intervention_triggered = 1;
+                return NGX_HTTP_INTERNAL_SERVER_ERROR;
+            }
 
             already_inspected = 1;
         } else {
@@ -161,7 +174,19 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
                 return NGX_HTTP_INTERNAL_SERVER_ERROR;
             }
 
-            coraza_append_request_body(ctx->coraza_transaction, data, blen);
+            /*
+             * A non-zero return means the chunk was not appended, so the
+             * engine would inspect a shorter body than nginx forwards
+             * upstream (a request-smuggling-style bypass). Fail closed.
+             * (libcoraza signals failure with a positive sentinel, so test
+             * != 0, not < 0.)
+             */
+            if (coraza_append_request_body(ctx->coraza_transaction, data, blen) != 0) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                    "coraza: failed to append request body chunk for inspection");
+                ctx->intervention_triggered = 1;
+                return NGX_HTTP_INTERNAL_SERVER_ERROR;
+            }
 
             if (chain->buf->last_buf) {
                 break;
