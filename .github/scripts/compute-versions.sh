@@ -68,48 +68,50 @@ ANGIE_SHA="$(sha_of_url "https://github.com/webserver-llc/angie/archive/refs/tag
 CRS_SHA="$(sha_of_url "https://github.com/coreruleset/coreruleset/archive/refs/tags/v${CRS}.tar.gz")"
 LIBCORAZA_SHA="$(sha_of_url "https://github.com/corazawaf/libcoraza/archive/refs/tags/${LIBCORAZA}.zip")"
 
-# Keep GO_FTW_VERSION from the current file (renovate owns it).
-GO_FTW="$(grep -E '^GO_FTW_VERSION=' "$VERSIONS_FILE" | cut -d= -f2)"
-
-cat > "$VERSIONS_FILE" <<EOF
-# Central version + sha256 pins for all CI workflows.
+# Rewrite the pins IN PLACE, one key at a time. This script owns only the keys
+# listed in `set_pin` calls below; every other line of versions.env — comments,
+# blank lines, and hand-maintained pins like NGINX_TESTS_* (no upstream
+# releases, pinned to an immutable commit) and FALLBACK_LIBCORAZA_* (held at
+# 1.4.x on purpose so ci-deep keeps exercising the pre-1.6 fallback path) —
+# is carried through untouched.
 #
-# SINGLE SOURCE OF TRUTH. Every workflow sources this file into \$GITHUB_ENV as
-# its first step (via .github/scripts/load-versions.sh); the monthly bump.yml
-# job rewrites it and opens a PR. Tarballs/zips are pinned by version string
-# (release archives are immutable) AND verified against the sha256 recorded
-# here, so a compromised/changed upstream archive fails the build.
-#
-# Regenerate with .github/scripts/compute-versions.sh (bump.yml runs it monthly).
-# Keep KEY=value, no spaces, no quotes — this file is both \`source\`d and \`cat\`d.
+# Do NOT go back to regenerating the whole file from a heredoc: that silently
+# deletes any pin the heredoc does not know about, which is how the
+# NGINX_TESTS_* and FALLBACK_LIBCORAZA_* pins were lost once already.
 
-# nginx mainline (odd minor) — built + prove + go-ftw in build.yml
-NGINX_MAINLINE=${NGX_MAINLINE}
-NGINX_MAINLINE_SHA256=${NGX_MAINLINE_SHA}
+# set_pin KEY VALUE — replace the value of an existing KEY=... line, preserving
+# its position and the comment above it. Missing key = the file and this script
+# have drifted apart, which is a bug in one of them; fail loudly rather than
+# appending an orphan line at the bottom.
+set_pin() {
+  local key="$1" val="$2"
+  grep -qE "^${key}=" "$VERSIONS_FILE" || {
+    echo "::error::${key} not found in ${VERSIONS_FILE} — add it there first" >&2
+    exit 1
+  }
+  # Value is passed through the environment, not `awk -v` (which expands \n and
+  # friends) and not sed (where & and \1 are replacement metacharacters), so the
+  # pin lands byte-for-byte as resolved. Matters: these are sha256 values.
+  key="$key" val="$val" awk \
+    'index($0, ENVIRON["key"] "=") == 1 { print ENVIRON["key"] "=" ENVIRON["val"]; next } { print }' \
+    "$VERSIONS_FILE" > "$tmp/versions.env"
+  mv "$tmp/versions.env" "$VERSIONS_FILE"
+}
 
-# nginx stable (even minor) — built + prove + go-ftw in build.yml
-NGINX_STABLE=${NGX_STABLE}
-NGINX_STABLE_SHA256=${NGX_STABLE_SHA}
-
-# nginx version used by the deep/soak/scanner jobs (mainline)
-NGINX_VERSION=${NGX_MAINLINE}
-NGINX_VERSION_SHA256=${NGX_MAINLINE_SHA}
-
-# Angie (webserver-llc) — build-only cell in build.yml; full soak in ci-deep
-ANGIE_VERSION=${ANGIE}
-ANGIE_SHA256=${ANGIE_SHA}
-
-# libcoraza (cgo shared lib the module links against)
-LIBCORAZA_VERSION=${LIBCORAZA}
-LIBCORAZA_SHA256=${LIBCORAZA_SHA}
-
-# OWASP CRS — LTS line (used by build.yml go-ftw regression run)
-CRS_VERSION=${CRS}
-CRS_SHA256=${CRS_SHA}
-
-# go-ftw (test runner, installed via \`go install\`, pinned by tag only)
-GO_FTW_VERSION=${GO_FTW}
-EOF
+set_pin NGINX_MAINLINE        "$NGX_MAINLINE"
+set_pin NGINX_MAINLINE_SHA256 "$NGX_MAINLINE_SHA"
+set_pin NGINX_STABLE          "$NGX_STABLE"
+set_pin NGINX_STABLE_SHA256   "$NGX_STABLE_SHA"
+set_pin NGINX_VERSION         "$NGX_MAINLINE"
+set_pin NGINX_VERSION_SHA256  "$NGX_MAINLINE_SHA"
+set_pin ANGIE_VERSION         "$ANGIE"
+set_pin ANGIE_SHA256          "$ANGIE_SHA"
+set_pin LIBCORAZA_VERSION     "$LIBCORAZA"
+set_pin LIBCORAZA_SHA256      "$LIBCORAZA_SHA"
+set_pin CRS_VERSION           "$CRS"
+set_pin CRS_SHA256            "$CRS_SHA"
+# GO_FTW_VERSION is renovate's; NGINX_TESTS_* and FALLBACK_LIBCORAZA_* are
+# hand-pinned. None are set here — they survive by not being touched.
 
 echo "----- new versions.env -----"
 echo "nginx mainline: ${NGX_MAINLINE}"
