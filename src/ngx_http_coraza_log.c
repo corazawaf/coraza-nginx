@@ -36,5 +36,11 @@ ngx_http_coraza_log_handler(ngx_http_request_t *r)
 
     coraza_process_logging(ctx->coraza_transaction);
 
+    /*
+     * Claim the transaction so the ngx_http_coraza_cleanup() fallback does not
+     * log it a second time.
+     */
+    ctx->logged = 1;
+
     return NGX_OK;
 }
