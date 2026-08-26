@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.1](https://github.com/corazawaf/coraza-nginx/compare/v0.20.0...v0.20.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* write the audit record when an internal redirect hides the LOG-phase ctx ([#106](https://github.com/corazawaf/coraza-nginx/issues/106)) ([b56e091](https://github.com/corazawaf/coraza-nginx/commit/b56e091be7d46a08192f68419abe7753043d8b79))
+
 ## [0.20.0](https://github.com/corazawaf/coraza-nginx/compare/v0.11.4...v0.20.0) (2026-07-27)
 
 
