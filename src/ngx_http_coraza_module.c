@@ -142,6 +142,31 @@ void ngx_http_coraza_cleanup(void *data)
 
 	ctx = (ngx_http_coraza_ctx_t *)data;
 
+	/*
+	 * Last chance to run ProcessLogging.
+	 *
+	 * The LOG-phase handler is the normal place for it, but it can be missed
+	 * entirely: nginx wipes r->ctx on every internal redirect
+	 * (ngx_http_internal_redirect(), ngx_http_named_location()) and in
+	 * ngx_http_filter_finalize_request(), so an interrupted transaction routed
+	 * through error_page / X-Accel-Redirect reaches the LOG phase with no ctx
+	 * to find -- and if the error location is `coraza off`, with mcf->enable
+	 * == 0 as well.  Either way the handler bails out and the transaction is
+	 * freed here having never been logged, losing the audit record for the
+	 * very request that was blocked.
+	 *
+	 * Only phases 2..4 are affected: the request-headers poll passes
+	 * early_log=1 and has already logged.
+	 *
+	 * This cleanup is registered on r->pool, which ngx_http_free_request()
+	 * destroys *after* ngx_http_log_request(), so the transaction is still
+	 * alive here and RESPONSE_STATUS already holds the final status.
+	 */
+	if (!ctx->logged) {
+		coraza_process_logging(ctx->coraza_transaction);
+		ctx->logged = 1;
+	}
+
 	if (coraza_free_transaction(ctx->coraza_transaction) != NGX_OK) {
 		dd("cleanup -- transaction free failed");
 	}
