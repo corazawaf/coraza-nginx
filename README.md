@@ -21,7 +21,7 @@ sudo apt update
 sudo apt install libnginx-mod-http-coraza
 ```
 
-This pulls in libcoraza automatically. Built for Ubuntu 24.04 (noble), 25.10 (questing), 26.04 (resolute) and 26.10 (stonking). Jammy (22.04) is not supported — its nginx packaging doesn't ship the `nginx-dev` / `dh-sequence-nginx` bits needed to build a dynamic module.
+This pulls in libcoraza automatically. Built for Ubuntu 24.04 (noble), 26.04 (resolute) and 26.10 (stonking). Jammy (22.04) is not supported — its nginx packaging doesn't ship the `nginx-dev` / `dh-sequence-nginx` bits needed to build a dynamic module.
 
 # Compilation
 
