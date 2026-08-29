@@ -71,13 +71,11 @@ LIBCORAZA_SHA="$(sha_of_url "https://github.com/corazawaf/libcoraza/archive/refs
 # Rewrite the pins IN PLACE, one key at a time. This script owns only the keys
 # listed in `set_pin` calls below; every other line of versions.env — comments,
 # blank lines, and hand-maintained pins like NGINX_TESTS_* (no upstream
-# releases, pinned to an immutable commit) and FALLBACK_LIBCORAZA_* (held at
-# 1.4.x on purpose so ci-deep keeps exercising the pre-1.6 fallback path) —
-# is carried through untouched.
+# releases, pinned to an immutable commit) — is carried through untouched.
 #
 # Do NOT go back to regenerating the whole file from a heredoc: that silently
 # deletes any pin the heredoc does not know about, which is how the
-# NGINX_TESTS_* and FALLBACK_LIBCORAZA_* pins were lost once already.
+# NGINX_TESTS_* pins were lost once already.
 
 # set_pin KEY VALUE — replace the value of an existing KEY=... line, preserving
 # its position and the comment above it. Missing key = the file and this script
@@ -110,8 +108,8 @@ set_pin LIBCORAZA_VERSION     "$LIBCORAZA"
 set_pin LIBCORAZA_SHA256      "$LIBCORAZA_SHA"
 set_pin CRS_VERSION           "$CRS"
 set_pin CRS_SHA256            "$CRS_SHA"
-# GO_FTW_VERSION is renovate's; NGINX_TESTS_* and FALLBACK_LIBCORAZA_* are
-# hand-pinned. None are set here — they survive by not being touched.
+# GO_FTW_VERSION is renovate's; NGINX_TESTS_* are hand-pinned. None are set
+# here — they survive by not being touched.
 
 echo "----- new versions.env -----"
 echo "nginx mainline: ${NGX_MAINLINE}"

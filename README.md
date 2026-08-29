@@ -27,7 +27,7 @@ This pulls in libcoraza automatically. Built for Ubuntu 24.04 (noble), 26.04 (re
 
 If you have any doubts, please read the [GitHub build Action](https://github.com/corazawaf/coraza-nginx/blob/main/.github/workflows/build-test.yml) for additional information.
 
-Before compiling this software make sure that you have libcoraza >= 1.4.0 installed.
+Before compiling this software make sure that you have libcoraza >= 1.7.0 installed.
 You can download it from the [libcoraza git repository](https://github.com/corazawaf/libcoraza). For information pertaining to the compilation and installation of libcoraza please consult the documentation provided along with it.
 
 To build libcoraza from source (requires Go 1.21+):
