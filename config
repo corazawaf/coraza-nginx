@@ -17,22 +17,23 @@ ngx_addon_name="ngx_http_coraza_module"
 # "failed" means `ret < 0`; the bulk-header submit entry points arrive in 1.6.
 # coraza_version_num() first appears in 1.7.0 and reports the library version.
 #
-# Compile+link a probe (nginx's auto/feature) that references coraza_version_num.
-# The symbol was introduced in 1.7.0, so it resolves at link iff libcoraza is
-# >= 1.7 -- configure fails cleanly against an older library rather than silently
-# building against an old ABI, without RUNNING anything (a run probe would break
-# cross-compilation and needs libcoraza.so on the loader path at configure time).
-# This uses the same compiler and include flags the module is built with, so a
-# coraza.h supplied via --with-cc-opt=-I<dir> is picked up. The exact version
-# number is re-checked at runtime when the module dlopen's libcoraza
-# (ngx_http_coraza_dl_open) -- this is the build-time half.
+# Compile-only probe (nginx's auto/feature): coraza_version_num() is declared in
+# coraza.h from 1.7.0, so `sizeof(coraza_version_num())` compiles iff the header
+# is >= 1.7 -- configure then fails cleanly against older headers rather than
+# silently building against an old ABI. sizeof leaves its operand unevaluated, so
+# this needs no reference to the symbol at link and nothing is run: no -lcoraza,
+# no libcoraza.so on any path, and cross-compilation works. It uses the same
+# compiler and include flags the module is built with, so a coraza.h supplied via
+# --with-cc-opt=-I<dir> is picked up. The exact version number is re-checked at
+# runtime when the module dlopen's libcoraza (ngx_http_coraza_dl_open) -- this is
+# the build-time half.
 ngx_feature="libcoraza >= 1.7.0 (coraza_version_num)"
 ngx_feature_name=
 ngx_feature_run=no
 ngx_feature_incs="#include <coraza/coraza.h>"
 ngx_feature_path=
-ngx_feature_libs="-lcoraza"
-ngx_feature_test="int (*p)(void) = coraza_version_num; (void) p;"
+ngx_feature_libs=
+ngx_feature_test="(void) sizeof(coraza_version_num());"
 . auto/feature
 
 if test $ngx_found != yes; then
