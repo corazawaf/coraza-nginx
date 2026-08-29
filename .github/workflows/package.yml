@@ -15,8 +15,8 @@ jobs:
     name: Package for nginx ${{ matrix.nginx_version }} (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     env:
-      # renovate: depName=libcoraza packageName=corazawaf/libcoraza datasource=github-releases
-      LIBCORAZA_VERSION: v1.4.0
+      # LIBCORAZA_VERSION / LIBCORAZA_SHA256 are loaded from .github/versions.env
+      # (single source of truth) in the "Load libcoraza pin" step below.
       # sha256 of nginx-1.30.3.tar.gz from nginx.org — update together with the matrix
       NGINX_SHA256: "e5823dc6f45610993def93ebf6cfce68264af4958c77e874b7d20f3709001b8f"
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -38,6 +38,15 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Load the shared libcoraza pin so the released artifact builds against
+      # the same version CI does (.github/versions.env is the single source of
+      # truth), instead of a stale hardcoded value.
+      - name: Load libcoraza pin
+        run: |
+          set -a; . .github/versions.env; set +a
+          echo "LIBCORAZA_VERSION=$LIBCORAZA_VERSION" >> "$GITHUB_ENV"
+          echo "LIBCORAZA_SHA256=$LIBCORAZA_SHA256" >> "$GITHUB_ENV"
 
       # Grab nginx source, from cache if possible, or from web
       - name: Grab nginx-${{ matrix.nginx_version }} cache
@@ -66,6 +75,7 @@ jobs:
         run: |
           cd ${{ github.workspace }}
           wget https://github.com/corazawaf/libcoraza/archive/refs/tags/${{ env.LIBCORAZA_VERSION }}.zip
+          echo "${LIBCORAZA_SHA256}  ${{ env.LIBCORAZA_VERSION }}.zip" | sha256sum -c -
           unzip -o ${{ env.LIBCORAZA_VERSION }}.zip
 
       # NB: no ccache / Go build-cache restore in this job. It runs only on
