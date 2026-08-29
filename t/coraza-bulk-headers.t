@@ -146,6 +146,10 @@ my $log = $t->read_file('error.log');
 # libcoraza >= 1.7 is required and the bulk-header entry points are mandatory
 # symbols (ngx_http_coraza_dl_open fails to load otherwise), so a successful
 # load means the assertions above really exercised the bulk path.
-like($log,
-    qr/coraza: \S+ loaded via dynlib_open \(libcoraza \d+\.\d+\.\d+\)/,
-    'libcoraza loaded: bulk-header symbols resolved, bulk path exercised above');
+if ($log =~ /coraza: \S+ loaded via dynlib_open \(libcoraza (\d+)\.(\d+)\.\d+\)/) {
+    ok($1 > 1 || ($1 == 1 && $2 >= 7),
+        "libcoraza $1.$2 loaded (>= 1.7): bulk-header symbols resolved, "
+        . 'bulk path exercised above');
+} else {
+    fail('connector did not log the libcoraza version at load');
+}

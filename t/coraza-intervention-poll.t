@@ -267,5 +267,10 @@ like(http_get('/respbody-ok'), qr!^HTTP/\S+ 200!,
 # libcoraza >= 1.7 is required, so the OK-path poll gate is always active.
 # Confirm the library loaded so a green result is interpretable.
 my $log = $t->read_file('error.log');
-like($log, qr/coraza: \S+ loaded via dynlib_open \(libcoraza \d+\.\d+\.\d+\)/,
-    'connector loaded libcoraza (poll gate active on the required >= 1.7 ABI)');
+if ($log =~ /coraza: \S+ loaded via dynlib_open \(libcoraza (\d+)\.(\d+)\.\d+\)/) {
+    ok($1 > 1 || ($1 == 1 && $2 >= 7),
+        "connector loaded libcoraza $1.$2 (>= 1.7; poll gate active on the "
+        . 'required ABI)');
+} else {
+    fail('connector did not log the libcoraza version at load');
+}
