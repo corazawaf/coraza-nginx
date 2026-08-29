@@ -264,9 +264,13 @@ like(http_get('/respbody'), qr!^HTTP/\S+ 403!,
 like(http_get('/respbody-ok'), qr!^HTTP/\S+ 200!,
     'B: response-body control passes');
 
-# The gate is only active on a 1.6+ (bulk-capable) library; on older libcoraza
-# the connector polls unconditionally. Record which path the run exercised so a
-# green result is interpretable.
+# libcoraza >= 1.7 is required, so the OK-path poll gate is always active.
+# Confirm the library loaded so a green result is interpretable.
 my $log = $t->read_file('error.log');
-like($log, qr/coraza: \S+ loaded via dynlib_open \(bulk headers: (yes|no)\)/,
-    'connector logs bulk-header capability (gate active iff yes)');
+if ($log =~ /coraza: \S+ loaded via dynlib_open \(libcoraza (\d+)\.(\d+)\.\d+\)/) {
+    ok($1 > 1 || ($1 == 1 && $2 >= 7),
+        "connector loaded libcoraza $1.$2 (>= 1.7; poll gate active on the "
+        . 'required ABI)');
+} else {
+    fail('connector did not log the libcoraza version at load');
+}

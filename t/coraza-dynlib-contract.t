@@ -17,7 +17,7 @@ my $root = "$FindBin::Bin/..";
 my $control = slurp("$root/debian/control");
 my $dl = slurp("$root/src/ngx_http_coraza_dl.c");
 
-like($control, qr/\blibcoraza1\s+\(>=\s*1\.6\)/,
+like($control, qr/\blibcoraza1\s+\(>=\s*1\.7\)/,
 	'Debian package pins the libcoraza runtime ABI');
 
 unlike($dl, qr/Optional.*coraza_is_response_body_processable/s,

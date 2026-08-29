@@ -10,34 +10,41 @@
 
 ngx_addon_name="ngx_http_coraza_module"
 
-# Detect the libcoraza result-code contract at build time.
+# Require libcoraza >= 1.7.0 at build time.
 #
-# libcoraza >= 1.6 ships `typedef enum coraza_result_t { CORAZA_ERROR = -1,
-# CORAZA_OK = 0, CORAZA_INTERRUPTION = 1 }`.  On that contract the body-phase
-# process calls return -1 on engine error and 1 on interruption, so "failed"
-# means `ret < 0`.  Older libcoraza has no such enum and returns 1 on error,
-# 0 on success, so "failed" means `ret != 0`.
+# From 1.5 the coraza_process_* calls use the tri-state coraza_result_t
+# contract (CORAZA_ERROR = -1, CORAZA_OK = 0, CORAZA_INTERRUPTION = 1), so
+# "failed" means `ret < 0`; the bulk-header submit entry points arrive in 1.6.
+# coraza_version_num() first appears in 1.7.0 and reports the library version.
 #
-# CORAZA_INTERRUPTION is an *enum member*, not a #define, so it is invisible to
-# the preprocessor and cannot be tested with `#ifdef` in the C sources.  Detect
-# the enum with a real compile probe (nginx's auto/feature) so the check uses the
-# *same* compiler and include flags the module is built with — a fixed-path grep
-# of /usr/local/include and /usr/include would miss a coraza.h supplied via
-# --with-cc-opt=-I<dir>, leave CORAZA_HAS_RESULT_ENUM undefined, and wrongly apply
-# the legacy `ret != 0` contract (treating CORAZA_INTERRUPTION == 1 as a fatal
-# error → spurious HTTP 500).  On success -DCORAZA_HAS_RESULT_ENUM is passed to
-# the connector; ngx_http_coraza_process_body_failed() reads this macro.
-ngx_feature="libcoraza result enum (CORAZA_INTERRUPTION)"
-ngx_feature_name="CORAZA_HAS_RESULT_ENUM"
+# Compile-only probe (nginx's auto/feature): coraza_version_num() is declared in
+# coraza.h from 1.7.0, so `sizeof(coraza_version_num())` compiles iff the header
+# is >= 1.7 -- configure then fails cleanly against older headers rather than
+# silently building against an old ABI. sizeof leaves its operand unevaluated, so
+# this needs no reference to the symbol at link and nothing is run: no -lcoraza,
+# no libcoraza.so on any path, and cross-compilation works. It uses the same
+# compiler and include flags the module is built with, so a coraza.h supplied via
+# --with-cc-opt=-I<dir> is picked up. The exact version number is re-checked at
+# runtime when the module dlopen's libcoraza (ngx_http_coraza_dl_open) -- this is
+# the build-time half.
+ngx_feature="libcoraza >= 1.7.0 (coraza_version_num)"
+ngx_feature_name=
 ngx_feature_run=no
 ngx_feature_incs="#include <coraza/coraza.h>"
 ngx_feature_path=
 ngx_feature_libs=
-ngx_feature_test="int r = (int) CORAZA_INTERRUPTION; (void) r;"
+ngx_feature_test="(void) sizeof(coraza_version_num());"
 . auto/feature
 
 if test $ngx_found != yes; then
-    echo " + libcoraza result enum NOT found: using legacy ret!=0 contract"
+    cat << END
+
+$0: error: the coraza-nginx module requires libcoraza >= 1.7.0, but the
+libcoraza available at build time is older or does not report its version
+(coraza_version_num). Install libcoraza >= 1.7.0 and retry.
+
+END
+    exit 1
 fi
 
 coraza_dependency="ngx_http_postpone_filter_module \

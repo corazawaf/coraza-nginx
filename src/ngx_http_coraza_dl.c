@@ -53,11 +53,16 @@ typedef int                  (*fn_coraza_is_response_body_processable)(coraza_tr
 /* Bulk header submission, present in libcoraza 1.6+.  Adds every request /
  * response header in a single cgo crossing from a packed buffer
  * ([u16 name_len][name][u32 value_len][value] repeated `count` times),
- * replacing one coraza_add_*_header cgo call per header.  Resolved with
- * DL_SYM_OPT: on an older libcoraza the pointers stay NULL and the module
- * falls back to the per-header path. */
+ * replacing one coraza_add_*_header cgo call per header.  Required symbols:
+ * libcoraza >= 1.7 is a hard requirement, so these always resolve; the
+ * per-header path they sit beside now serves only as the pack-failure
+ * (INT_MAX overflow) safety net, not as an old-library fallback. */
 typedef int                  (*fn_coraza_add_request_headers)(coraza_transaction_t, char *, int, int);
 typedef int                  (*fn_coraza_add_response_headers)(coraza_transaction_t, char *, int, int);
+
+/* libcoraza >= 1.7: reports the loaded library version (major*10000 +
+ * minor*100 + patch), gated in ngx_http_coraza_dl_open(). */
+typedef int                  (*fn_coraza_version_num)(void);
 
 /* ------------------------------------------------------------------ */
 /* Static function pointers — set once by ngx_http_coraza_dl_open()   */
@@ -91,9 +96,11 @@ static fn_coraza_update_status_code      dl_update_status_code;
 
 static fn_coraza_is_response_body_processable dl_is_response_body_processable;
 
-/* libcoraza 1.6+ only (DL_SYM_OPT) — NULL when the running library predates them. */
+/* Bulk-header entry points (libcoraza 1.6+) — required (>= 1.7 is enforced). */
 static fn_coraza_add_request_headers     dl_add_request_headers;
 static fn_coraza_add_response_headers    dl_add_response_headers;
+
+static fn_coraza_version_num             dl_version_num;
 
 static dynlib_t dl_handle;
 
@@ -175,17 +182,32 @@ ngx_http_coraza_dl_open(ngx_log_t *log)
     DL_SYM(dl_is_response_body_processable,
            coraza_is_response_body_processable);
 
-    /* Best-effort bulk-header entry points (libcoraza 1.6+).  Absence is not
-     * an error: dl_add_*_headers stays NULL and the module keeps using the
-     * per-header path. */
-    DL_SYM_OPT(dl_add_request_headers,  coraza_add_request_headers);
-    DL_SYM_OPT(dl_add_response_headers, coraza_add_response_headers);
+    /* Bulk-header entry points (libcoraza 1.6+) — required. */
+    DL_SYM(dl_add_request_headers,  coraza_add_request_headers);
+    DL_SYM(dl_add_response_headers, coraza_add_response_headers);
 
-    ngx_log_error(NGX_LOG_NOTICE, log, 0,
-                  "coraza: %s loaded via dynlib_open (bulk headers: %s)",
-                  CORAZA_DYNLIB_BASENAME DYNLIB_EXT,
-                  (dl_add_request_headers && dl_add_response_headers)
-                      ? "yes" : "no");
+    /* Version gate. coraza_version_num() first appears in 1.7.0 and reports the
+     * version of the library actually dlopen'd -- the authoritative check for a
+     * module that resolves everything at runtime.  A library that does not
+     * export it, or reports < 1.7.0, is unsupported: fail so the worker refuses
+     * to start (fail closed) rather than run against an old ABI. */
+    DL_SYM(dl_version_num, coraza_version_num);
+    {
+        int version = dl_version_num();
+        if (version < 10700) {
+            ngx_log_error(NGX_LOG_EMERG, log, 0,
+                          "coraza: libcoraza >= 1.7.0 required, but the loaded "
+                          "library reports %d.%d.%d",
+                          version / 10000, version / 100 % 100, version % 100);
+            dynlib_close(dl_handle);
+            dl_handle = NULL;
+            return NGX_ERROR;
+        }
+        ngx_log_error(NGX_LOG_NOTICE, log, 0,
+                      "coraza: %s loaded via dynlib_open (libcoraza %d.%d.%d)",
+                      CORAZA_DYNLIB_BASENAME DYNLIB_EXT,
+                      version / 10000, version / 100 % 100, version % 100);
+    }
 
     return NGX_OK;
 }
