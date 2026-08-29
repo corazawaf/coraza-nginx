@@ -143,18 +143,9 @@ like($benign, qr!^HTTP/\S+ 200!,
 # and SKIP explicitly (never silently pass) when it is absent.
 my $log = $t->read_file('error.log');
 
-# Gate on the actual capability. A blanket "(yes|no)" match can never fail, so
-# it would let the bulk path go silently untested if the symbols ever vanished.
-# Instead: assert "yes" (the assertions above really exercised the bulk path)
-# when present, and SKIP explicitly — never silently pass — when absent (e.g.
-# the libcoraza v1.4.0 the fallback CI job pins).
-if ($log =~ /coraza: \S+ loaded via dynlib_open \(bulk headers: yes\)/) {
-    pass('bulk-header symbols resolved: the assertions above exercised the bulk path');
-} elsif ($log =~ /coraza: \S+ loaded via dynlib_open \(bulk headers: no\)/) {
-    SKIP: {
-        skip('running libcoraza < 1.6 (no bulk symbols); assertions above ran '
-             . 'via the per-header fallback, bulk path not exercised', 1);
-    }
-} else {
-    fail('connector did not log its bulk-header capability at load time');
-}
+# libcoraza >= 1.7 is required and the bulk-header entry points are mandatory
+# symbols (ngx_http_coraza_dl_open fails to load otherwise), so a successful
+# load means the assertions above really exercised the bulk path.
+like($log,
+    qr/coraza: \S+ loaded via dynlib_open \(libcoraza \d+\.\d+\.\d+\)/,
+    'libcoraza loaded: bulk-header symbols resolved, bulk path exercised above');
