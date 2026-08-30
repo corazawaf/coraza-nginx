@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/corazawaf/coraza-nginx/compare/v0.20.1...v0.21.0) (2026-08-30)
+
+
+### release
+
+* prepare 0.21.0 ([#111](https://github.com/corazawaf/coraza-nginx/issues/111)) ([53bd798](https://github.com/corazawaf/coraza-nginx/commit/53bd7983a3994cfe224e082e25dee7096385677f))
+
 ## [0.20.1](https://github.com/corazawaf/coraza-nginx/compare/v0.20.0...v0.20.1) (2026-08-26)
 
 
