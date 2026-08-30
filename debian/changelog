@@ -1,3 +1,14 @@
+libnginx-mod-http-coraza (0.21.0-1) unstable; urgency=low
+
+  * New upstream release 0.21.0.
+  * Require libcoraza >= 1.7.0; support for older libcoraza is dropped. The
+    connector gates on coraza_version_num() both at build time (configure
+    fails against older headers) and at runtime (the worker refuses to start
+    against an older shared library), and always uses the tri-state
+    coraza_result_t return contract.
+
+ -- Pierre Pomes <pierre.pomes@gmail.com>  Sat, 29 Aug 2026 12:00:00 +0000
+
 libnginx-mod-http-coraza (0.20.0-1) unstable; urgency=low
 
   * New upstream release 0.20.0.
