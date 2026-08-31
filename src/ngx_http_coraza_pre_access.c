@@ -15,6 +15,8 @@
 
 #include "ngx_http_coraza_common.h"
 
+#define NGX_HTTP_CORAZA_REQUEST_BODY_FILE_CHUNK_SIZE (64 * 1024)
+
 void
 ngx_http_coraza_request_read(ngx_http_request_t *r)
 {
@@ -76,6 +78,128 @@ ngx_http_coraza_process_request_body_phase(ngx_http_coraza_ctx_t *ctx,
     }
 
     return NGX_DECLINED;
+}
+
+
+/*
+ * Submit a file-buffered request body in reusable 64 KiB chunks.  Opening a
+ * separate descriptor keeps ngx_read_file() from changing nginx's file offset
+ * state on platforms without pread(); nginx may still need its descriptor to
+ * forward the same body upstream after inspection.
+ */
+static ngx_int_t
+ngx_http_coraza_append_request_body_file(ngx_http_coraza_ctx_t *ctx,
+    ngx_http_request_t *r, ngx_temp_file_t *temp_file)
+{
+    ngx_file_t  file;
+    u_char     *data;
+    off_t       body_size;
+    off_t       offset;
+    size_t      size;
+    ssize_t     n;
+    ngx_int_t   rc;
+    ngx_int_t   ret;
+
+    body_size = temp_file->file.offset;
+    if (body_size == 0) {
+        return NGX_OK;
+    }
+
+    if (body_size < 0) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "coraza: invalid file-buffered request body size");
+        ctx->intervention_triggered = 1;
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+
+    ngx_memzero(&file, sizeof(ngx_file_t));
+    file.name = temp_file->file.name;
+    file.log = r->connection->log;
+    file.fd = ngx_open_file(file.name.data, NGX_FILE_RDONLY,
+                            NGX_FILE_OPEN, 0);
+
+    if (file.fd == NGX_INVALID_FILE) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, ngx_errno,
+            ngx_open_file_n " \"%V\" failed", &file.name);
+        ctx->intervention_triggered = 1;
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+
+    data = ngx_alloc(NGX_HTTP_CORAZA_REQUEST_BODY_FILE_CHUNK_SIZE,
+                     r->connection->log);
+    if (data == NULL) {
+        rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
+        goto done;
+    }
+
+    offset = 0;
+    rc = NGX_OK;
+
+    while (offset < body_size) {
+        if (body_size - offset
+            > (off_t) NGX_HTTP_CORAZA_REQUEST_BODY_FILE_CHUNK_SIZE)
+        {
+            size = NGX_HTTP_CORAZA_REQUEST_BODY_FILE_CHUNK_SIZE;
+        } else {
+            size = (size_t) (body_size - offset);
+        }
+
+        n = ngx_read_file(&file, data, size, offset);
+        if (n == NGX_ERROR) {
+            rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
+            goto free;
+        }
+
+        if (n == 0) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "coraza: file-buffered request body ended at %O of %O bytes",
+                offset, body_size);
+            rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
+            goto free;
+        }
+
+        if (coraza_append_request_body(ctx->coraza_transaction, data,
+                                       (int) n) != 0)
+        {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "coraza: failed to append file-buffered request body chunk "
+                "for inspection");
+            rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
+            goto free;
+        }
+
+        offset += n;
+
+        if (offset < body_size) {
+            ret = ngx_http_coraza_process_intervention(ctx, r, 0);
+            if (ret < 0) {
+                rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
+                goto free;
+            }
+            if (ret > 0) {
+                ctx->intervention_triggered = 1;
+                rc = ret;
+                goto free;
+            }
+        }
+    }
+
+free:
+
+    ngx_free(data);
+
+done:
+
+    if (ngx_close_file(file.fd) == NGX_FILE_ERROR) {
+        ngx_log_error(NGX_LOG_ALERT, r->connection->log, ngx_errno,
+            ngx_close_file_n " \"%V\" failed", &file.name);
+    }
+
+    if (rc != NGX_OK) {
+        ctx->intervention_triggered = 1;
+    }
+
+    return rc;
 }
 
 
@@ -175,7 +299,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
     {
         int ret = 0;
         int already_inspected = 0;
-        char *file_name = NULL;
+        ngx_int_t rc;
 
         dd("request body phase is ready to be processed");
 
@@ -187,29 +311,16 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
         r->write_event_handler = ngx_http_core_run_phases;
 
         if (r->request_body->temp_file != NULL) {
-            ngx_str_t file_path = r->request_body->temp_file->file.name;
-            if (ngx_str_to_char(file_path, &file_name, r->pool) != NGX_OK) {
-                return NGX_HTTP_INTERNAL_SERVER_ERROR;
-            }
             /*
              * Request body was saved to a file, probably we don't have a
              * copy of it in memory.
              */
-            dd("request body inspection: file -- %s", file_name);
+            dd("request body inspection: file");
 
-            /*
-             * A non-zero return means libcoraza could not read/submit the
-             * body file, so the engine would evaluate phase 2 against no (or
-             * a partial) body while nginx forwards the full body upstream.
-             * Fail closed rather than inspect less than we forward.
-             * (libcoraza signals failure with a positive sentinel, so test
-             * != 0, not < 0.)
-             */
-            if (coraza_request_body_from_file(ctx->coraza_transaction, file_name) != 0) {
-                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                    "coraza: failed to submit file-buffered request body for inspection");
-                ctx->intervention_triggered = 1;
-                return NGX_HTTP_INTERNAL_SERVER_ERROR;
+            rc = ngx_http_coraza_append_request_body_file(ctx, r,
+                    r->request_body->temp_file);
+            if (rc != NGX_OK) {
+                return rc;
             }
 
             already_inspected = 1;
