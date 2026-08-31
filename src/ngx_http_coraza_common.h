@@ -224,6 +224,7 @@ ngx_http_coraza_poll_after_process(ngx_http_coraza_ctx_t *ctx,
 /* ngx_http_coraza_dl.c */
 ngx_int_t ngx_http_coraza_dl_open(ngx_log_t *log);
 void ngx_http_coraza_dl_close(ngx_log_t *log);
+int ngx_http_coraza_is_request_body_accessible(coraza_transaction_t t);
 int ngx_http_coraza_is_response_body_processable(coraza_transaction_t t);
 /* Bulk header entry points (libcoraza 1.6+); guard every call with
  * ngx_http_coraza_bulk_headers_available() (forward-declared above). */

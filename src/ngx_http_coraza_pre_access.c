@@ -35,6 +35,50 @@ ngx_http_coraza_request_read(ngx_http_request_t *r)
 }
 
 
+/*
+ * Finish the request-body phase after any body submission.  This must also run
+ * when request-body access is off: Coraza still evaluates phase-2 rules on
+ * headers, URI arguments and other non-body variables in that case.
+ */
+static ngx_int_t
+ngx_http_coraza_process_request_body_phase(ngx_http_coraza_ctx_t *ctx,
+    ngx_http_request_t *r)
+{
+    int pret;
+    int ret;
+
+    pret = coraza_process_request_body(ctx->coraza_transaction);
+    if (ngx_http_coraza_process_body_failed(pret))
+    {
+        /*
+         * The engine could not evaluate phase 2; no interruption is set,
+         * so the poll below would let the body through uninspected.  Fail
+         * closed rather than inspect nothing while nginx forwards the body.
+         */
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "coraza: request body phase processing failed");
+        ctx->intervention_triggered = 1;
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+
+    ret = ngx_http_coraza_poll_after_process(ctx, r, 0, pret);
+    if (r->error_page) {
+        return NGX_DECLINED;
+    }
+    if (ret < 0) {
+        /* NGX_ERROR from the intervention handler: fail closed. */
+        ctx->intervention_triggered = 1;
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+    if (ret > 0) {
+        ctx->intervention_triggered = 1;
+        return ret;
+    }
+
+    return NGX_DECLINED;
+}
+
+
 ngx_int_t
 ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
 {
@@ -71,9 +115,27 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
         return NGX_DONE;
     }
 
+    /*
+     * Request-header processing has already run in the rewrite handler, so
+     * libcoraza can now answer whether request-body bytes are accessible for
+     * this transaction.  When access is off, leave body_requested clear and
+     * let the eventual content handler read/forward the body; Coraza discards
+     * those bytes, so reading them here would only add buffering, copies and
+     * cgo crossings.
+     *
+     * body_requested also records that this predicate was true.  On the
+     * NGX_AGAIN resume path it prevents a second predicate call and a second
+     * ngx_http_read_client_request_body() call.
+     */
     if (ctx->body_requested == 0)
     {
         ngx_int_t rc = NGX_OK;
+
+        if (!ngx_http_coraza_is_request_body_accessible(
+                ctx->coraza_transaction))
+        {
+            return ngx_http_coraza_process_request_body_phase(ctx, r);
+        }
 
         ctx->body_requested = 1;
 
@@ -112,18 +174,17 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
     if (ctx->waiting_more_body == 0)
     {
         int ret = 0;
-        int pret = 0;
         int already_inspected = 0;
         char *file_name = NULL;
 
-        dd("request body is ready to be processed");
-
-        r->write_event_handler = ngx_http_core_run_phases;
+        dd("request body phase is ready to be processed");
 
         ngx_chain_t *chain = r->request_body->bufs;
 
         /* TODO: send chunks to Coraza as they arrive instead of waiting
          * for the full body, to reduce latency on large requests. */
+
+        r->write_event_handler = ngx_http_core_run_phases;
 
         if (r->request_body->temp_file != NULL) {
             ngx_str_t file_path = r->request_body->temp_file->file.name;
@@ -212,7 +273,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
          * returned any kind of intervention.
          */
 
-        /* Check for body limit intervention before processing rules */
+        /* Check for body limit intervention before processing rules. */
         ret = ngx_http_coraza_process_intervention(ctx, r, 0);
         if (r->error_page) {
             return NGX_DECLINED;
@@ -227,36 +288,9 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
             return ret;
         }
 
-        pret = coraza_process_request_body(ctx->coraza_transaction);
-        if (ngx_http_coraza_process_body_failed(pret))
-        {
-            /*
-             * The engine could not evaluate phase 2; no interruption is set,
-             * so the poll below would let the body through uninspected.  Fail
-             * closed rather than inspect nothing while nginx forwards the body.
-             */
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "coraza: request body phase processing failed");
-            ctx->intervention_triggered = 1;
-            return NGX_HTTP_INTERNAL_SERVER_ERROR;
-        }
-
-        ret = ngx_http_coraza_poll_after_process(ctx, r, 0, pret);
-        if (r->error_page) {
-            return NGX_DECLINED;
-        }
-        if (ret < 0) {
-            /* NGX_ERROR from the intervention handler: fail closed. */
-            ctx->intervention_triggered = 1;
-            return NGX_HTTP_INTERNAL_SERVER_ERROR;
-        }
-        if (ret > 0) {
-            ctx->intervention_triggered = 1;
-            return ret;
-        }
+        return ngx_http_coraza_process_request_body_phase(ctx, r);
     }
 
     dd("Nothing to add on the body inspection, reclaiming a NGX_DECLINED");
     return NGX_DECLINED;
 }
-
