@@ -29,6 +29,12 @@ unlike($dl, qr/libcoraza\s*<\s*1\.4/,
 like($dl, qr/DL_SYM\(dl_is_response_body_processable,\s*coraza_is_response_body_processable\)/s,
 	'response-body helper is resolved as a required symbol');
 
+like($dl, qr/DL_SYM\(dl_is_request_body_accessible,\s*coraza_is_request_body_accessible\)/s,
+	'request-body helper is resolved as a required symbol');
+
+like($dl, qr/return\s+dl_is_request_body_accessible\(t\)/,
+	'request-body helper wrapper calls the resolved symbol');
+
 unlike($dl, qr/DL_SYM\([^,]+,\s*coraza_rules_merge\)/,
 	'dead coraza_rules_merge symbol is not required at startup');
 
