@@ -16,7 +16,8 @@ name: Bump CI version pins
 # requests" to be ON (Settings > Actions > General) for GITHUB_TOKEN to open the
 # PR. NOTE: a PR opened by GITHUB_TOKEN does not itself trigger the pull_request
 # CI; if the bump PR should auto-run the matrix without a manual nudge, swap the
-# token below for a GitHub App / PAT (as release-please does elsewhere).
+# token below for a GitHub App token (as release-please does elsewhere). A PAT
+# will NOT work here -- sign-commits requires a bot token (GITHUB_TOKEN or App).
 
 on:
   schedule:
@@ -59,12 +60,20 @@ jobs:
             echo "ym=$(date -u +%Y%m)"
             echo "ymd=$(date -u +%Y-%m)"
           } >> "$GITHUB_ENV"
+          # Quoted heredocs keep the literal Markdown backticks out of shell
+          # quoting (no ShellCheck SC2016) while the summary is spliced between.
           {
-            printf '%s\n\n' 'Monthly automated bump of `.github/versions.env` (nginx mainline/stable, Angie, OWASP CRS LTS, libcoraza) with fresh sha256 pins.'
-            printf '```\n'
+            cat <<'HEADER'
+          Monthly automated bump of `.github/versions.env` (nginx mainline/stable, Angie, OWASP CRS LTS, libcoraza) with fresh sha256 pins.
+
+          ```
+          HEADER
             cat /tmp/bump-summary.txt
-            printf '```\n\n'
-            printf '%s\n' 'The full ci-fast + build matrix gates this PR before merge.'
+            cat <<'FOOTER'
+          ```
+
+          The full ci-fast + build matrix gates this PR before merge.
+          FOOTER
           } > /tmp/pr-body.md
 
       # Creates the branch, a SIGNED commit (via the API), and the PR — reusing
