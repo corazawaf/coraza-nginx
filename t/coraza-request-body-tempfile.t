@@ -4,10 +4,9 @@
 # buffered to a temporary FILE rather than kept in memory.
 #
 # With client_body_in_file_only nginx always spills the request body to a temp
-# file; the pre-access handler then feeds Coraza via
-# coraza_request_body_from_file() (the temp_file branch) instead of the
-# in-memory chain walk.  A phase-2 REQUEST_BODY rule proves the file-backed
-# body is still inspected and blocked.
+# file; the pre-access handler then feeds Coraza through the connector's
+# chunked temp-file reader instead of the in-memory chain walk.  A phase-2
+# REQUEST_BODY rule proves the file-backed body is still inspected and blocked.
 
 ###############################################################################
 
@@ -50,7 +49,7 @@ http {
 
         location /body {
             # Force the request body onto disk so the temp-file inspection
-            # path (coraza_request_body_from_file) is exercised.
+            # path (the connector's chunked temp-file reader) is exercised.
             client_body_in_file_only on;
             coraza_rules '
                 SecRuleEngine On

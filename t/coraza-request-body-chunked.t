@@ -10,11 +10,10 @@
 #     reads -- had no coverage at all.
 #
 #   * Temp-file bodies.  ngx_http_coraza_pre_access.c has a whole branch for
-#     r->request_body->temp_file that hands the file PATH to Coraza
-#     (coraza_request_body_from_file) instead of appending buffers.  Every
-#     existing body test sends a few hundred bytes and stays in memory, so
-#     that branch was never entered.  client_body_buffer_size here is small
-#     enough to force the spill.
+#     r->request_body->temp_file that reads and appends the file in reusable
+#     64 KiB chunks.  Every existing body test sends a few hundred bytes and
+#     stays in memory, so that branch was never entered.  The small
+#     client_body_buffer_size here forces the spill.
 #
 # The adversarial case that matters for the temp-file path: a payload split
 # across the buffer boundary must still be inspected as one body.  If only
@@ -40,7 +39,7 @@ use Test::Nginx;
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http proxy/)->plan(7);
+my $t = Test::Nginx->new()->has(qw/http proxy/)->plan(9);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -70,7 +69,7 @@ http {
         }
 
         # client_body_buffer_size 1k forces anything larger to a temp file, so
-        # this location drives the coraza_request_body_from_file branch.
+        # this location drives the connector's chunked temp-file reader.
         # SecRequestBodyLimit must stay above the payload or Coraza would
         # reject it before the branch is reached.
         location /body-file {
@@ -83,6 +82,20 @@ http {
                 SecRequestBodyNoFilesLimit 1048576
                 SecAction "id:7203,phase:1,pass,nolog,ctl:requestBodyProcessor=URLENCODED"
                 SecRule REQUEST_BODY "@contains BADBODY" "id:7202,phase:2,deny,log,status:403"
+            ';
+            proxy_pass http://127.0.0.1:%%PORT_8081%%;
+        }
+
+        # The connector-owned reader must preserve Coraza's request-body limit
+        # intervention when the limit is crossed between 64 KiB appends.
+        location /body-file-limit {
+            client_body_buffer_size 1k;
+            coraza on;
+            coraza_rules '
+                SecRuleEngine On
+                SecRequestBodyAccess On
+                SecRequestBodyLimit 65536
+                SecRequestBodyLimitAction Reject
             ';
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
         }
@@ -127,6 +140,15 @@ like(post('/body-file', $tail), qr!^HTTP/1.1 403!,
 my $straddle = ('A' x 1021) . 'BADBODY' . ('B' x 4096);
 like(post('/body-file', $straddle), qr!^HTTP/1.1 403!,
 	'temp-file body inspected (marker straddling the buffer boundary)');
+
+# Marker straddling the connector's 64 KiB read boundary: separate appends must
+# still form one contiguous body for the request-body processor.
+my $reader_straddle = ('A' x 65533) . 'BADBODY' . ('B' x 4096);
+like(post('/body-file', $reader_straddle), qr!^HTTP/1.1 403!,
+	'temp-file body inspected across the 64 KiB reader boundary');
+
+like(post('/body-file-limit', 'L' x 70000), qr!^HTTP/1.1 413!,
+	'temp-file reader preserves request-body limit enforcement');
 
 # Control: same size, no marker -- proves the 403s above are the rule matching
 # and not the temp-file path failing closed on every large body.

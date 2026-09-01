@@ -35,7 +35,6 @@ typedef int                  (*fn_coraza_process_uri)(coraza_transaction_t, char
 typedef int                  (*fn_coraza_add_request_header)(coraza_transaction_t, char *, int, char *, int);
 typedef int                  (*fn_coraza_process_request_headers)(coraza_transaction_t);
 typedef int                  (*fn_coraza_append_request_body)(coraza_transaction_t, unsigned char *, int);
-typedef int                  (*fn_coraza_request_body_from_file)(coraza_transaction_t, char *);
 typedef int                  (*fn_coraza_process_request_body)(coraza_transaction_t);
 typedef int                  (*fn_coraza_is_request_body_accessible)(coraza_transaction_t);
 typedef int                  (*fn_coraza_add_response_header)(coraza_transaction_t, char *, int, char *, int);
@@ -86,7 +85,6 @@ static fn_coraza_process_uri             dl_process_uri;
 static fn_coraza_add_request_header      dl_add_request_header;
 static fn_coraza_process_request_headers dl_process_request_headers;
 static fn_coraza_append_request_body     dl_append_request_body;
-static fn_coraza_request_body_from_file  dl_request_body_from_file;
 static fn_coraza_process_request_body    dl_process_request_body;
 static fn_coraza_is_request_body_accessible dl_is_request_body_accessible;
 static fn_coraza_add_response_header     dl_add_response_header;
@@ -172,7 +170,6 @@ ngx_http_coraza_dl_open(ngx_log_t *log)
     DL_SYM(dl_add_request_header,       coraza_add_request_header);
     DL_SYM(dl_process_request_headers,  coraza_process_request_headers);
     DL_SYM(dl_append_request_body,      coraza_append_request_body);
-    DL_SYM(dl_request_body_from_file,   coraza_request_body_from_file);
     DL_SYM(dl_process_request_body,     coraza_process_request_body);
     DL_SYM(dl_is_request_body_accessible,
            coraza_is_request_body_accessible);
@@ -324,11 +321,6 @@ int coraza_append_request_body(coraza_transaction_t t,
                                unsigned char *data, int length)
 {
     return dl_append_request_body(t, data, length);
-}
-
-int coraza_request_body_from_file(coraza_transaction_t t, char *file)
-{
-    return dl_request_body_from_file(t, file);
 }
 
 int coraza_process_request_body(coraza_transaction_t t)
