@@ -8,9 +8,15 @@ name: Bump CI version pins
 # GitHub Actions themselves are pinned by SHA and bumped separately by renovate;
 # this job only owns the upstream source-archive versions.
 #
+# The commit is created through the GitHub API (create-pull-request with
+# sign-commits: true) so it is signed/"Verified" — main requires signed commits,
+# and a plain `git commit` from the runner is unsigned and cannot be merged.
+#
 # Requires repo setting "Allow GitHub Actions to create and approve pull
-# requests" to be ON (Settings > Actions > General) for the default GITHUB_TOKEN
-# to open the PR.
+# requests" to be ON (Settings > Actions > General) for GITHUB_TOKEN to open the
+# PR. NOTE: a PR opened by GITHUB_TOKEN does not itself trigger the pull_request
+# CI; if the bump PR should auto-run the matrix without a manual nudge, swap the
+# token below for a GitHub App / PAT (as release-please does elsewhere).
 
 on:
   schedule:
@@ -30,14 +36,12 @@ jobs:
     name: Recompute pins + open PR
     runs-on: ubuntu-26.04
     permissions:
-      contents: write        # create the bump branch
+      contents: write        # create the bump branch / commit
       pull-requests: write   # open the PR
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          # Don't leave the token wired into .git/config for later run steps;
-          # the push below authenticates explicitly via `gh auth setup-git`.
           persist-credentials: false
 
       - name: Install tools
@@ -48,34 +52,32 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: bash .github/scripts/compute-versions.sh | tee /tmp/bump-summary.txt
 
-      - name: Open PR if changed
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Prepare PR metadata
         run: |
           set -euo pipefail
-          if git diff --quiet -- .github/versions.env; then
-            echo "versions.env unchanged — nothing to bump."
-            exit 0
-          fi
+          {
+            echo "ym=$(date -u +%Y%m)"
+            echo "ymd=$(date -u +%Y-%m)"
+          } >> "$GITHUB_ENV"
+          {
+            printf '%s\n\n' 'Monthly automated bump of `.github/versions.env` (nginx mainline/stable, Angie, OWASP CRS LTS, libcoraza) with fresh sha256 pins.'
+            printf '```\n'
+            cat /tmp/bump-summary.txt
+            printf '```\n\n'
+            printf '%s\n' 'The full ci-fast + build matrix gates this PR before merge.'
+          } > /tmp/pr-body.md
 
-          branch="ci/bump-versions-$(date -u +%Y%m)"
-          # Re-establish git credentials (persist-credentials:false above).
-          gh auth setup-git
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$branch"
-          git add .github/versions.env
-          git commit -m "ci: monthly bump of CI version pins"
-          git push -f origin "$branch"
-
-          summary="$(cat /tmp/bump-summary.txt)"
-          body=$'Monthly automated bump of `.github/versions.env` (nginx mainline/stable, Angie, OWASP CRS LTS, libcoraza) with fresh sha256 pins.\n\n```\n'"$summary"$'\n```\n\nThe full ci-fast + build matrix gates this PR before merge.'
-
-          # Reuse an existing open PR for this branch, else create one.
-          if gh pr view "$branch" --json number >/dev/null 2>&1; then
-            gh pr edit "$branch" --body "$body"
-          else
-            gh pr create --base main --head "$branch" \
-              --title "ci: monthly CI version-pin bump ($(date -u +%Y-%m))" \
-              --body "$body"
-          fi
+      # Creates the branch, a SIGNED commit (via the API), and the PR — reusing
+      # an existing open PR for the same branch. No-ops when nothing changed.
+      - name: Create/update bump PR
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
+        with:
+          token: ${{ github.token }}
+          base: main
+          branch: ci/bump-versions-${{ env.ym }}
+          add-paths: .github/versions.env
+          sign-commits: true
+          commit-message: "ci: monthly bump of CI version pins"
+          title: "ci: monthly CI version-pin bump (${{ env.ymd }})"
+          body-path: /tmp/pr-body.md
+          delete-branch: false
