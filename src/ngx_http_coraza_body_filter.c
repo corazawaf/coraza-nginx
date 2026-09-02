@@ -85,7 +85,10 @@ ngx_http_coraza_read_body_data(ngx_http_request_t *r, ngx_buf_t *buf,
             }
 
             if (n == 0) {
-                break;
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                    "coraza: response body file ended at %O of %O bytes",
+                    offset, buf->file_last);
+                return NGX_ERROR;
             }
 
             total_read += (size_t) n;
