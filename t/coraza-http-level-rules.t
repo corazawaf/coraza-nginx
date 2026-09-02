@@ -28,6 +28,7 @@ select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
 my $t = Test::Nginx->new()->has(qw/http/);
+my $nginx = defined $ENV{TEST_NGINX_BINARY} ? $ENV{TEST_NGINX_BINARY} : 'nginx';
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -76,7 +77,7 @@ EOF
 
 $t->run();
 $t->todo_alerts();
-$t->plan(3);
+$t->plan(5);
 
 ###############################################################################
 
@@ -92,3 +93,35 @@ like(http_get('/inherited?block=0'), qr/^HTTP.*200/,
 like(http_get('/off?block=1', PeerAddr => '127.0.0.1:' . port(8081)),
     qr/^HTTP.*200/,
     'coraza off does not enforce inherited http-level rules (control)');
+
+my $testdir = $t->testdir();
+
+$t->write_file_expand('ruleless.conf', <<'EOF');
+
+%%TEST_GLOBALS%%
+
+daemon off;
+
+events {
+}
+
+http {
+    access_log off;
+
+    server {
+        listen 127.0.0.1:%%PORT_8082%%;
+
+        location / {
+            coraza on;
+            return 200 "unprotected";
+        }
+    }
+}
+EOF
+
+my $out = `$nginx -t -p $testdir/ -c ruleless.conf 2>&1`;
+my $rc = $?;
+
+isnt($rc, 0, 'nginx rejects coraza on when the http block declares no rules at all');
+like($out, qr/"coraza on" requires at least one inherited or configured rule/,
+    'ruleless coraza configuration reports the fail-closed error');

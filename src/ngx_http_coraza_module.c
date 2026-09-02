@@ -24,6 +24,7 @@ static void *ngx_http_coraza_create_main_conf(ngx_conf_t *cf);
 static char *ngx_http_coraza_init_main_conf(ngx_conf_t *cf, void *conf);
 static void *ngx_http_coraza_create_conf(ngx_conf_t *cf);
 static char *ngx_http_coraza_merge_conf(ngx_conf_t *cf, void *parent, void *child);
+static ngx_int_t ngx_http_coraza_validate_rules(ngx_conf_t *cf);
 static ngx_int_t ngx_http_coraza_init_process(ngx_cycle_t *cycle);
 static void ngx_http_coraza_exit_process(ngx_cycle_t *cycle);
 
@@ -428,6 +429,10 @@ ngx_http_coraza_init(ngx_conf_t *cf)
 	ngx_http_core_main_conf_t *cmcf;
 	int rc = 0;
 
+	if (ngx_http_coraza_validate_rules(cf) != NGX_OK) {
+		return NGX_ERROR;
+	}
+
 	cmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_core_module);
 	if (cmcf == NULL)
 	{
@@ -476,6 +481,45 @@ ngx_http_coraza_init(ngx_conf_t *cf)
 	}
 
 	return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_coraza_validate_rules(ngx_conf_t *cf)
+{
+	ngx_http_coraza_main_conf_t *mmcf;
+	ngx_http_coraza_conf_t *lcf;
+	ngx_http_coraza_conf_t **loc_confs;
+	ngx_uint_t i;
+
+	mmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_coraza_module);
+	if (mmcf == NULL || mmcf->rules_inline != 0 || mmcf->rules_file != 0) {
+		return NGX_OK;
+	}
+
+	lcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_coraza_module);
+	if (lcf != NULL && lcf->enable == 1) {
+		goto ruleless;
+	}
+
+	if (mmcf->loc_confs == NULL) {
+		return NGX_OK;
+	}
+
+	loc_confs = mmcf->loc_confs->elts;
+	for (i = 0; i < mmcf->loc_confs->nelts; i++) {
+		lcf = loc_confs[i];
+		if (lcf->enable == 1) {
+			goto ruleless;
+		}
+	}
+
+	return NGX_OK;
+
+ruleless:
+	ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
+				  "coraza: \"coraza on\" requires at least one "
+				  "inherited or configured rule");
+	return NGX_ERROR;
 }
 
 static void *
