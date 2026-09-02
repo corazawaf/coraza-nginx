@@ -59,6 +59,29 @@ http {
                 SecResponseBodyAccess Off
             ';
         }
+
+        location /body_file_clean {
+            default_type text/plain;
+            directio 512;
+            coraza_rules '
+                SecRuleEngine On
+                SecResponseBodyAccess On
+                SecResponseBodyMimeType text/plain
+                SecResponseBodyLimit 524288
+            ';
+        }
+
+        location /body_file_block {
+            default_type text/plain;
+            directio 512;
+            coraza_rules '
+                SecRuleEngine On
+                SecResponseBodyAccess On
+                SecResponseBodyMimeType text/plain
+                SecResponseBodyLimit 524288
+                SecRule RESPONSE_BODY "@contains END-MARKER" "id:12,phase:4,deny,log,status:403,t:none"
+            ';
+        }
     }
 }
 EOF
@@ -72,9 +95,15 @@ $t->write_file("/body1", "BAD BODY");
 my $large_body = "X" x (100 * 1024);
 $t->write_file("/body_access_off", $large_body);
 
+# Static files arrive as file-backed buffers.  Put the rule marker beyond the
+# first 64 KiB chunk so phase 4 proves all chunks were submitted.
+my $file_body = ("R" x (256 * 1024)) . "END-MARKER";
+$t->write_file("/body_file_clean", $file_body);
+$t->write_file("/body_file_block", $file_body);
+
 $t->run();
 $t->todo_alerts();
-$t->plan(3);
+$t->plan(7);
 
 ###############################################################################
 
@@ -84,3 +113,12 @@ my $r = http_get('/body_access_off');
 like($r, qr/^HTTP.*200/, 'large response with SecResponseBodyAccess Off returns 200');
 like($r, qr/\Q$large_body\E/, 'large response body delivered intact');
 
+$r = http_get('/body_file_clean');
+like($r, qr/^HTTP.*200/, 'chunked file-backed response inspection allows clean body');
+like($r, qr/\QEND-MARKER\E/, 'chunked inspected file body is delivered intact');
+
+$r = http_get('/body_file_block');
+like($r, qr/^HTTP.*403/,
+    'phase 4 blocks on a marker beyond the first file chunk');
+unlike($r, qr/\QEND-MARKER\E/,
+    'clean phase-4 block does not leak the inspected file body');
