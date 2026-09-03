@@ -94,7 +94,9 @@ like($r1, qr!^HTTP/\S+ 403!, 'request 1 on the connection is denied');
 
 SKIP: {
 	skip 'connection was closed after the deny (see file header)', 1
-		if !defined $r1 || $r1 eq '' || $s->connected() == 0;
+		# connected() returns a packed peer address, not a number, so test
+		# it for truth -- comparing it with == warns and is meaningless.
+		if !defined $r1 || $r1 eq '' || !$s->connected();
 
 	# Request 2 on the SAME socket: benign, must be evaluated fresh and
 	# return 200 -- not a stale 403 carried over from request 1's
