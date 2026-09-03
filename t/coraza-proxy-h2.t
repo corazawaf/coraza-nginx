@@ -23,7 +23,7 @@ use Test::Nginx::HTTP2;
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http http_v2 proxy/)->plan(23);
+my $t = Test::Nginx->new()->has(qw/http http_v2 proxy/)->plan(27);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -135,15 +135,13 @@ for $phase (1 .. 3) {
 	is($frame->{headers}->{':status'}, 302, "redirect 302 - phase ${phase}");
 }
 
-SKIP: {
-skip 'long test', 1 unless $ENV{TEST_NGINX_UNSAFE};
-
 $s = Test::Nginx::HTTP2->new();
 $sid = $s->new_stream({ path => '/phase4?what=redirect302' });
 $frames = $s->read(all => [{ sid => $sid, fin => 1 }]);
+($frame) = grep { $_->{type} eq "HEADERS" } @$frames;
+is($frame->{headers}->{':status'}, 302, 'redirect 302 - phase 4 status');
 ($frame) = grep { $_->{type} eq "DATA" } @$frames;
-is($frame, undef, 'redirect 302 - phase 4');
-}
+unlike($frame->{data} // '', qr/not found/, 'redirect 302 - phase 4 body not leaked');
 
 # Redirect (301)
 
@@ -155,15 +153,13 @@ for $phase (1 .. 3) {
 	is($frame->{headers}->{':status'}, 301, "redirect 301 - phase ${phase}");
 }
 
-SKIP: {
-skip 'long test', 1 unless $ENV{TEST_NGINX_UNSAFE};
-
 $s = Test::Nginx::HTTP2->new();
 $sid = $s->new_stream({ path => '/phase4?what=redirect301' });
 $frames = $s->read(all => [{ sid => $sid, fin => 1 }]);
+($frame) = grep { $_->{type} eq "HEADERS" } @$frames;
+is($frame->{headers}->{':status'}, 301, 'redirect 301 - phase 4 status');
 ($frame) = grep { $_->{type} eq "DATA" } @$frames;
-is($frame, undef, 'redirect 301 - phase 4');
-}
+unlike($frame->{data} // '', qr/not found/, 'redirect 301 - phase 4 body not leaked');
 
 # Block (401)
 
@@ -175,15 +171,13 @@ for $phase (1 .. 3) {
 	is($frame->{headers}->{':status'}, 401, "block 401 - phase ${phase}");
 }
 
-SKIP: {
-skip 'long test', 1 unless $ENV{TEST_NGINX_UNSAFE};
-
 $s = Test::Nginx::HTTP2->new();
 $sid = $s->new_stream({ path => '/phase4?what=block401' });
 $frames = $s->read(all => [{ sid => $sid, fin => 1 }]);
+($frame) = grep { $_->{type} eq "HEADERS" } @$frames;
+is($frame->{headers}->{':status'}, 401, 'block 401 - phase 4 status');
 ($frame) = grep { $_->{type} eq "DATA" } @$frames;
-is($frame, undef, 'block 401 - phase 4');
-}
+unlike($frame->{data} // '', qr/not found/, 'block 401 - phase 4 body not leaked');
 
 
 # Block (403)
@@ -196,15 +190,13 @@ for $phase (1 .. 3) {
 	is($frame->{headers}->{':status'}, 403, "block 403 - phase ${phase}");
 }
 
-SKIP: {
-skip 'long test', 1 unless $ENV{TEST_NGINX_UNSAFE};
-
 $s = Test::Nginx::HTTP2->new();
 $sid = $s->new_stream({ path => '/phase4?what=block403' });
 $frames = $s->read(all => [{ sid => $sid, fin => 1 }]);
+($frame) = grep { $_->{type} eq "HEADERS" } @$frames;
+is($frame->{headers}->{':status'}, 403, 'block 403 - phase 4 status');
 ($frame) = grep { $_->{type} eq "DATA" } @$frames;
-is($frame, undef, 'block 403 - phase 4');
-}
+unlike($frame->{data} // '', qr/not found/, 'block 403 - phase 4 body not leaked');
 
 # Nothing to detect
 #like(http_get('/phase1?what=nothing'), qr/phase1\?what=nothing\' not found/, 'nothing phase 1');
