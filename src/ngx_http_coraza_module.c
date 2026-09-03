@@ -745,7 +745,15 @@ ngx_http_coraza_init_process(ngx_cycle_t *cycle)
 	ngx_http_coraza_conf_t **loc_confs;
 	ngx_uint_t i;
 
-	/* Step 1: load libcoraza.so — Go runtime initializes fresh here */
+	/*
+	 * Step 1: load libcoraza.so.  This must happen after fork, in each
+	 * worker, never in the master: a Go runtime already running when
+	 * nginx forks would have its threads silently dropped in the child,
+	 * so no Go code may ever run in the master process.  dlopen()-ing
+	 * here instead lets the Go runtime inside libcoraza start fresh in
+	 * every worker, avoiding the post-fork deadlock (see
+	 * ngx_http_coraza_dl.c).
+	 */
 	if (ngx_http_coraza_dl_open(cycle->log) != NGX_OK) {
 		return NGX_ERROR;
 	}

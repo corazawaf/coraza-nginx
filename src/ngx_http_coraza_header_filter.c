@@ -430,12 +430,26 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     }
 
     mcf = ngx_http_get_module_loc_conf(r, ngx_http_coraza_module);
+    if (mcf == NULL) {
+        return ngx_http_next_header_filter(r);
+    }
 
     if (ctx->intervention_triggered) {
         return ngx_http_next_header_filter(r);
     }
 
-    /* Skip if already processed (can happen with subrequests or error pages) */
+    /*
+     * ctx->processed is deliberately sticky for the lifetime of this ctx: it
+     * guards against this filter running twice for the same ctx, not against
+     * running once per "logical" response. An internal redirect
+     * (error_page, X-Accel-Redirect) reuses the same r/ctx across the hop,
+     * but nginx invokes the header filter chain only once, for the final
+     * response actually sent to the client -- redirected phases never reach
+     * this filter, so there is nothing here for the flag to wrongly
+     * suppress. A subrequest gets its own r and, unless it creates one, a
+     * NULL ctx (see ngx_http_coraza_create_ctx() callers), so it is
+     * unaffected by the parent's flag. Do not reset this flag.
+     */
     if (ctx && ctx->processed)
     {
         return ngx_http_next_header_filter(r);
