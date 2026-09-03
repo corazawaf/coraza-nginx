@@ -56,6 +56,17 @@ Or, to build a dynamic module:
 Note that when building a dynamic module, your nginx source version
 needs to match the version of nginx you're compiling this for.
 
+When building from source, pass `-Wno-unused-function`. The installed
+`coraza/coraza.h` carries libcoraza's cgo preamble, whose `static` callback
+shims are unused in any given translation unit, and nginx builds with `-Werror`:
+
+```
+./configure --add-dynamic-module=/path/to/coraza-nginx --with-compat \
+    --with-cc-opt="-Wno-unused-function"
+```
+
+The Debian package build sets its own CFLAGS and does not need this flag.
+
 Further information about nginx third-party add-ons support are available here:
 http://wiki.nginx.org/3rdPartyModules
 
@@ -83,7 +94,7 @@ sets `-ldl` for you on Linux/macOS.
 # Usage
 
 coraza for nginx extends your nginx configuration directives.
-It adds four new directives:
+It adds five new directives:
 
 coraza
 ------
@@ -191,6 +202,21 @@ be able to find correlations between access log and error log entries
 using the same unique identificator.
 
 String can contain variables.
+
+coraza_delay_response_headers
+-----------------------------
+**syntax:** *coraza_delay_response_headers on | off*
+
+**context:** *http, server, location*
+
+**default:** *on*
+
+When enabled (the default), response headers are held back from the client
+until phase-4 response body inspection completes, so a phase-4 rule can still
+return a clean error page. When disabled, headers are sent as soon as they are
+ready, which means a late phase-4 intervention can no longer replace a response
+whose headers have already gone out. Operators whose ruleset has no phase-4
+response rules can turn this off to restore normal header streaming.
 
 ## Configuration merging
 
