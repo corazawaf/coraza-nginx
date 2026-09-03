@@ -12,6 +12,8 @@
 
 static ngx_http_output_body_filter_pt ngx_http_next_body_filter;
 
+#define NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE (64 * 1024)
+
 /*
  * Length of the body data ngx_http_coraza_read_body_data would return,
  * without performing the read/allocation -- lets callers reject an
@@ -105,6 +107,126 @@ ngx_http_coraza_read_body_data(ngx_http_request_t *r, ngx_buf_t *buf,
 }
 
 
+/*
+ * Submit a file-backed response range through one reusable scratch buffer.
+ * File buffers can describe an arbitrarily large range, so allocating the
+ * whole range in r->pool would retain that allocation until request teardown.
+ */
+static ngx_int_t
+ngx_http_coraza_append_response_body_file(ngx_http_coraza_ctx_t *ctx,
+    ngx_http_request_t *r, ngx_buf_t *buf)
+{
+    u_char    *data;
+    off_t      offset;
+    size_t     size;
+    ssize_t    n;
+    ngx_int_t  rc;
+#if (NGX_HAVE_ALIGNED_DIRECTIO)
+    ngx_uint_t directio_disabled;
+#endif
+
+    if (buf->file_last < buf->file_pos) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "coraza: invalid file-backed response body range");
+        ctx->intervention_triggered = 1;
+        return NGX_ERROR;
+    }
+
+    if (buf->file_last == buf->file_pos) {
+        return NGX_OK;
+    }
+
+    data = ngx_alloc(NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE,
+                     r->connection->log);
+    if (data == NULL) {
+        ctx->intervention_triggered = 1;
+        return NGX_ERROR;
+    }
+
+    offset = buf->file_pos;
+    rc = NGX_OK;
+
+#if (NGX_HAVE_ALIGNED_DIRECTIO)
+    directio_disabled = 0;
+
+    if (buf->file->directio) {
+        if (ngx_directio_off(buf->file->fd) == NGX_FILE_ERROR) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, ngx_errno,
+                ngx_directio_off_n " \"%s\" failed", buf->file->name.data);
+            rc = NGX_ERROR;
+            goto done;
+        }
+
+        directio_disabled = 1;
+    }
+#endif
+
+    while (offset < buf->file_last) {
+        if (buf->file_last - offset
+            > (off_t) NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE)
+        {
+            size = NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE;
+        } else {
+            size = (size_t) (buf->file_last - offset);
+        }
+
+        n = ngx_read_file(buf->file, data, size, offset);
+        if (n == NGX_ERROR) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, ngx_errno,
+                "coraza: failed to read file-backed response body at %O",
+                offset);
+            rc = NGX_ERROR;
+            break;
+        }
+
+        if (n == 0) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "coraza: file-backed response body ended at %O of %O bytes",
+                offset, buf->file_last);
+            rc = NGX_ERROR;
+            break;
+        }
+
+        if (coraza_append_response_body(ctx->coraza_transaction, data,
+                                        (int) n) != 0)
+        {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "coraza: failed to append file-backed response body chunk "
+                "for inspection");
+            rc = NGX_ERROR;
+            break;
+        }
+
+        offset += n;
+    }
+
+#if (NGX_HAVE_ALIGNED_DIRECTIO)
+done:
+
+    if (directio_disabled) {
+        ngx_err_t  err;
+
+        err = ngx_errno;
+
+        if (ngx_directio_on(buf->file->fd) == NGX_FILE_ERROR) {
+            ngx_log_error(NGX_LOG_ALERT, r->connection->log, ngx_errno,
+                ngx_directio_on_n " \"%s\" failed", buf->file->name.data);
+        }
+
+        ngx_set_errno(err);
+    }
+#endif
+
+    ngx_free(data);
+
+    if (rc != NGX_OK) {
+        ctx->intervention_triggered = 1;
+    }
+
+    return rc;
+}
+
+
 ngx_int_t
 ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
@@ -164,44 +286,13 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
             size_t  len;
             int     ret;
 
-            /*
-             * coraza_append_response_body takes an int length; guard the
-             * size_t -> int narrowing so a >INT_MAX buffer cannot wrap to a
-             * bogus length and skip inspection. Fail closed. Checked against
-             * the buffer's own bounds before the read/allocation below, so
-             * an oversized on-disk chunk is rejected without paying for the
-             * file read first.
-             */
-            if (ngx_http_coraza_body_chunk_len(chain->buf) > INT_MAX) {
-                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                    "coraza: response body chunk too large to inspect");
-                ctx->intervention_triggered = 1;
-                return NGX_ERROR;
-            }
-
-            if (ngx_http_coraza_read_body_data(r, chain->buf, &data, &len)
-                != NGX_OK)
+            if (!ngx_buf_in_memory(chain->buf)
+                && chain->buf->in_file
+                && chain->buf->file)
             {
-                return NGX_ERROR;
-            }
-
-            if (len > 0) {
-                /*
-                 * A non-zero return means libcoraza could not write the
-                 * chunk into the response-body buffer, so the engine would
-                 * evaluate phase 4 against a shorter body than nginx streams
-                 * to the client -- an inspection bypass. Fail closed, exactly
-                 * as the request-body append path does. Matches the libcoraza
-                 * contract where coraza_append_response_body() returns 1 on a
-                 * WriteResponseBody error and 0 on success.
-                 */
-                if (coraza_append_response_body(ctx->coraza_transaction,
-                                                data, len) != 0)
+                if (ngx_http_coraza_append_response_body_file(ctx, r,
+                        chain->buf) != NGX_OK)
                 {
-                    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                        "coraza: failed to append response body chunk "
-                        "for inspection");
-                    ctx->intervention_triggered = 1;
                     if (ctx->headers_delayed) {
                         ctx->headers_delayed = 0;
                         return NGX_HTTP_INTERNAL_SERVER_ERROR;
@@ -209,6 +300,43 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                     return ngx_http_filter_finalize_request(r,
                         &ngx_http_coraza_module,
                         NGX_HTTP_INTERNAL_SERVER_ERROR);
+                }
+
+            } else {
+                /*
+                 * In-memory data still crosses an int-length cgo boundary.
+                 * File ranges use bounded chunks above and never narrow the
+                 * complete logical range.
+                 */
+                if (ngx_http_coraza_body_chunk_len(chain->buf) > INT_MAX) {
+                    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                        "coraza: response body chunk too large to inspect");
+                    ctx->intervention_triggered = 1;
+                    return NGX_ERROR;
+                }
+
+                if (ngx_http_coraza_read_body_data(r, chain->buf, &data, &len)
+                    != NGX_OK)
+                {
+                    return NGX_ERROR;
+                }
+
+                if (len > 0) {
+                    if (coraza_append_response_body(ctx->coraza_transaction,
+                                                    data, len) != 0)
+                    {
+                        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                            "coraza: failed to append response body chunk "
+                            "for inspection");
+                        ctx->intervention_triggered = 1;
+                        if (ctx->headers_delayed) {
+                            ctx->headers_delayed = 0;
+                            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+                        }
+                        return ngx_http_filter_finalize_request(r,
+                            &ngx_http_coraza_module,
+                            NGX_HTTP_INTERNAL_SERVER_ERROR);
+                    }
                 }
             }
 
@@ -317,18 +445,18 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                 u_char    *data;
                 size_t     len;
 
-                if (!ctx->response_body_processable
-                    && !ngx_buf_in_memory(chain->buf)
+                if (!ngx_buf_in_memory(chain->buf)
                     && chain->buf->in_file
                     && chain->buf->file != NULL
                     && !chain->buf->temp_file)
                 {
                     /*
-                     * No body inspection will read these bytes.  Pure
-                     * non-temp file-backed buffers can be replayed by
+                     * Pure non-temp file-backed buffers can be replayed by
                      * preserving the stable file range instead of reading it
-                     * into r->pool.  Upstream temp files keep the copy path
-                     * because their lifetime is controlled by upstream.
+                     * into r->pool.  Inspection, when enabled, already read
+                     * the range through a bounded scratch buffer above.
+                     * Upstream temp files keep the copy path because their
+                     * lifetime is controlled by upstream.
                      */
                     b = ngx_calloc_buf(r->pool);
                     if (b == NULL) {
@@ -350,10 +478,9 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                      * the cap never tripped.  Charge the logical range so the
                      * cap governs this path too: once past it the headers and
                      * everything buffered so far are flushed and the remainder
-                     * streams through.  There is no cost to clean phase-4
-                     * blocking here -- body inspection is disabled for this
-                     * transaction (!response_body_processable), so the delay
-                     * is only holding headers, not enabling a body block.
+                     * streams through.  Under the cap, the delay still holds
+                     * these stable ranges until phase 4 completes, whether or
+                     * not response-body inspection is enabled.
                      */
                     ctx->pending_bytes +=
                         (size_t) (chain->buf->file_last - chain->buf->file_pos);
