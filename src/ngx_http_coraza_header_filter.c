@@ -618,7 +618,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     }
     if (ret > 0) {
         ctx->intervention_triggered = 1;
-        if (r->headers_out.location) {
+        if (ngx_http_coraza_is_redirect_status(ret) && r->headers_out.location) {
             ngx_http_coraza_prepare_redirect(r, ret);
             return ngx_http_next_header_filter(r);
         }
@@ -685,6 +685,27 @@ ngx_int_t
 ngx_http_coraza_forward_header(ngx_http_request_t *r)
 {
     return ngx_http_next_header_filter(r);
+}
+
+
+/*
+ * The intervention statuses for which ngx_http_coraza_process_intervention()
+ * installs a redirect Location.  Both filters must test the STATUS, never
+ * merely the presence of r->headers_out.location: an origin response may carry
+ * a Location of its own -- an upstream 302 whose headers or body then trip a
+ * deny -- and keying off the header alone answers that deny with a header-only
+ * response carrying the origin's target instead of the configured error page.
+ *
+ * Shared so the header filter and the body filter's delayed path cannot drift.
+ */
+ngx_int_t
+ngx_http_coraza_is_redirect_status(ngx_int_t status)
+{
+    return status == NGX_HTTP_MOVED_PERMANENTLY
+           || status == NGX_HTTP_MOVED_TEMPORARILY
+           || status == NGX_HTTP_SEE_OTHER
+           || status == NGX_HTTP_TEMPORARY_REDIRECT
+           || status == NGX_HTTP_PERMANENT_REDIRECT;
 }
 
 

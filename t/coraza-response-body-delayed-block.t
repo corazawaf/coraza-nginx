@@ -110,9 +110,14 @@ http {
         # page: keying the redirect exit off r->headers_out.location alone
         # would mistake the origin's header for a redirect intervention and
         # answer with a header-only 403 pointing at the origin's target.
+        #
+        # The Location must come from a real upstream redirect: add_header only
+        # appends to r->headers_out.headers and leaves r->headers_out.location
+        # NULL, so the guard would never see it and this control would pass
+        # whatever the code did.
         location /origin-redirect.txt {
             coraza_delay_response_headers on;
-            add_header Location http://origin.example.com/elsewhere always;
+            proxy_pass http://127.0.0.1:8081/origin-body.txt;
             coraza_rules '
                 SecRuleEngine On
                 SecResponseBodyAccess On
@@ -135,6 +140,27 @@ http {
             ';
         }
     }
+
+    # Origin for /origin-redirect.txt: a genuine 302, so its Location lands in
+    # r->headers_out.location on the proxied response, with a body that trips
+    # the phase-4 deny.  Coraza is off here; only the proxying server inspects.
+    server {
+        listen       127.0.0.1:8081;
+        server_name  origin;
+
+        coraza off;
+        default_type text/plain;
+
+        location /origin-body.txt {
+            add_header Location http://origin.example.com/elsewhere always;
+            error_page 418 =302 /origin-body-content.txt;
+            return 418;
+        }
+
+        location /origin-body-content.txt {
+            internal;
+        }
+    }
 }
 EOF
 
@@ -145,6 +171,7 @@ $t->write_file("/denied-403.html", $denied);
 $t->write_file("/block.txt", $origin);
 $t->write_file("/redirect.txt", $origin);
 $t->write_file("/origin-redirect.txt", $origin);
+$t->write_file("/origin-body-content.txt", $origin);
 $t->write_file("/pass.txt", $clean);
 
 $t->run();

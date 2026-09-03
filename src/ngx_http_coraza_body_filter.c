@@ -260,6 +260,7 @@ ngx_http_coraza_body_filter_finalize(ngx_http_request_t *r,
 {
     ngx_flag_t was_delayed = ctx->headers_delayed;
 
+
     if (was_delayed) {
         ctx->headers_delayed    = 0;
         ctx->pending_chain      = NULL;
@@ -274,20 +275,11 @@ ngx_http_coraza_body_filter_finalize(ngx_http_request_t *r,
      * only option left and the header filter has already handled any redirect
      * before we got here.
      *
-     * Test the intervention STATUS, not merely the presence of
-     * r->headers_out.location.  The origin response may already carry a
-     * Location of its own (an upstream 302 whose body then trips a phase-4
-     * deny); keying off the header alone would route that deny down this path
-     * and answer with a header-only 403 carrying the origin's Location instead
-     * of the configured error page.  Only these statuses are the ones
-     * ngx_http_coraza_process_intervention() installs a redirect Location for.
+     * Why the status test and not r->headers_out.location alone:
+     * ngx_http_coraza_is_redirect_status().
      */
     if (was_delayed
-        && (status == NGX_HTTP_MOVED_PERMANENTLY
-            || status == NGX_HTTP_MOVED_TEMPORARILY
-            || status == NGX_HTTP_SEE_OTHER
-            || status == NGX_HTTP_TEMPORARY_REDIRECT
-            || status == NGX_HTTP_PERMANENT_REDIRECT)
+        && ngx_http_coraza_is_redirect_status(status)
         && r->headers_out.location)
     {
         ngx_int_t rc;
