@@ -619,44 +619,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     if (ret > 0) {
         ctx->intervention_triggered = 1;
         if (r->headers_out.location) {
-            /* Redirect: send status + Location through normal filter chain.
-             * ngx_http_filter_finalize_request would generate a new error
-             * page with fresh headers, discarding our Location header.
-             * Clear status_line so the core filter builds it from status
-             * (proxy sets status_line from upstream, e.g. "404 Not Found"). */
-            r->headers_out.status = ret;
-            r->headers_out.status_line.len = 0;
-            r->err_status = 0;
-            r->header_only = 1;
-
-            /* Clear entity/representation headers carried over from the
-             * original response so the synthesized 3xx redirect is not
-             * protocol-inconsistent (RFC 9110 §15.4 / §8.3-8.8): a body-less
-             * redirect must not advertise Content-Length, Content-Type,
-             * Content-Encoding, Last-Modified, ETag or Accept-Ranges that
-             * describe the representation we are discarding. */
-            r->headers_out.content_length_n = -1;
-            if (r->headers_out.content_length) {
-                r->headers_out.content_length->hash = 0;
-                r->headers_out.content_length = NULL;
-            }
-            ngx_str_null(&r->headers_out.content_type);
-            r->headers_out.content_type_len = 0;
-            r->headers_out.last_modified_time = -1;
-            if (r->headers_out.last_modified) {
-                r->headers_out.last_modified->hash = 0;
-                r->headers_out.last_modified = NULL;
-            }
-            if (r->headers_out.content_encoding) {
-                r->headers_out.content_encoding->hash = 0;
-                r->headers_out.content_encoding = NULL;
-            }
-            if (r->headers_out.etag) {
-                r->headers_out.etag->hash = 0;
-                r->headers_out.etag = NULL;
-            }
-            ngx_http_clear_accept_ranges(r);
-
+            ngx_http_coraza_prepare_redirect(r, ret);
             return ngx_http_next_header_filter(r);
         }
         return ngx_http_filter_finalize_request(r, &ngx_http_coraza_module, ret);
@@ -722,4 +685,55 @@ ngx_int_t
 ngx_http_coraza_forward_header(ngx_http_request_t *r)
 {
     return ngx_http_next_header_filter(r);
+}
+
+
+/*
+ * Turn the in-flight response into a body-less redirect carrying the Location
+ * header that ngx_http_coraza_process_intervention() already installed.
+ *
+ * A redirect intervention must NOT go through ngx_http_filter_finalize_request():
+ * that builds a fresh error page with fresh headers and drops our Location, so
+ * the client gets the redirect status with nowhere to go.  Both the header
+ * filter and the delayed path in the body filter therefore prepare the response
+ * here and then send it down the normal filter chain instead.
+ *
+ * status_line is cleared so the core filter rebuilds it from status; a proxied
+ * response arrives with status_line already set from upstream (e.g.
+ * "404 Not Found") and would otherwise contradict the new status.
+ */
+void
+ngx_http_coraza_prepare_redirect(ngx_http_request_t *r, ngx_int_t status)
+{
+    r->headers_out.status = status;
+    r->headers_out.status_line.len = 0;
+    r->err_status = 0;
+    r->header_only = 1;
+
+    /* Clear entity/representation headers carried over from the original
+     * response so the synthesized 3xx redirect is not protocol-inconsistent
+     * (RFC 9110 §15.4 / §8.3-8.8): a body-less redirect must not advertise
+     * Content-Length, Content-Type, Content-Encoding, Last-Modified, ETag or
+     * Accept-Ranges that describe the representation we are discarding. */
+    r->headers_out.content_length_n = -1;
+    if (r->headers_out.content_length) {
+        r->headers_out.content_length->hash = 0;
+        r->headers_out.content_length = NULL;
+    }
+    ngx_str_null(&r->headers_out.content_type);
+    r->headers_out.content_type_len = 0;
+    r->headers_out.last_modified_time = -1;
+    if (r->headers_out.last_modified) {
+        r->headers_out.last_modified->hash = 0;
+        r->headers_out.last_modified = NULL;
+    }
+    if (r->headers_out.content_encoding) {
+        r->headers_out.content_encoding->hash = 0;
+        r->headers_out.content_encoding = NULL;
+    }
+    if (r->headers_out.etag) {
+        r->headers_out.etag->hash = 0;
+        r->headers_out.etag = NULL;
+    }
+    ngx_http_clear_accept_ranges(r);
 }

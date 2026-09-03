@@ -244,6 +244,7 @@ ngx_int_t ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in);
 ngx_int_t ngx_http_coraza_header_filter_init(void);
 ngx_int_t ngx_http_coraza_header_filter(ngx_http_request_t *r);
 ngx_int_t ngx_http_coraza_forward_header(ngx_http_request_t *r);
+void ngx_http_coraza_prepare_redirect(ngx_http_request_t *r, ngx_int_t status);
 
 /* ngx_http_coraza_log.c */
 ngx_int_t ngx_http_coraza_log_handler(ngx_http_request_t *r);

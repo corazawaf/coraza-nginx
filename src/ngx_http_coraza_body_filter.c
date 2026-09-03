@@ -230,6 +230,83 @@ done:
 }
 
 
+/*
+ * Terminate the response with `status` from inside the body filter.
+ *
+ * Returning a bare status code from a body filter is NOT a finalize: nginx
+ * propagates it up through ngx_http_output_filter() and no header is ever
+ * written, so on the delayed path -- where by construction nothing has been
+ * sent yet -- the client would see a truncated response or a reset instead of
+ * the clean error page the delay mechanism exists to provide.
+ * ngx_http_filter_finalize_request() runs ngx_http_clean_header() +
+ * ngx_http_special_response_handler() and actually produces that page.
+ *
+ * A redirect intervention is the exception, and it is why this is not a
+ * uniform finalize.  ngx_http_coraza_process_intervention() has already
+ * installed r->headers_out.location; finalizing would build a fresh error page
+ * with fresh headers and drop it, leaving the client a 3xx with no Location.
+ * So a redirect prepares the response and forwards it through the normal
+ * filter chain, exactly as the header filter's own redirect case does.  The
+ * buffered body is dropped either way: both outcomes replace it.
+ *
+ * The caller has already set ctx->intervention_triggered, so the header-filter
+ * re-run that either path triggers early-returns instead of re-inspecting the
+ * headers we just discarded.  pending_chain's buffers live in r->pool and are
+ * released with the request.
+ */
+static ngx_int_t
+ngx_http_coraza_body_filter_finalize(ngx_http_request_t *r,
+    ngx_http_coraza_ctx_t *ctx, ngx_int_t status)
+{
+    ngx_flag_t was_delayed = ctx->headers_delayed;
+
+    if (was_delayed) {
+        ctx->headers_delayed    = 0;
+        ctx->pending_chain      = NULL;
+        ctx->pending_chain_last = &ctx->pending_chain;
+        ctx->pending_bytes      = 0;
+    }
+
+    /*
+     * Only the delayed path may forward the redirect itself: its headers have
+     * not been sent, so the prepared status and Location still reach the wire.
+     * Once headers are streaming, ngx_http_filter_finalize_request() is the
+     * only option left and the header filter has already handled any redirect
+     * before we got here.
+     *
+     * Test the intervention STATUS, not merely the presence of
+     * r->headers_out.location.  The origin response may already carry a
+     * Location of its own (an upstream 302 whose body then trips a phase-4
+     * deny); keying off the header alone would route that deny down this path
+     * and answer with a header-only 403 carrying the origin's Location instead
+     * of the configured error page.  Only these statuses are the ones
+     * ngx_http_coraza_process_intervention() installs a redirect Location for.
+     */
+    if (was_delayed
+        && (status == NGX_HTTP_MOVED_PERMANENTLY
+            || status == NGX_HTTP_MOVED_TEMPORARILY
+            || status == NGX_HTTP_SEE_OTHER
+            || status == NGX_HTTP_TEMPORARY_REDIRECT
+            || status == NGX_HTTP_PERMANENT_REDIRECT)
+        && r->headers_out.location)
+    {
+        ngx_int_t rc;
+
+        ngx_http_coraza_prepare_redirect(r, status);
+
+        rc = ngx_http_coraza_forward_header(r);
+        if (rc == NGX_ERROR) {
+            return NGX_ERROR;
+        }
+
+        /* header_only is set, so there is no body to hand on. */
+        return rc;
+    }
+
+    return ngx_http_filter_finalize_request(r, &ngx_http_coraza_module, status);
+}
+
+
 ngx_int_t
 ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
@@ -296,12 +373,7 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                 if (ngx_http_coraza_append_response_body_file(ctx, r,
                         chain->buf) != NGX_OK)
                 {
-                    if (ctx->headers_delayed) {
-                        ctx->headers_delayed = 0;
-                        return NGX_HTTP_INTERNAL_SERVER_ERROR;
-                    }
-                    return ngx_http_filter_finalize_request(r,
-                        &ngx_http_coraza_module,
+                    return ngx_http_coraza_body_filter_finalize(r, ctx,
                         NGX_HTTP_INTERNAL_SERVER_ERROR);
                 }
 
@@ -332,12 +404,7 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                             "coraza: failed to append response body chunk "
                             "for inspection");
                         ctx->intervention_triggered = 1;
-                        if (ctx->headers_delayed) {
-                            ctx->headers_delayed = 0;
-                            return NGX_HTTP_INTERNAL_SERVER_ERROR;
-                        }
-                        return ngx_http_filter_finalize_request(r,
-                            &ngx_http_coraza_module,
+                        return ngx_http_coraza_body_filter_finalize(r, ctx,
                             NGX_HTTP_INTERNAL_SERVER_ERROR);
                     }
                 }
@@ -346,20 +413,11 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
             ret = ngx_http_coraza_process_intervention(ctx, r, 0);
             if (ret > 0) {
                 ctx->intervention_triggered = 1;
-                if (ctx->headers_delayed) {
-                    ctx->headers_delayed = 0;
-                    return ret;
-                }
-                return ngx_http_filter_finalize_request(r,
-                    &ngx_http_coraza_module, ret);
+                return ngx_http_coraza_body_filter_finalize(r, ctx, ret);
             } else if (ret < 0) {
                 ctx->intervention_triggered = 1;
-                if (ctx->headers_delayed) {
-                    ctx->headers_delayed = 0;
-                    return NGX_HTTP_INTERNAL_SERVER_ERROR;
-                }
-                return ngx_http_filter_finalize_request(r,
-                    &ngx_http_coraza_module, NGX_HTTP_INTERNAL_SERVER_ERROR);
+                return ngx_http_coraza_body_filter_finalize(r, ctx,
+                    NGX_HTTP_INTERNAL_SERVER_ERROR);
             }
         }
 
@@ -390,33 +448,20 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                  */
                 ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                     "coraza: response body phase processing failed");
-                if (ctx->headers_delayed) {
-                    ctx->intervention_triggered = 1;
-                    ctx->headers_delayed = 0;
-                    return NGX_HTTP_INTERNAL_SERVER_ERROR;
-                }
-                return ngx_http_filter_finalize_request(r,
-                    &ngx_http_coraza_module, NGX_HTTP_INTERNAL_SERVER_ERROR);
+                ctx->intervention_triggered = 1;
+                return ngx_http_coraza_body_filter_finalize(r, ctx,
+                    NGX_HTTP_INTERNAL_SERVER_ERROR);
             }
 
             ret = ngx_http_coraza_poll_after_process(ctx, r, 0, pret);
             if (ret > 0) {
                 ctx->intervention_triggered = 1;
-                if (ctx->headers_delayed) {
-                    ctx->headers_delayed = 0;
-                    return ret;
-                }
-                return ngx_http_filter_finalize_request(r,
-                    &ngx_http_coraza_module, ret);
+                return ngx_http_coraza_body_filter_finalize(r, ctx, ret);
             }
             else if (ret < 0) {
                 ctx->intervention_triggered = 1;
-                if (ctx->headers_delayed) {
-                    ctx->headers_delayed = 0;
-                    return NGX_HTTP_INTERNAL_SERVER_ERROR;
-                }
-                return ngx_http_filter_finalize_request(r,
-                    &ngx_http_coraza_module, NGX_HTTP_INTERNAL_SERVER_ERROR);
+                return ngx_http_coraza_body_filter_finalize(r, ctx,
+                    NGX_HTTP_INTERNAL_SERVER_ERROR);
             }
         }
 
