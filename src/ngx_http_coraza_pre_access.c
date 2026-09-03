@@ -177,6 +177,19 @@ ngx_http_coraza_append_request_body_file(ngx_http_coraza_ctx_t *ctx,
 
         if (offset < body_size) {
             ret = ngx_http_coraza_process_intervention(ctx, r, 0);
+            /*
+             * On an error_page re-entry pass a prior intervention has
+             * already been finalized, so yield instead of finalizing
+             * again -- the same treatment as the final poll below and as
+             * the two body-filter poll sites.  Yield explicitly rather
+             * than falling through to the cleanup with rc still NGX_OK,
+             * which would report the whole body inspected while the
+             * remaining chunks were never appended.
+             */
+            if (r->error_page) {
+                rc = NGX_DECLINED;
+                goto done;
+            }
             if (ret < 0) {
                 rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
                 goto done;
@@ -196,7 +209,12 @@ done:
             ngx_close_file_n " \"%V\" failed", &file.name);
     }
 
-    if (rc != NGX_OK) {
+    /*
+     * NGX_DECLINED is the deliberate error_page-re-entry yield above, not a
+     * failure: the sibling poll sites yield without arming the flag, so this
+     * one must not arm it either.
+     */
+    if (rc != NGX_OK && rc != NGX_DECLINED) {
         ctx->intervention_triggered = 1;
     }
 
@@ -368,6 +386,13 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
 
             /* Check for intervention after each chunk for prompt detection */
             ret = ngx_http_coraza_process_intervention(ctx, r, 0);
+            /*
+             * If nginx has already started streaming the error page body
+             * after a prior intervention, do not attempt another finalize.
+             */
+            if (r->error_page) {
+                return NGX_DECLINED;
+            }
             if (ret < 0) {
                 /* NGX_ERROR from the intervention handler: fail closed. */
                 ctx->intervention_triggered = 1;

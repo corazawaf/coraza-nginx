@@ -369,13 +369,13 @@ static ngx_command_t ngx_http_coraza_commands[] = {
 	 NGX_HTTP_LOC_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_MAIN_CONF | NGX_CONF_TAKE1,
 	 ngx_conf_set_rules,
 	 NGX_HTTP_LOC_CONF_OFFSET,
-	 offsetof(ngx_http_coraza_conf_t, enable),
+	 0,
 	 NULL},
 	{ngx_string("coraza_rules_file"),
 	 NGX_HTTP_LOC_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_MAIN_CONF | NGX_CONF_TAKE1,
 	 ngx_conf_set_rules_file,
 	 NGX_HTTP_LOC_CONF_OFFSET,
-	 offsetof(ngx_http_coraza_conf_t, enable),
+	 0,
 	 NULL},
 	{ngx_string("coraza_transaction_id"),
 	 NGX_HTTP_LOC_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_MAIN_CONF | NGX_CONF_TAKE1,
@@ -783,13 +783,6 @@ ngx_http_coraza_init_process(ngx_cycle_t *cycle)
 		ngx_http_coraza_conf_t *lcf = loc_confs[i];
 
 		if (!lcf->has_rules || lcf->rules->nelts == 0) {
-			continue;
-		}
-
-		/* If this loc_conf shares a rules pointer with main or another
-		 * loc_conf that we already built, reuse that WAF. */
-		if (lcf->rules == mmcf->rules && mmcf->waf != 0) {
-			lcf->waf = mmcf->waf;
 			continue;
 		}
 

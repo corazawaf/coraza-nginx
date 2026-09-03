@@ -27,7 +27,8 @@ ngx_http_coraza_log_handler(ngx_http_request_t *r)
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
     if (ctx == NULL) {
-        return NGX_ERROR;
+        /* LOG-phase handlers must return NGX_OK */
+        return NGX_OK;
     }
 
     if (ctx->logged) {
