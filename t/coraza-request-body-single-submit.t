@@ -67,7 +67,7 @@ http {
             coraza_rules '
                 SecRuleEngine On
                 SecRequestBodyAccess On
-                SecAction "id:1,phase:1,pass,nolog,ctl:requestBodyProcessor=URLENCODED"
+                SecAction "id:1,phase:1,t:none,pass,nolog,ctl:requestBodyProcessor=URLENCODED"
                 SecRequestBodyLimit 20
                 SecRequestBodyLimitAction Reject
             ';
