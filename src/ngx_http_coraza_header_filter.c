@@ -502,6 +502,34 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
         }
 
         /*
+         * The first pass above already submitted Server / Date /
+         * Last-Modified by reading r->headers_out.server / .date /
+         * .last_modified directly. On a proxied response nginx's upstream
+         * module points those dedicated fields at the very same
+         * ngx_table_elt_t entries that also live in this list (it does not
+         * copy them), so submitting every list entry unconditionally here
+         * would hand Coraza a second copy of each -- a SecRule counting or
+         * concatenating RESPONSE_HEADERS would see the value twice.
+         *
+         * Guard on pointer identity against exactly the dedicated fields the
+         * first pass consumes, never on header name: a response may
+         * legitimately carry a second, distinct header of the same name that
+         * nginx did not hoist into a dedicated slot (e.g. a second
+         * Last-Modified added by another module), and dropping that by name
+         * would hide it from the WAF entirely -- a detection bypass, which is
+         * strictly worse than a duplicate. Content-Length and Content-Type
+         * are read from computed/ngx_str_t fields (content_length_n,
+         * content_type), not from a list-resident ngx_table_elt_t, so they
+         * need no guard here.
+         */
+        if (&data[i] == r->headers_out.server
+            || &data[i] == r->headers_out.date
+            || &data[i] == r->headers_out.last_modified)
+        {
+            continue;
+        }
+
+        /*
          * Doing this ugly cast here, explanation on the request_header
          */
         rc = ngx_http_coraza_add_response_header(r, ctx, &data[i].key,
