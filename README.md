@@ -60,7 +60,7 @@ When building from source, pass `-Wno-unused-function`. The installed
 `coraza/coraza.h` carries libcoraza's cgo preamble, whose `static` callback
 shims are unused in any given translation unit, and nginx builds with `-Werror`:
 
-```
+```sh
 ./configure --add-dynamic-module=/path/to/coraza-nginx --with-compat \
     --with-cc-opt="-Wno-unused-function"
 ```
