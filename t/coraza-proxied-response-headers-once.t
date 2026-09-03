@@ -48,7 +48,7 @@ use Test::Nginx;
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http proxy/)->plan(3);
+my $t = Test::Nginx->new()->has(qw/http proxy/)->plan(4);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -71,10 +71,10 @@ http {
             coraza_rules '
                 SecRuleEngine On
                 SecResponseBodyAccess Off
-                SecRule RESPONSE_HEADERS:Server "@rx ." "id:401,phase:3,pass,log,setvar:tx.hits=+1"
-                SecRule RESPONSE_HEADERS:Date "@rx ." "id:402,phase:3,pass,log,setvar:tx.hits=+1"
-                SecRule RESPONSE_HEADERS:Last-Modified "@rx ." "id:403,phase:3,pass,log,setvar:tx.hits=+1"
-                SecRule TX:HITS "@gt 3" "id:499,phase:3,deny,log,status:403"
+                SecRule RESPONSE_HEADERS:Server "@rx ." "id:401,phase:3,t:none,pass,log,setvar:tx.hits=+1"
+                SecRule RESPONSE_HEADERS:Date "@rx ." "id:402,phase:3,t:none,pass,log,setvar:tx.hits=+1"
+                SecRule RESPONSE_HEADERS:Last-Modified "@rx ." "id:403,phase:3,t:none,pass,log,setvar:tx.hits=+1"
+                SecRule TX:HITS "@gt 3" "id:499,phase:3,t:none,deny,log,status:403"
             ';
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
         }
@@ -91,8 +91,8 @@ http {
             coraza_rules '
                 SecRuleEngine On
                 SecResponseBodyAccess Off
-                SecRule RESPONSE_HEADERS:X-Dup "@rx ." "id:411,phase:3,pass,log,setvar:tx.dup_hits=+1"
-                SecRule TX:DUP_HITS "@gt 1" "id:498,phase:3,deny,log,status:403"
+                SecRule RESPONSE_HEADERS:X-Dup "@rx ." "id:411,phase:3,t:none,pass,log,setvar:tx.dup_hits=+1"
+                SecRule TX:DUP_HITS "@gt 1" "id:498,phase:3,t:none,deny,log,status:403"
             ';
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
         }
@@ -117,6 +117,9 @@ unlike($log, qr/id "499"/,
 like(http_get('/control'), qr/^HTTP\S+ 403/,
     'control: a genuinely-duplicated wire header (X-Dup) is counted twice, '
     . 'proving the tx.hits mechanism can detect a real double submission');
+
+unlike($log, qr/signal 11|SIGSEGV|AddressSanitizer/,
+    'no crash or sanitizer report in error.log');
 
 ###############################################################################
 
