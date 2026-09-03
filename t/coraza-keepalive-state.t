@@ -93,10 +93,15 @@ my $r1 = send_and_read($s, "GET /?x=bad HTTP/1.1\r\n"
 like($r1, qr!^HTTP/\S+ 403!, 'request 1 on the connection is denied');
 
 SKIP: {
-	skip 'connection was closed after the deny (see file header)', 1
-		# connected() returns a packed peer address, not a number, so test
-		# it for truth -- comparing it with == warns and is meaningless.
-		if !defined $r1 || $r1 eq '' || !$s->connected();
+	# A connection nginx closed after the deny is the regression this file
+	# exists to catch (see the header), so it fails the planned assertion
+	# rather than skipping it.  connected() returns a packed peer address,
+	# not a number, so test it for truth -- comparing with == is meaningless.
+	do {
+		fail('connection was closed after the deny; request 2 could not '
+			. 'reuse it (see file header)');
+		last SKIP;
+	} if !defined $r1 || $r1 eq '' || !$s->connected();
 
 	# Request 2 on the SAME socket: benign, must be evaluated fresh and
 	# return 200 -- not a stale 403 carried over from request 1's
