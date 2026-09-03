@@ -60,7 +60,7 @@ http {
             coraza on;
             coraza_rules '
                 SecRuleEngine On
-                SecRule ARGS:x "@streq bad" "id:40,phase:1,deny,status:403,log,msg:\'upgrade-deny-probe\'"
+                SecRule ARGS:x "@streq bad" "id:40,phase:1,t:none,deny,status:403,log,msg:\'upgrade-deny-probe\'"
             ';
             return 200 "TEST-OK-IF-YOU-SEE-THIS";
         }

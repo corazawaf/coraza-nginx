@@ -56,7 +56,7 @@ http {
             coraza on;
             coraza_rules '
                 SecRuleEngine On
-                SecRule ARGS:x "@streq bad" "id:50,phase:1,deny,status:403,log,msg:\'detectiononly-probe\'"
+                SecRule ARGS:x "@streq bad" "id:50,phase:1,t:none,deny,status:403,log,msg:\'detectiononly-probe\'"
             ';
             return 200 "TEST-OK-IF-YOU-SEE-THIS";
         }
@@ -65,7 +65,7 @@ http {
             coraza on;
             coraza_rules '
                 SecRuleEngine DetectionOnly
-                SecRule ARGS:x "@streq bad" "id:51,phase:1,deny,status:403,log,msg:\'detectiononly-probe\'"
+                SecRule ARGS:x "@streq bad" "id:51,phase:1,t:none,deny,status:403,log,msg:\'detectiononly-probe\'"
             ';
             return 200 "TEST-OK-IF-YOU-SEE-THIS";
         }

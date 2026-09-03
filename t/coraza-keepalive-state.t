@@ -66,7 +66,7 @@ http {
             coraza on;
             coraza_rules '
                 SecRuleEngine On
-                SecRule ARGS:x "@streq bad" "id:60,phase:1,deny,status:403,log,msg:\'keepalive-state-probe\'"
+                SecRule ARGS:x "@streq bad" "id:60,phase:1,t:none,deny,status:403,log,msg:\'keepalive-state-probe\'"
             ';
             return 200 "TEST-OK-IF-YOU-SEE-THIS";
         }
