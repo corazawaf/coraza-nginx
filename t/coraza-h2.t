@@ -15,6 +15,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 
 use lib 'lib';
 use Test::Nginx;
+
+use lib '.';
+use coraza_crash_check;
 use Test::Nginx::HTTP2;
 
 ###############################################################################
@@ -98,7 +101,7 @@ $t->write_file("/phase2", "should be moved/blocked before this.");
 $t->write_file("/phase3", "should be moved/blocked before this.");
 $t->write_file("/phase4", "should not be moved/blocked, headers delivered before phase 4.");
 $t->run();
-$t->plan(20);
+$t->plan(21);
 
 ###############################################################################
 
@@ -199,3 +202,6 @@ $sid = $s->new_stream({ path => "/phase4?what=nothing" });
 $frames = $s->read(all => [{ sid => $sid, fin => 1 }]);
 ($frame) = grep { $_->{type} eq "DATA" } @$frames;
 is($frame->{data}, "should not be moved\/blocked, headers delivered before phase 4.", 'nothing phase 4');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

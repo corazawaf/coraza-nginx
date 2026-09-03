@@ -29,6 +29,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -112,7 +115,7 @@ mkdir($t->testdir() . '/http');
 $t->write_file("/http/403.html", $custom_txt);
 
 $t->run();
-$t->plan(10);
+$t->plan(11);
 
 ###############################################################################
 
@@ -170,3 +173,6 @@ EOF
 }
 
 ###############################################################################
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

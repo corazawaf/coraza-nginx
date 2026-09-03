@@ -28,12 +28,15 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http/)->plan(2);
+my $t = Test::Nginx->new()->has(qw/http/)->plan(3);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -71,3 +74,6 @@ my $r = http_get('/redir?x=go');
 like($r, qr!^HTTP/\S+ 302!, 'clean redirect returns 302');
 like($r, qr!Location: http://example\.org/clean/path\?a=b\r?\n!,
     'clean Location passes through unchanged (no truncation)');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

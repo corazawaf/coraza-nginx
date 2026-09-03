@@ -16,6 +16,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 
 use lib 'lib';
 use Test::Nginx;
+
+use lib '.';
+use coraza_crash_check;
 use Test::Nginx::HTTP2;
 
 ###############################################################################
@@ -114,7 +117,7 @@ EOF
 
 $t->run();
 
-$t->plan(36);
+$t->plan(37);
 
 ###############################################################################
 
@@ -225,3 +228,6 @@ like($frame->{data}, qr/TEST-OK-IF-YOU-SEE-THIS/, "POST with auth_request (reque
 }
 
 ###############################################################################
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

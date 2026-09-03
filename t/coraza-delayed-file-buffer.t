@@ -19,6 +19,9 @@ BEGIN { chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -26,7 +29,7 @@ select STDOUT; $| = 1;
 
 my $root = "$FindBin::Bin/..";
 my $src = slurp("$root/src/ngx_http_coraza_body_filter.c");
-my $t = Test::Nginx->new()->has(qw/http/)->plan(12);
+my $t = Test::Nginx->new()->has(qw/http/)->plan(13);
 
 like($src,
     qr/!\s*ngx_buf_in_memory\(chain->buf\)\s*&&\s*chain->buf->in_file\s*&&\s*chain->buf->file\s*!=\s*NULL\s*&&\s*!\s*chain->buf->temp_file.*?\*b\s*=\s*\*chain->buf/s,
@@ -192,3 +195,6 @@ sub slurp {
     local $/ = undef;
     return <$fh>;
 }
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

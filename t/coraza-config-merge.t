@@ -18,6 +18,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -157,7 +160,7 @@ EOF
 $t->run_daemon(\&http_daemon);
 $t->run()->waitforsocket('127.0.0.1:' . port(8081));
 
-$t->plan(10);
+$t->plan(15);
 
 ###############################################################################
 
@@ -173,6 +176,20 @@ like(http_get_body('/server/coraza-disabled', 'VERY BAD BODY'), qr/TEST-OK-IF-YO
 like(http_get_body('/server/nobodyaccess', 'VERY BAD BODY'), qr/TEST-OK-IF-YOU-SEE-THIS/, "server override for SecRequestBodyAccess, pass");
 like(http_get_body('/server/bodylimitprocesspartial', 'BODY' x 33), qr/TEST-OK-IF-YOU-SEE-THIS/, "server override for SecRequestBodyLimitAction, pass");
 like(http_get_body('/server/bodylimitincreased', 'BODY' x 64), qr/TEST-OK-IF-YOU-SEE-THIS/, "server override for SecRequestBodyLimit, pass");
+
+# Every override location above only has a "pass" assertion, so a config bug
+# that left SecRuleEngine effectively Off (or dropped the id:11 body rule)
+# everywhere would pass all of them just as well as a correct, narrowly
+# scoped merge. bodylimitprocesspartial and bodylimitincreased only change
+# how/how-much of the body is read, not whether REQUEST_BODY is still
+# matched against id:11, so a bad body that fits under each location's own
+# limit must still 403 there -- pair every "pass" above with that 403
+# control.
+like(http_get_body('/bodylimitprocesspartial', 'VERY BAD BODY'), qr/^HTTP.*403/, "location override for SecRequestBodyLimitAction, still blocks under the new limit");
+like(http_get_body('/bodylimitincreased', 'VERY BAD BODY'), qr/^HTTP.*403/, "location override for SecRequestBodyLimit, still blocks under the increased limit");
+
+like(http_get_body('/server/bodylimitprocesspartial', 'VERY BAD BODY'), qr/^HTTP.*403/, "server override for SecRequestBodyLimitAction, still blocks under the new limit");
+like(http_get_body('/server/bodylimitincreased', 'VERY BAD BODY'), qr/^HTTP.*403/, "server override for SecRequestBodyLimit, still blocks under the increased limit");
 
 ###############################################################################
 
@@ -231,3 +248,6 @@ sub http_get_body {
 }
 
 ###############################################################################
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

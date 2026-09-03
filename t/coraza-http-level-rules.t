@@ -22,6 +22,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -76,7 +79,7 @@ EOF
 
 $t->run();
 $t->todo_alerts();
-$t->plan(3);
+$t->plan(4);
 
 ###############################################################################
 
@@ -92,3 +95,6 @@ like(http_get('/inherited?block=0'), qr/^HTTP.*200/,
 like(http_get('/off?block=1', PeerAddr => '127.0.0.1:' . port(8081)),
     qr/^HTTP.*200/,
     'coraza off does not enforce inherited http-level rules (control)');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

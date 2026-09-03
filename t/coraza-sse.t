@@ -31,12 +31,15 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http proxy/)->plan(10);
+my $t = Test::Nginx->new()->has(qw/http proxy/)->plan(11);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -109,12 +112,17 @@ like($body, qr/data: event-1/, 'SSE with HTAB OWS before ";" delivered');
 like($body, qr/data: event-1/, 'SSE with mixed-case media type delivered');
 
 # Near-miss content types must NOT get the exemption: the phase-4 header
-# delay stays in force, so the client receives nothing early.
-($status, $body) = sse_read('/nearmiss', 2);
-is($status . $body, '', 'near-miss "text/event-streamx" stays delayed');
+# delay stays in force, so the client receives nothing before the deadline.
+# Require the explicit timeout outcome: a connect failure or early EOF must
+# not masquerade as correctly delayed headers.
+my $outcome;
+($status, $body, $outcome) = sse_read('/nearmiss', 2);
+ok(defined $status && $status eq '' && $body eq '' && $outcome eq 'timeout',
+	'near-miss "text/event-streamx" connects but stays delayed');
 
-($status, $body) = sse_read('/notsse', 2);
-is($status . $body, '', 'malformed "text/event-stream junk" stays delayed');
+($status, $body, $outcome) = sse_read('/notsse', 2);
+ok(defined $status && $status eq '' && $body eq '' && $outcome eq 'timeout',
+	'malformed "text/event-stream junk" connects but stays delayed');
 
 # The exemption skips the header DELAY, not the WAF.  A phase-1 rule must
 # still block an SSE request, otherwise this change would be a bypass rather
@@ -139,13 +147,14 @@ sub sse_read {
 		Proto    => 'tcp',
 		PeerAddr => '127.0.0.1:' . port(8080),
 		Timeout  => 5,
-	) or return ('', '');
+	) or return (undef, undef, 'connect-error');
 
 	$s->print("GET $uri HTTP/1.1\r\n"
 		. "Host: localhost\r\n"
 		. "Connection: close\r\n\r\n");
 
 	my $buf = '';
+	my $outcome = 'eof';
 	eval {
 		local $SIG{ALRM} = sub { die "timeout\n" };
 		alarm($deadline);
@@ -156,18 +165,27 @@ sub sse_read {
 		while ($buf !~ /data: event-1/) {
 			my $chunk;
 			my $n = $s->sysread($chunk, 1024);
-			last if !defined $n || $n == 0;
+			die "read error: $!\n" unless defined $n;
+			last if $n == 0;
 			$buf .= $chunk;
 		}
+		$outcome = 'data' if $buf =~ /data: event-1/;
 		alarm(0);
 	};
+	if ($@) {
+		if ($@ eq "timeout\n") {
+			$outcome = 'timeout';
+		} else {
+			die $@;
+		}
+	}
 	alarm(0);
 	close($s);
 
 	my ($head, $body) = split /\r\n\r\n/, $buf, 2;
 	$head = '' unless defined $head;
 	$body = '' unless defined $body;
-	return ($head, $body);
+	return ($head, $body, $outcome);
 }
 
 sub sse_daemon {
@@ -223,3 +241,6 @@ sub sse_daemon {
 }
 
 ###############################################################################
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

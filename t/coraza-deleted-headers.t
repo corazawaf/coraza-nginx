@@ -34,6 +34,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -140,9 +143,7 @@ like(http_get('/deleted-resp'), qr!^HTTP/1.1 200!,
 like(http_get('/kept-resp'), qr!^HTTP/1.1 403!,
 	'control: response header rule fires when not hidden');
 
-$t->stop();
-
-unlike($t->read_file('error.log'), qr/signal 11|SIGSEGV|AddressSanitizer/,
+coraza_crash_check::assert_no_crash($t,
 	'no crash or sanitizer error walking deleted headers');
 
 ###############################################################################

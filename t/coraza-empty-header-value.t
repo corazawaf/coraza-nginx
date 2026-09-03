@@ -32,6 +32,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -127,9 +130,7 @@ like(http_get('/q?'), qr!^HTTP/1.1 200!, 'empty query string served');
 like(http_get('/q?x=boom'), qr!^HTTP/1.1 403!,
 	'rule still enforced after empty-value requests (worker healthy)');
 
-$t->stop();
-
-unlike($t->read_file('error.log'), qr/\[emerg\]|signal 11|SIGSEGV/,
+coraza_crash_check::assert_no_crash($t,
 	'no crash from empty-string conversions');
 
 ###############################################################################

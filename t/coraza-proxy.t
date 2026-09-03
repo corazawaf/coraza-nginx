@@ -16,12 +16,15 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http proxy/)->plan(23);
+my $t = Test::Nginx->new()->has(qw/http proxy/)->plan(24);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -203,3 +206,6 @@ EOF
 }
 
 ###############################################################################
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

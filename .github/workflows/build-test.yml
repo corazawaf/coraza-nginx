@@ -300,6 +300,11 @@ jobs:
       # ---- full test suite: nginx cells only -------------------------------
       - name: Run prove tests
         if: matrix.full_tests
+        # The suite completes in well under a minute; anything approaching this
+        # ceiling is a wedged test, not a slow one.  Without it a single test
+        # that blocks (e.g. an unbounded waitpid inside Test::Nginx::stop) runs
+        # out the whole job allowance instead of failing readably.
+        timeout-minutes: 15
         run: |
           # Pinned to an immutable commit + sha256 (see versions.env), not the
           # mutable master ref — consistent with every other fetched archive.
@@ -314,7 +319,11 @@ jobs:
           # Pin the protocol-map test to the tree this cell built, rather than
           # letting it glob for any nginx-* in the workspace.
           export TEST_NGINX_SOURCE="${{ github.workspace }}/$SRC_DIR"
-          prove coraza*.t
+          # --timer prints per-file wall time, so a file that starts to creep
+          # is visible in the log before it becomes a hang; the outer `timeout`
+          # bounds the run itself and leaves the last-started file named in the
+          # output, which a bare job-level cancellation does not.
+          timeout --kill-after=30s 12m prove --timer coraza*.t
 
       - name: Install go-ftw
         if: matrix.full_tests
