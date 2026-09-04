@@ -1,12 +1,16 @@
 #!/usr/bin/perl
 
-# Tests for the Coraza-nginx bulk-header submission path (libcoraza 1.6+).
+# Tests for the Coraza-nginx bulk-header submission path (libcoraza >= 1.7).
 #
 # The connector packs every request / response header into a single buffer and
 # hands the whole set to Coraza in one cgo crossing via
 # coraza_add_request_headers() / coraza_add_response_headers(), instead of one
-# crossing per header.  When the running libcoraza predates 1.6 the bulk
-# symbols are absent and the connector falls back to the per-header path.
+# crossing per header.  libcoraza >= 1.7 is a hard floor and both bulk symbols
+# are mandatory, so there is no capability fallback left.  Three runtime
+# conditions still select the per-header path: the collector allocation
+# failing (ngx_array_create in the header filter, ngx_palloc of the pair array
+# in rewrite.c), the pack failing on an over-range header length, and the
+# submit returning CORAZA_ERROR.
 #
 # Correctness requirement: whichever path is taken, EVERY header must still be
 # inspected exactly once.  These tests drive a request carrying many request
@@ -59,7 +63,7 @@ http {
             coraza on;
             coraza_rules '
                 SecRuleEngine On
-                SecRule REQUEST_HEADERS:X-Probe "@streq blockme" "id:100,phase:1,deny,status:403,log"
+                SecRule REQUEST_HEADERS:X-Probe "@streq blockme" "id:100,phase:1,deny,status:403,log,t:none"
             ';
             return 200 "ok";
         }
@@ -71,7 +75,7 @@ http {
             coraza on;
             coraza_rules '
                 SecRuleEngine On
-                SecRule RESPONSE_HEADERS:X-Secret "@streq leak" "id:200,phase:3,deny,status:403,log"
+                SecRule RESPONSE_HEADERS:X-Secret "@streq leak" "id:200,phase:3,deny,status:403,log,t:none"
             ';
             add_header X-Secret "leak";
             return 200 "ok";
@@ -83,8 +87,8 @@ http {
             coraza on;
             coraza_rules '
                 SecRuleEngine On
-                SecRule REQUEST_HEADERS:X-Probe "@streq blockme" "id:100,phase:1,deny,status:403,log"
-                SecRule RESPONSE_HEADERS:X-Secret "@streq leak" "id:200,phase:3,deny,status:403,log"
+                SecRule REQUEST_HEADERS:X-Probe "@streq blockme" "id:100,phase:1,deny,status:403,log,t:none"
+                SecRule RESPONSE_HEADERS:X-Secret "@streq leak" "id:200,phase:3,deny,status:403,log,t:none"
             ';
             add_header X-Secret "safe";
             return 200 "ok";
@@ -134,22 +138,22 @@ EOF
 like($benign, qr!^HTTP/\S+ 200!,
     'bulk path: benign request+response passes both rules');
 
-# Report which path the assertions above actually exercised, and make the bulk
-# path a first-class assertion when it is available. The bulk symbols exist only
-# in libcoraza >= 1.6; on an older runtime (e.g. the v1.4.0 the upstream CI still
-# pins) the connector falls back to the per-header path. Rather than accept
-# "(yes|no)" — which would let the feature under test go silently untested when
-# the symbols vanish — we branch: assert "yes" when the capability is present,
-# and SKIP explicitly (never silently pass) when it is absent.
 my $log = $t->read_file('error.log');
 
-# libcoraza >= 1.7 is required and the bulk-header entry points are mandatory
-# symbols (ngx_http_coraza_dl_open fails to load otherwise), so a successful
-# load means the assertions above really exercised the bulk path.
+# Rule out the one path-selection cause a black-box test can rule out: the
+# bulk entry points being absent.  They are mandatory symbols, so a successful
+# load proves they resolved.
+#
+# This is a proxy, not a path trace.  It does not prove the collector
+# allocation succeeded, and under memory pressure the connector would take the
+# per-header path and still satisfy every assertion above.  That is by design:
+# the point of the assertions is that both paths inspect every header exactly
+# once, so either one passing is the correct outcome.  Distinguishing them
+# would need a pool-allocation failure injection hook, which does not exist,
+# or a log line emitted purely for the test.
 if ($log =~ /coraza: \S+ loaded via dynlib_open \(libcoraza (\d+)\.(\d+)\.\d+\)/) {
     ok($1 > 1 || ($1 == 1 && $2 >= 7),
-        "libcoraza $1.$2 loaded (>= 1.7): bulk-header symbols resolved, "
-        . 'bulk path exercised above');
+        "libcoraza $1.$2 loaded (>= 1.7): bulk-header symbols resolved");
 } else {
     fail('connector did not log the libcoraza version at load');
 }

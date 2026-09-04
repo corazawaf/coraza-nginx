@@ -176,14 +176,13 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
         ngx_int_t  bulk_done = 0;
 
         /*
-         * Fast path (libcoraza 1.6+): pack every request header into one
-         * buffer and hand Coraza the whole set in a single cgo crossing,
-         * instead of one crossing per header.  Falls through to the
-         * per-header loop below if the bulk symbol is absent or the pack
-         * fails (e.g. an over-range header length -- treated as fail-closed
-         * there too).
+         * Fast path: pack every request header into one buffer and hand
+         * Coraza the whole set in a single cgo crossing, instead of one
+         * crossing per header.  Falls through to the per-header loop below
+         * if the pack fails (e.g. an over-range header length -- treated as
+         * fail-closed there too).
          */
-        if (ngx_http_coraza_bulk_headers_available()) {
+        {
             ngx_http_coraza_header_t *pairs;
             ngx_uint_t nheaders = 0;
             ngx_list_part_t *cp = part;

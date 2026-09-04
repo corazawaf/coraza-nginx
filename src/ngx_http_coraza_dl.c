@@ -402,35 +402,23 @@ ngx_http_coraza_is_response_body_processable(coraza_transaction_t t)
 }
 
 /*
- * Bulk header wrappers (libcoraza 1.6+).  These forward to the resolved
- * symbols; callers must first check ngx_http_coraza_bulk_headers_available()
- * because the pointers may be NULL on an older library.
+ * Bulk header wrappers.  These forward directly to the resolved symbols:
+ * both are loaded with the mandatory DL_SYM (see ngx_http_coraza_dl_open()
+ * above), so dl_add_request_headers / dl_add_response_headers are guaranteed
+ * non-NULL here -- a library that does not export them, or that is older
+ * than the enforced 1.7.0 floor, fails dl_open and the worker never starts.
+ * A negative return here is therefore always a genuine runtime pack/submit
+ * failure reported by libcoraza, not a missing symbol; callers already treat
+ * it as the signal to replay per-header.
  */
 int coraza_add_request_headers(coraza_transaction_t t, char *packed,
                                int packed_len, int count)
 {
-    if (dl_add_request_headers == NULL) {
-        return -1;
-    }
     return dl_add_request_headers(t, packed, packed_len, count);
 }
 
 int coraza_add_response_headers(coraza_transaction_t t, char *packed,
                                 int packed_len, int count)
 {
-    if (dl_add_response_headers == NULL) {
-        return -1;
-    }
     return dl_add_response_headers(t, packed, packed_len, count);
-}
-
-/*
- * ngx_http_coraza_bulk_headers_available — 1 when the loaded libcoraza
- * exports both bulk-header entry points, 0 otherwise.  Callers use the
- * per-header path when this returns 0.
- */
-int
-ngx_http_coraza_bulk_headers_available(void)
-{
-    return dl_add_request_headers != NULL && dl_add_response_headers != NULL;
 }
