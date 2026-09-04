@@ -2,7 +2,10 @@
 
 # Print the UBSan source-location predicate owned by this connector checkout.
 # Callers pass the module root so both absolute compiler paths and relative
-# src/ paths are accepted, while similarly named third-party trees stay out.
+# src/ paths are accepted. Relative compiler paths carry no checkout identity,
+# so the soak deliberately treats the connector's exact src/ basename as ours:
+# its input is only the current nginx process's sanitizer log, and rejecting
+# that form would let a legitimate connector diagnostic pass the gate.
 ubsan_owned_pattern() {
 	local module_dir="$1"
 	local module_dir_re

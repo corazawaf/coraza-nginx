@@ -52,7 +52,9 @@ check "own-src absolute path" \
     #0 0x55a1b2 in ngx_http_coraza_body_filter src/ngx_http_coraza_body_filter.c:214" \
 	red
 
-# Real report naming our connector source, relative path form.
+# Real report naming our connector source, relative path form. The compiler can
+# emit this form without checkout provenance, so the live-process log is the
+# ownership boundary and the gate intentionally fails closed on it.
 check "own-src relative path" \
 	"src/ngx_http_coraza_utils.c:88:5: runtime error: null pointer passed as argument 2, which is declared to never be null" \
 	red
@@ -66,8 +68,8 @@ check "nginx-core noise" \
 	#1 0x55a1c3 in ngx_http_coraza_body_filter src/ngx_http_coraza_body_filter.c:214" \
 	green
 
-# An unrelated source tree can use the same connector-looking filename. Only
-# this checkout's absolute path (or the compiler's relative src/ form) is ours.
+# An unrelated absolute source tree can use the same connector-looking
+# filename; it must not be attributed to this checkout.
 check "external connector-like path" \
 	"/usr/src/ngx_http_coraza_vendor.c:10:2: runtime error: signed integer overflow" \
 	green

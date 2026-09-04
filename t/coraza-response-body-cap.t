@@ -137,9 +137,9 @@ $t->write_file("/big", "Z" x $size);
 $t->write_file("/before-cap", "EARLY-MARKER" . ("Y" x (512 * 1024)));
 
 # Marker placed only after the 1 MiB cap: by the time these bytes arrive the
-# connector has already flushed and stopped collecting, so it must NOT be
-# seen (must NOT block) even though the rule would clearly match it if
-# inspection continued past the cap.
+# connector has already flushed the headers, but it keeps inspecting later
+# chunks. The rule therefore sees the marker and aborts the already-started
+# response instead of replacing its 200 headers with a clean 403.
 my $pad = 2 * 1024 * 1024;
 $t->write_file("/after-cap", ("X" x $pad) . "LATE-MARKER");
 
