@@ -524,7 +524,8 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
          */
         if (&data[i] == r->headers_out.server
             || &data[i] == r->headers_out.date
-            || &data[i] == r->headers_out.last_modified)
+            || (&data[i] == r->headers_out.last_modified
+                && r->headers_out.last_modified_time != -1))
         {
             continue;
         }

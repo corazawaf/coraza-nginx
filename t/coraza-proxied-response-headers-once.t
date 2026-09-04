@@ -48,7 +48,7 @@ use Test::Nginx;
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http proxy/)->plan(4);
+my $t = Test::Nginx->new()->has(qw/http proxy/)->plan(5);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -97,6 +97,20 @@ http {
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
         }
 
+        # nginx preserves an unparseable proxied Last-Modified field in the
+        # ordinary response-header list while setting last_modified_time to
+        # -1.  It must still reach Coraza through that list even though the
+        # dedicated Last-Modified resolver cannot synthesize a date from it.
+        location /invalid-last-modified {
+            coraza on;
+            coraza_rules '
+                SecRuleEngine On
+                SecResponseBodyAccess Off
+                SecRule RESPONSE_HEADERS:Last-Modified "@streq not-a-date" "id:421,phase:3,t:none,deny,log,status:418"
+            ';
+            proxy_pass http://127.0.0.1:%%PORT_8081%%;
+        }
+
     }
 }
 EOF
@@ -118,6 +132,10 @@ like(http_get('/control'), qr/^HTTP\S+ 403/,
     'control: a genuinely-duplicated wire header (X-Dup) is counted twice, '
     . 'proving the tx.hits mechanism can detect a real double submission');
 
+like(http_get('/invalid-last-modified'), qr/^HTTP\S+ 418/,
+    'unparseable proxied Last-Modified still reaches Coraza');
+
+$log = $t->read_file('error.log');
 unlike($log, qr/signal 11|SIGSEGV|AddressSanitizer/,
     'no crash or sanitizer report in error.log');
 
@@ -149,6 +167,12 @@ sub http_daemon {
             print $client "HTTP/1.1 200 OK\r\n"
                 . "X-Dup: a\r\n"
                 . "X-Dup: b\r\n"
+                . "Content-Length: 2\r\n"
+                . "Connection: close\r\n\r\n"
+                . "ok";
+        } elsif ($uri eq '/invalid-last-modified') {
+            print $client "HTTP/1.1 200 OK\r\n"
+                . "Last-Modified: not-a-date\r\n"
                 . "Content-Length: 2\r\n"
                 . "Connection: close\r\n\r\n"
                 . "ok";
