@@ -539,6 +539,10 @@ ngx_http_coraza_init_main_conf(ngx_conf_t *cf, void *conf)
 	return NGX_CONF_OK;
 }
 
+/**
+ * Allocate a location configuration.  The zeroed waf_owner field is part of
+ * the lifecycle contract: a location owns no WAF until init_process builds one.
+ */
 static void *
 ngx_http_coraza_create_conf(ngx_conf_t *cf)
 {
@@ -714,6 +718,10 @@ ngx_http_coraza_rules_equal(ngx_array_t *a, ngx_array_t *b)
 }
 
 
+/**
+ * Compile the ordered rule entries into one WAF.  Configuration or build
+ * failures are logged here and returned as a null handle to init_process.
+ */
 static coraza_waf_t
 ngx_http_coraza_build_waf(ngx_array_t *rules, ngx_log_t *log)
 {
