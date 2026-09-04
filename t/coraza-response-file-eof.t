@@ -96,6 +96,7 @@ static off_t truncate_at;
 static size_t appended_total;
 static int    append_calls;
 static int    append_fail;
+static int    short_read;
 
 void *
 ngx_pnalloc(ngx_pool_t *pool, size_t size)
@@ -147,6 +148,15 @@ ngx_read_file(ngx_file_t *file, u_char *buf, size_t size, off_t offset)
         if (offset + (off_t) size > truncate_at) {
             size = (size_t) (truncate_at - offset);
         }
+    }
+
+    /*
+     * Short reads are the ordinary pread()/signal case.  Halving each read
+     * keeps the loop honest: the reader must advance by what it actually got
+     * and submit only those bytes, never the full requested size.
+     */
+    if (short_read && size > 1) {
+        size /= 2;
     }
 
     memset(buf, 'A', size);
@@ -230,7 +240,13 @@ main(void)
     buffer.in_file = 1;
     buffer.file = &file;
     buffer.file_pos = 0;
-    buffer.file_last = 3 * NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE;
+
+    /*
+     * Deliberately NOT a whole multiple of the chunk size: the final chunk is
+     * short, so the clamp's else-branch (size = file_last - offset) is
+     * exercised rather than every read being a full 64 KiB.
+     */
+    buffer.file_last = 3 * NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE + 100;
 
     truncate_at = NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE;
     appended_total = 0;
@@ -267,8 +283,9 @@ main(void)
     }
 
     if (appended_total
-            != (size_t) (3 * NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE)
-        || append_calls != 3)
+            != (size_t) (3 * NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE
+                         + 100)
+        || append_calls != 4)
     {
         return 7;
     }
@@ -290,10 +307,76 @@ main(void)
     }
 
     if (!ctx.intervention_triggered) {
-        return 8;
+        return 9;
     }
 
     append_fail = 0;
+
+    /*
+     * Short reads: every byte of the range must still be inspected, and the
+     * reader must advance by what ngx_read_file() returned rather than by the
+     * size it asked for.  Advancing by the requested size would skip the
+     * unread remainder past the WAF.
+     */
+    memset(&ctx, 0, sizeof(ctx));
+    truncate_at = 0;
+    appended_total = 0;
+    append_calls = 0;
+    short_read = 1;
+
+    if (ngx_http_coraza_append_response_body_file(&ctx, &request, &buffer)
+        != NGX_OK)
+    {
+        return 10;
+    }
+
+    if (appended_total
+        != (size_t) (3 * NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE + 100))
+    {
+        return 11;
+    }
+
+    short_read = 0;
+
+    /*
+     * A mid-file range: the reader must start at buf->file_pos, not at 0.
+     * Response chains routinely describe a window into a larger file.
+     */
+    memset(&ctx, 0, sizeof(ctx));
+    truncate_at = 0;
+    appended_total = 0;
+    append_calls = 0;
+
+    buffer.file_pos = NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE;
+    buffer.file_last = 3 * NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE;
+
+    if (ngx_http_coraza_append_response_body_file(&ctx, &request, &buffer)
+        != NGX_OK)
+    {
+        return 12;
+    }
+
+    if (appended_total
+            != (size_t) (2 * NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE)
+        || append_calls != 2)
+    {
+        return 13;
+    }
+
+    /* An empty range must return early without reading anything. */
+    memset(&ctx, 0, sizeof(ctx));
+    appended_total = 0;
+    append_calls = 0;
+
+    buffer.file_pos = NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE;
+    buffer.file_last = NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE;
+
+    if (ngx_http_coraza_append_response_body_file(&ctx, &request, &buffer)
+        != NGX_OK
+        || append_calls != 0)
+    {
+        return 14;
+    }
 
     return 0;
 }
@@ -334,6 +417,12 @@ my %scenario = (
     6 => 'chunked reader: intact multi-chunk range must succeed',
     7 => 'chunked reader: intact range inspects every 64 KiB chunk',
     8 => 'chunked reader: Coraza-rejected chunk must fail closed',
+    9 => 'chunked reader: Coraza rejection must set intervention_triggered',
+    10 => 'chunked reader: short reads must still succeed',
+    11 => 'chunked reader: short reads must inspect every byte of the range',
+    12 => 'chunked reader: mid-file range must succeed',
+    13 => 'chunked reader: mid-file range must start at file_pos',
+    14 => 'chunked reader: empty range must return without reading',
 );
 
 my $status = system($binary);
