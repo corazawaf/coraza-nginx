@@ -3,7 +3,7 @@
 use warnings;
 use strict;
 
-use Test::More tests => 12;
+use Test::More tests => 14;
 
 BEGIN { use FindBin; chdir($FindBin::Bin); }
 
@@ -45,3 +45,20 @@ is_deeply($normal->{calls}, [qw/daemons nginx/],
 my $slow = FakeTest->new(2);
 like(coraza_crash_check::_stop_with_timeout($slow, 1), qr/shutdown timeout/,
 	'bounded shutdown reports a stalled stop');
+
+my $child = fork();
+die "fork failed: $!" unless defined $child;
+exit 0 if $child == 0;
+ok(coraza_crash_check::_reap_with_timeout($child, 1),
+	'forced-cleanup reap completes through the nonblocking helper');
+
+my $live_child = fork();
+die "fork failed: $!" unless defined $live_child;
+if ($live_child == 0) {
+	sleep 5;
+	exit 0;
+}
+ok(!coraza_crash_check::_reap_with_timeout($live_child, 0.05),
+	'forced-cleanup reap returns at its deadline for a live child');
+kill 'KILL', $live_child;
+waitpid($live_child, 0);

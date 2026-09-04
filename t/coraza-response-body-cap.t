@@ -39,10 +39,11 @@
 #     connector flush is the only thing that can stop inspection.
 #
 #   * /after-cap places the marker only past the 1 MiB cap. Once flushed,
-#     content is streamed straight to the client and is no longer collected
-#     for inspection, so the rule must NOT fire: the response completes
-#     200 with the marker delivered to the client but never seen by
-#     Coraza -- truncated inspection, not a silent full-body pass.
+#     headers and preceding bytes have already reached the client, but Coraza
+#     continues inspecting subsequent chunks. A late deny therefore resets
+#     the response instead of replacing it with a clean error page. The
+#     declared Content-Length is intentionally left unsatisfied and the
+#     matching final chunk must not reach the client.
 
 ###############################################################################
 
@@ -144,7 +145,7 @@ $t->write_file("/after-cap", ("X" x $pad) . "LATE-MARKER");
 
 $t->run();
 $t->todo_alerts();
-$t->plan(7);
+$t->plan(9);
 
 ###############################################################################
 
@@ -161,28 +162,30 @@ my $r_early = http_get('/before-cap');
 like($r_early, qr/^HTTP.*403/,
     'rule match before the buffering cap still blocks (deny is not bypassed by delayed buffering)');
 
-# A marker placed only past the cap must NOT be seen: once the connector
-# flushes and starts streaming, it stops collecting for inspection, so the
-# response completes normally (200, marker delivered) rather than being
-# silently fully inspected -- this is the truncation the cap exists to
-# produce, made observable instead of assumed.
-my $r_late = http_get_full('/after-cap');
+# A marker placed only past the cap is still inspected. Since the 200 headers
+# are already on the wire, the late deny cannot replace them with a 403; it
+# aborts the response before the matching final chunk is forwarded instead.
+my ($r_late, $expected_late) = http_get_until_close('/after-cap');
 like($r_late, qr/^HTTP.*200/,
-    'rule match placed only after the buffering cap is not seen (inspection truncates, not a silent full pass)');
-like($r_late, qr/LATE-MARKER\z/,
-    'the un-inspected marker is still part of the response the client is '
-    . 'sent, confirming the body was streamed through rather than dropped');
+	'late intervention preserves the status whose headers were already sent');
+unlike($r_late, qr/LATE-MARKER/,
+	'late matching chunk is not forwarded after the intervention');
+cmp_ok(length($r_late), '<', $expected_late,
+	'late intervention closes the response before its declared Content-Length');
 
 coraza_crash_check::assert_no_crash($t,
 	'no worker crash in error.log');
 like($t->read_file('cap.log'), qr/flushing headers early/,
     'connector flushed delayed headers once the buffering cap was exceeded');
+like($t->read_file('cap.log'), qr/header already sent/,
+	'late phase-4 intervention reached the post-flush finalization path');
 
-sub http_get_full {
+sub http_get_until_close {
 	my ($uri) = @_;
 	my $reply = '';
 	my $s;
 	my $error;
+	my $expected;
 	eval {
 		local $SIG{ALRM} = sub { die "response read timeout\n" };
 		alarm(10);
@@ -195,7 +198,6 @@ sub http_get_full {
 			. "Host: localhost" . CRLF
 			. "Connection: close" . CRLF . CRLF;
 
-		my $expected;
 		while (1) {
 			my $n = sysread($s, my $chunk, 64 * 1024);
 			die "Can't read nginx response: $!\n" unless defined $n;
@@ -208,12 +210,9 @@ sub http_get_full {
 				$expected = length($headers) + 4 + $1
 					if $headers =~ /Content-Length:\s*(\d+)/i;
 			}
-			last if defined $expected && length($reply) >= $expected;
 		}
 		die "nginx response omitted Content-Length\n"
 			unless defined $expected;
-		die "nginx response ended before Content-Length\n"
-			unless length($reply) == $expected;
 		alarm(0);
 		1;
 	} or do {
@@ -222,5 +221,5 @@ sub http_get_full {
 	};
 	close $s if defined $s;
 	die $error if defined $error;
-	return $reply;
+	return ($reply, $expected);
 }

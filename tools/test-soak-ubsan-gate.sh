@@ -11,20 +11,14 @@
 set -euo pipefail
 
 SELF="$(cd "$(dirname "$0")" && pwd)"
-SOAK="$SELF/soak.sh"
 MODULE_DIR="$(cd "$SELF/.." && pwd)"
 
-# Extract the live detection regex straight out of soak.sh so this test
-# fails loudly if that line is edited/removed, instead of silently testing
-# a stale copy of the pattern.
-PATTERN_SUFFIX="$(sed -n "s/^[[:space:]]*UBSAN_OWNED_SUFFIX='\\([^']*\\)'$/\\1/p" "$SOAK")"
-if [ -z "$PATTERN_SUFFIX" ]; then
-	echo "FAIL: could not locate the UBSan ownership pattern in soak.sh (drifted?)"
-	exit 1
-fi
-module_dir_re=$(printf '%s\n' "$MODULE_DIR" \
-	| sed 's/[][(){}.^$*+?|\\]/\\&/g')
-PATTERN="^(${module_dir_re}/)?${PATTERN_SUFFIX}"
+# Both the live soak and this negative control call the same constructor, so a
+# change to the optional absolute checkout prefix cannot drift between them.
+# Resolved from this script's directory.
+# shellcheck disable=SC1091
+source "$SELF/ubsan-owned-pattern.sh"
+PATTERN="$(ubsan_owned_pattern "$MODULE_DIR")"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT

@@ -28,6 +28,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -89,7 +92,7 @@ EOF
 $t->run_daemon(\&http_daemon);
 $t->run()->waitforsocket('127.0.0.1:' . port(8081));
 
-$t->plan(4);
+$t->plan(5);
 
 ###############################################################################
 
@@ -113,11 +116,12 @@ like(http_req_body('POST', '/nobuffering_detectiononly', $bad_body),
 	qr/\Q$bad_body\E\z/,
 	'proxy_request_buffering off, malicious body, DetectionOnly control passes through');
 
-$t->stop();
-
 like($t->read_file('auditlog-detectiononly.txt'),
 	qr/no-buffering-detectiononly/,
 	'DetectionOnly rule evaluated the full request body');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');
 
 ###############################################################################
 

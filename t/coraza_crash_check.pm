@@ -29,8 +29,9 @@ package coraza_crash_check;
 use warnings;
 use strict;
 
+use POSIX qw/ WNOHANG /;
 use Test::More;
-use Time::HiRes qw/ sleep /;
+use Time::HiRes qw/ sleep time /;
 
 # Matches what the three original crash-checking tests looked for
 # (coraza-empty-header-value.t, coraza-request-body-chunked.t,
@@ -87,7 +88,7 @@ sub assert_no_crash {
 			kill 'TERM', @workers, $master;
 			sleep 0.1;
 			kill 'KILL', @workers, $master;
-			waitpid($master, 0);
+			_reap_with_timeout($master, $SHUTDOWN_TIMEOUT);
 		}
 		$t->{_started} = 0;
 
@@ -98,6 +99,19 @@ sub assert_no_crash {
 	}
 
 	unlike($t->read_file('error.log'), $CRASH_RE, $name);
+}
+
+sub _reap_with_timeout {
+	my ($pid, $timeout) = @_;
+	my $deadline = time() + $timeout;
+
+	while (time() < $deadline) {
+		my $reaped = waitpid($pid, WNOHANG);
+		return 1 if $reaped == $pid || $reaped == -1;
+		sleep 0.05;
+	}
+
+	return 0;
 }
 
 sub _stop_with_timeout {

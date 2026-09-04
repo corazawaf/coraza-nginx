@@ -267,10 +267,10 @@ fi
 if ls "$WORK"/logs/ubsan* >/dev/null 2>&1; then
     echo "note: UBSan diagnostics:"
     cat "$WORK"/logs/ubsan*
-    module_dir_re=$(printf '%s\n' "$MODULE_DIR" \
-        | sed 's/[][(){}.^$*+?|\\]/\\&/g')
-    UBSAN_OWNED_SUFFIX='src/ngx_http_coraza_[^[:space:]]*:[0-9]+(:[0-9]+)?: runtime error:'
-    UBSAN_OWNED_PATTERN="^(${module_dir_re}/)?${UBSAN_OWNED_SUFFIX}"
+	# Resolved from the runtime module root.
+	# shellcheck disable=SC1091
+	source "$MODULE_DIR/tools/ubsan-owned-pattern.sh"
+	UBSAN_OWNED_PATTERN="$(ubsan_owned_pattern "$MODULE_DIR")"
     ubsan_grep_rc=0
     grep -qE "$UBSAN_OWNED_PATTERN" "$WORK"/logs/ubsan* || ubsan_grep_rc=$?
     if [ "$ubsan_grep_rc" -eq 0 ]; then
