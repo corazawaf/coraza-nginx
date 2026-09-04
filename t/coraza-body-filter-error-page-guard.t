@@ -59,7 +59,7 @@ http {
             coraza_rules '
                 SecRuleEngine On
                 SecResponseBodyAccess On
-                SecRule ARGS:x "@streq boom" "id:600,phase:1,deny,log,status:403"
+                SecRule ARGS:x "@streq boom" "id:600,phase:1,deny,log,status:403,t:none"
             ';
             error_page 403 = /denied;
             return 200 "should not reach";
@@ -73,9 +73,23 @@ http {
             coraza_rules '
                 SecRuleEngine On
                 SecResponseBodyAccess On
-                SecRule RESPONSE_BODY "@contains forbidden" "id:601,phase:4,deny,log,status:418"
+                SecResponseBodyMimeType text/plain
+                SecRule RESPONSE_BODY "@contains forbidden" "id:601,phase:4,deny,log,status:418,t:none"
             ';
             return 403 "forbidden by coraza\n";
+        }
+
+        # Positive phase-4 control without nginx's special-response path.
+        # Returning 403 directly also sets r->error_page, so /denied itself
+        # cannot distinguish a working phase-4 engine from the guard above.
+        location /phase4-control {
+            coraza_rules '
+                SecRuleEngine On
+                SecResponseBodyAccess On
+                SecResponseBodyMimeType text/plain
+                SecRule RESPONSE_BODY "@contains forbidden" "id:602,phase:4,deny,log,status:418,t:none"
+            ';
+            return 200 "forbidden control body\n";
         }
     }
 }
@@ -83,7 +97,7 @@ EOF
 
 $t->run();
 $t->todo_alerts();
-$t->plan(3);
+$t->plan(4);
 
 ###############################################################################
 
@@ -93,6 +107,12 @@ my $r = http_get('/trigger?x=boom');
 like($r, qr/^HTTP\S+ 403/,
     'error-page body filter did not re-finalize (still 403, not 418)');
 like($r, qr/forbidden by coraza/, 'error_page handler body delivered intact');
+
+# An ordinary 200 response must still run phase 4.  This is the positive
+# control for the error-page guard above: an over-broad guard that disabled
+# response-body inspection would otherwise satisfy both assertions.
+like(http_get('/phase4-control'), qr/^HTTP\S+ 418/,
+    'phase-4 rule blocks an ordinary response outside error_page');
 
 # Control: a clean request never routes through the error page at all.
 like(http_get('/trigger?x=safe'), qr/^HTTP\S+ 200/,
