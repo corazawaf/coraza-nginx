@@ -167,10 +167,6 @@ close $s;
 
 $t->stop();
 
-is(origin_saw('unexpected'), 0,
-	'origin never received a request URI other than the five sent '
-	. '(rules out request-side desync from the misleading responses)');
-
 # Every request-bearing accepted connection logs its (monotonically
 # assigned) connection id next to each URI it served, in
 # <testdir>/conn-log. The earlier response-content assertions do not, by
@@ -184,11 +180,17 @@ is(origin_saw('unexpected'), 0,
 # papered over with a reuse claim that is not true.
 my @conn_log = split /\n/, $t->read_file('conn-log');
 my %conn_for_uri;
+my @origin_uris;
 for my $line (@conn_log) {
 	my ($id, $uri) = split /\s+/, $line, 2;
 	next unless defined $uri;
+	push @origin_uris, $uri;
 	$conn_for_uri{$uri} = $id unless exists $conn_for_uri{$uri};
 }
+
+is_deeply(\@origin_uris, [qw(
+	/early-hints /no-content /not-modified /no-content-chunked /plain
+)], 'origin received exactly the five request URIs in order');
 
 is($conn_for_uri{'/no-content'} // 'missing:/no-content',
 	$conn_for_uri{'/early-hints'} // 'missing:/early-hints',
