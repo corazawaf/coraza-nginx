@@ -56,7 +56,10 @@ for my $dir (@needed) {
 plan skip_all => 'module source tree not found'
     unless defined $root;
 # CI installs libcoraza under /usr/local; a distribution package lands in
-# /usr.  Probe both so the harness is not silently skipped on either.
+# /usr.  Probe both so the harness is not silently skipped on either.  The
+# first hit wins deliberately -- this mirrors the linker's own search order,
+# so a host with stale headers under /usr/local and the real library under
+# /usr still compiles against the same set the linker would resolve against.
 my ($coraza_inc) = grep { -f "$_/coraza/coraza.h" }
     qw(/usr/local/include /usr/include);
 
@@ -223,6 +226,9 @@ main(void)
      * its length.  The second ngx_read_file() therefore returns 0.
      */
     memset(&ctx, 0, sizeof(ctx));
+    memset(&buffer, 0, sizeof(buffer));
+    buffer.in_file = 1;
+    buffer.file = &file;
     buffer.file_pos = 0;
     buffer.file_last = 3 * NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE;
 
@@ -267,6 +273,28 @@ main(void)
         return 7;
     }
 
+    /*
+     * Coraza rejects an intact chunk (append_fail): the chunked reader must
+     * fail closed and flag intervention, exercising body_filter.c:190.
+     */
+    memset(&ctx, 0, sizeof(ctx));
+    truncate_at = 0;
+    appended_total = 0;
+    append_calls = 0;
+    append_fail = 1;
+
+    if (ngx_http_coraza_append_response_body_file(&ctx, &request, &buffer)
+        != NGX_ERROR)
+    {
+        return 8;
+    }
+
+    if (!ctx.intervention_triggered) {
+        return 8;
+    }
+
+    append_fail = 0;
+
     return 0;
 }
 EOF
@@ -305,12 +333,18 @@ my %scenario = (
     5 => 'chunked reader: only the bytes that existed are inspected',
     6 => 'chunked reader: intact multi-chunk range must succeed',
     7 => 'chunked reader: intact range inspects every 64 KiB chunk',
+    8 => 'chunked reader: Coraza-rejected chunk must fail closed',
 );
 
 my $status = system($binary);
-my $code = $status == -1 ? -1 : $status >> 8;
+my $code = $status == -1 ? -1
+    : ($status & 127) ? -($status & 127)
+    : $status >> 8;
 
 is($code, 0, 'file-backed response readers fail closed on premature EOF')
     or diag($scenario{$code}
         ? "failing scenario $code: $scenario{$code}"
-        : "harness exited with unmapped status $status");
+        : "harness exited with unmapped status $status"
+            . ($status == -1 ? " (system() failed to launch: $!)"
+                : ($status & 127) ? " (killed by signal " . ($status & 127) . ")"
+                : ''));
