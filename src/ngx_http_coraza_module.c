@@ -562,6 +562,7 @@ ngx_http_coraza_create_conf(ngx_conf_t *cf)
 	 *     conf->transaction_id = NULL;
 	 *     conf->has_rules = 0;
 	 *     conf->delay_response_headers = 0;
+	 *     conf->waf_owner = 0;
 	 */
 
 	conf->enable = NGX_CONF_UNSET;
@@ -665,6 +666,53 @@ ngx_http_coraza_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 /* ------------------------------------------------------------------ */
 /* Helper: build a WAF from a rules array                              */
 /* ------------------------------------------------------------------ */
+
+/*
+ * Two rules arrays produce the same WAF iff they carry the same ordered
+ * sequence of (type, value) entries.  Order is significant: SecLang is
+ * sequential, so [a,b] and [b,a] are different rulesets and must not merge.
+ *
+ * Comparing the stored strings is sufficient here because the connector never
+ * resolves a rules path against the including config's context: both
+ * ngx_conf_set_rules() and ngx_conf_set_rules_file() ngx_pstrdup() the raw
+ * token, and ngx_http_coraza_build_waf() hands that same byte sequence to
+ * coraza_rules_add()/coraza_rules_add_file() in the worker.  A relative path
+ * is therefore resolved by libcoraza from the worker's cwd, which is identical
+ * for every loc_conf in the cycle -- so identical text means identical meaning.
+ * If that ever stops holding (e.g. a directive gains context-dependent
+ * resolution at parse time), this comparison must be tightened or dropped:
+ * dedup is an optimization, and refusing to merge is always correct.
+ */
+static ngx_int_t
+ngx_http_coraza_rules_equal(ngx_array_t *a, ngx_array_t *b)
+{
+	ngx_http_coraza_rule_entry_t *ea, *eb;
+	ngx_uint_t i;
+
+	if (a == b) {
+		return 1;               /* pointer-identity fast path */
+	}
+
+	if (a == NULL || b == NULL || a->nelts != b->nelts) {
+		return 0;
+	}
+
+	ea = a->elts;
+	eb = b->elts;
+
+	for (i = 0; i < a->nelts; i++) {
+		if (ea[i].type != eb[i].type
+			|| ea[i].value.len != eb[i].value.len
+			|| ngx_memcmp(ea[i].value.data, eb[i].value.data,
+						  ea[i].value.len) != 0)
+		{
+			return 0;
+		}
+	}
+
+	return 1;
+}
+
 
 static coraza_waf_t
 ngx_http_coraza_build_waf(ngx_array_t *rules, ngx_log_t *log)
@@ -793,12 +841,28 @@ ngx_http_coraza_init_process(ngx_cycle_t *cycle)
 			continue;
 		}
 
-		/* Check if another loc_conf already built this exact rules array */
+		/*
+		 * Reuse a WAF another loc_conf already built when the two rules
+		 * arrays are content-identical.  Sharing the same pointer is the
+		 * cheap case (config inheritance already gives it to us); distinct
+		 * arrays that spell out the same directives in the same order are
+		 * the case this catches, and it is the common one -- n server
+		 * blocks each naming the same CRS bundle used to compile CRS n
+		 * times and hold n copies of it in every worker.
+		 *
+		 * Only owners are considered as donors, so the borrowed handle is
+		 * always one with a live owner responsible for freeing it exactly
+		 * once (see waf_owner in ngx_http_coraza_common.h).
+		 */
 		ngx_uint_t j;
 		ngx_int_t found = 0;
 		for (j = 0; j < i; j++) {
-			if (loc_confs[j]->rules == lcf->rules && loc_confs[j]->waf != 0) {
+			if (loc_confs[j]->waf_owner && loc_confs[j]->waf != 0
+				&& ngx_http_coraza_rules_equal(loc_confs[j]->rules,
+											   lcf->rules))
+			{
 				lcf->waf = loc_confs[j]->waf;
+				lcf->waf_owner = 0;     /* borrower: must not free */
 				found = 1;
 				break;
 			}
@@ -813,6 +877,7 @@ ngx_http_coraza_init_process(ngx_cycle_t *cycle)
 						  "coraza: failed to build loc WAF in worker");
 			return NGX_ERROR;
 		}
+		lcf->waf_owner = 1;             /* this loc_conf built it: it frees it */
 		ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0,
 					  "coraza: loc WAF initialized with %d rules",
 					  coraza_rules_count(lcf->waf));
@@ -843,34 +908,29 @@ ngx_http_coraza_exit_process(ngx_cycle_t *cycle)
 		return;
 	}
 
-	/* Free loc_conf WAFs, skipping shared ones.
-	 * Walk the array twice: first pass frees unique WAFs,
-	 * second pass zeroes all pointers.  This avoids a double-free
-	 * bug where zeroing waf in the first pass defeats the dedup check
-	 * for later loc_confs that share the same handle. */
+	/*
+	 * Free loc_conf WAFs.  Ownership is explicit: init_process set
+	 * waf_owner on exactly the one loc_conf that built each distinct WAF,
+	 * and left it clear on every loc_conf that borrowed a handle or fell
+	 * back to mmcf->waf.  Freeing owners only therefore frees each distinct
+	 * WAF exactly once -- no double free, no leak -- without the O(n^2)
+	 * pointer scan this used to need.  mmcf->waf is owned by mmcf and is
+	 * freed separately below; a loc_conf never owns it.
+	 *
+	 * Pointers are zeroed in a second pass so that nothing observes a
+	 * dangling handle between the two loops.
+	 */
 	loc_confs = mmcf->loc_confs->elts;
 	for (i = 0; i < mmcf->loc_confs->nelts; i++) {
 		ngx_http_coraza_conf_t *lcf = loc_confs[i];
 
-		if (lcf->waf == 0 || lcf->waf == mmcf->waf) {
-			continue;
-		}
-
-		/* Check if an earlier loc_conf already freed this WAF */
-		ngx_uint_t j;
-		ngx_int_t shared = 0;
-		for (j = 0; j < i; j++) {
-			if (loc_confs[j]->waf == lcf->waf) {
-				shared = 1;
-				break;
-			}
-		}
-		if (!shared) {
+		if (lcf->waf_owner && lcf->waf != 0 && lcf->waf != mmcf->waf) {
 			coraza_free_waf(lcf->waf);
 		}
 	}
 	for (i = 0; i < mmcf->loc_confs->nelts; i++) {
 		loc_confs[i]->waf = 0;
+		loc_confs[i]->waf_owner = 0;
 	}
 
 	/* Free main WAF */

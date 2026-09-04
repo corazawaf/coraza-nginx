@@ -111,6 +111,17 @@ typedef struct {
     coraza_waf_t               waf;
     ngx_array_t               *rules;       /* of ngx_http_coraza_rule_entry_t */
 
+    /*
+     * WAF ownership.  init_process dedups WAFs across loc_confs whose rules
+     * arrays are content-identical, so several loc_confs can point at the
+     * same coraza_waf_t.  Exactly one of them -- the one that actually built
+     * it -- has waf_owner set, and only that one frees the handle in
+     * exit_process.  Sharers leave waf_owner clear and must never free.
+     * A loc_conf that falls back to mmcf->waf is never an owner either;
+     * mmcf owns that handle.
+     */
+    ngx_flag_t                 waf_owner;
+
     ngx_flag_t                 enable;
     ngx_flag_t                 has_rules;
     ngx_flag_t                 delay_response_headers;
