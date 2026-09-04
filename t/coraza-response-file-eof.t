@@ -95,7 +95,11 @@ static off_t truncate_at;
 /* Bytes handed to coraza_append_response_body() across the whole range. */
 static size_t appended_total;
 static int    append_calls;
+static int    alloc_calls;
+static int    alloc_fail;
 static int    append_fail;
+static int    force_error;
+static int    read_calls;
 static int    short_read;
 
 void *
@@ -109,14 +113,21 @@ void *
 ngx_alloc(size_t size, ngx_log_t *log)
 {
     (void) log;
+
+    alloc_calls++;
+
+    if (alloc_fail) {
+        return NULL;
+    }
+
     return malloc(size);
 }
 
 /*
  * The fixture leaves buf->file->directio unset, so these are never reached;
- * they exist only to satisfy the linker on a tree built with
- * NGX_HAVE_ALIGNED_DIRECTIO.
+ * they exist only to satisfy the linker on a Unix tree built with O_DIRECT.
  */
+#if (NGX_HAVE_O_DIRECT)
 ngx_int_t
 ngx_directio_off(ngx_fd_t fd)
 {
@@ -130,14 +141,21 @@ ngx_directio_on(ngx_fd_t fd)
     (void) fd;
     return 0;
 }
+#endif
 
 ssize_t
 ngx_read_file(ngx_file_t *file, u_char *buf, size_t size, off_t offset)
 {
     (void) file;
 
+    read_calls++;
+
     if (force_eof) {
         return 0;
+    }
+
+    if (force_error) {
+        return NGX_ERROR;
     }
 
     if (truncate_at > 0) {
@@ -378,6 +396,68 @@ main(void)
         return 14;
     }
 
+    /* A read error must fail closed after one attempted read. */
+    memset(&ctx, 0, sizeof(ctx));
+    alloc_calls = 0;
+    appended_total = 0;
+    append_calls = 0;
+    read_calls = 0;
+    force_error = 1;
+
+    buffer.file_pos = 0;
+    buffer.file_last = NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE;
+
+    if (ngx_http_coraza_append_response_body_file(&ctx, &request, &buffer)
+            != NGX_ERROR
+        || !ctx.intervention_triggered
+        || alloc_calls != 1
+        || read_calls != 1
+        || append_calls != 0)
+    {
+        return 15;
+    }
+
+    force_error = 0;
+
+    /* An inverted range must be rejected before allocation or I/O. */
+    memset(&ctx, 0, sizeof(ctx));
+    alloc_calls = 0;
+    append_calls = 0;
+    read_calls = 0;
+
+    buffer.file_pos = NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE;
+    buffer.file_last = 0;
+
+    if (ngx_http_coraza_append_response_body_file(&ctx, &request, &buffer)
+            != NGX_ERROR
+        || !ctx.intervention_triggered
+        || alloc_calls != 0
+        || read_calls != 0
+        || append_calls != 0)
+    {
+        return 16;
+    }
+
+    /* Scratch-buffer allocation failure must stop before read or append. */
+    memset(&ctx, 0, sizeof(ctx));
+    alloc_calls = 0;
+    append_calls = 0;
+    read_calls = 0;
+    alloc_fail = 1;
+
+    buffer.file_pos = 0;
+    buffer.file_last = NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE;
+
+    if (ngx_http_coraza_append_response_body_file(&ctx, &request, &buffer)
+            != NGX_ERROR
+        || !ctx.intervention_triggered
+        || alloc_calls != 1
+        || read_calls != 0
+        || append_calls != 0)
+    {
+        return 17;
+    }
+
     return 0;
 }
 EOF
@@ -423,6 +503,9 @@ my %scenario = (
     12 => 'chunked reader: mid-file range must succeed',
     13 => 'chunked reader: mid-file range must start at file_pos',
     14 => 'chunked reader: empty range must return without reading',
+    15 => 'chunked reader: read errors must fail closed before append',
+    16 => 'chunked reader: inverted ranges must fail before allocation or I/O',
+    17 => 'chunked reader: allocation failure must stop before I/O',
 );
 
 my $status = system($binary);
@@ -430,7 +513,7 @@ my $code = $status == -1 ? -1
     : ($status & 127) ? -($status & 127)
     : $status >> 8;
 
-is($code, 0, 'file-backed response readers fail closed on premature EOF')
+is($code, 0, 'file-backed response readers enforce range and failure paths')
     or diag($scenario{$code}
         ? "failing scenario $code: $scenario{$code}"
         : "harness exited with unmapped status $status"
