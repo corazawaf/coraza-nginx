@@ -35,6 +35,18 @@ like($dl, qr/DL_SYM\(dl_is_request_body_accessible,\s*coraza_is_request_body_acc
 like($dl, qr/return\s+dl_is_request_body_accessible\(t\)/,
 	'request-body helper wrapper calls the resolved symbol');
 
+# The bulk-header wrappers dereference these pointers unconditionally -- the
+# NULL guards were removed once >= 1.7 became a hard floor -- so a downgrade to
+# DL_SYM_OPT would turn the first header-bearing request into a NULL call.
+like($dl, qr/DL_SYM\(dl_add_request_headers,\s*coraza_add_request_headers\)/s,
+	'bulk request-header entry point is resolved as a required symbol');
+
+like($dl, qr/DL_SYM\(dl_add_response_headers,\s*coraza_add_response_headers\)/s,
+	'bulk response-header entry point is resolved as a required symbol');
+
+unlike($dl, qr/DL_SYM_OPT\([^,]+,\s*coraza_add_(?:request|response)_headers\)/s,
+	'bulk header entry points are not downgraded to optional symbols');
+
 unlike($dl, qr/DL_SYM\([^,]+,\s*coraza_rules_merge\)/,
 	'dead coraza_rules_merge symbol is not required at startup');
 
