@@ -203,8 +203,7 @@ using the same unique identificator.
 
 String can contain variables.
 
-coraza_delay_response_headers
------------------------------
+## coraza_delay_response_headers
 **syntax:** *coraza_delay_response_headers on | off*
 
 **context:** *http, server, location*
@@ -351,5 +350,4 @@ feel free to open GitHub issues requesting for new features. Before opening a ne
 
 Having our packages in distros on time is something we highly desire. Let us know if
 there is anything we can do to facilitate your work as a packager.
-
 

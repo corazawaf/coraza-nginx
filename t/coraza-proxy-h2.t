@@ -105,7 +105,7 @@ $t->run()->waitforsocket('127.0.0.1:' . port(8081));
 
 ###############################################################################
 
-my ($phase, $s, $sid, $frames, $frame);
+my ($phase, $s, $sid, $frames, $frame, $data);
 
 $s = Test::Nginx::HTTP2->new();
 $sid = $s->new_stream({ path => '/' });
@@ -140,8 +140,9 @@ $sid = $s->new_stream({ path => '/phase4?what=redirect302' });
 $frames = $s->read(all => [{ sid => $sid, fin => 1 }]);
 ($frame) = grep { $_->{type} eq "HEADERS" } @$frames;
 is($frame->{headers}->{':status'}, 302, 'redirect 302 - phase 4 status');
-($frame) = grep { $_->{type} eq "DATA" } @$frames;
-unlike($frame->{data} // '', qr/not found/, 'redirect 302 - phase 4 body not leaked');
+$data = join '', map { $_->{data} // '' }
+	grep { $_->{type} eq "DATA" } @$frames;
+unlike($data, qr/not found/, 'redirect 302 - phase 4 body not leaked');
 
 # Redirect (301)
 
@@ -158,8 +159,9 @@ $sid = $s->new_stream({ path => '/phase4?what=redirect301' });
 $frames = $s->read(all => [{ sid => $sid, fin => 1 }]);
 ($frame) = grep { $_->{type} eq "HEADERS" } @$frames;
 is($frame->{headers}->{':status'}, 301, 'redirect 301 - phase 4 status');
-($frame) = grep { $_->{type} eq "DATA" } @$frames;
-unlike($frame->{data} // '', qr/not found/, 'redirect 301 - phase 4 body not leaked');
+$data = join '', map { $_->{data} // '' }
+	grep { $_->{type} eq "DATA" } @$frames;
+unlike($data, qr/not found/, 'redirect 301 - phase 4 body not leaked');
 
 # Block (401)
 
@@ -176,8 +178,9 @@ $sid = $s->new_stream({ path => '/phase4?what=block401' });
 $frames = $s->read(all => [{ sid => $sid, fin => 1 }]);
 ($frame) = grep { $_->{type} eq "HEADERS" } @$frames;
 is($frame->{headers}->{':status'}, 401, 'block 401 - phase 4 status');
-($frame) = grep { $_->{type} eq "DATA" } @$frames;
-unlike($frame->{data} // '', qr/not found/, 'block 401 - phase 4 body not leaked');
+$data = join '', map { $_->{data} // '' }
+	grep { $_->{type} eq "DATA" } @$frames;
+unlike($data, qr/not found/, 'block 401 - phase 4 body not leaked');
 
 
 # Block (403)
@@ -195,8 +198,9 @@ $sid = $s->new_stream({ path => '/phase4?what=block403' });
 $frames = $s->read(all => [{ sid => $sid, fin => 1 }]);
 ($frame) = grep { $_->{type} eq "HEADERS" } @$frames;
 is($frame->{headers}->{':status'}, 403, 'block 403 - phase 4 status');
-($frame) = grep { $_->{type} eq "DATA" } @$frames;
-unlike($frame->{data} // '', qr/not found/, 'block 403 - phase 4 body not leaked');
+$data = join '', map { $_->{data} // '' }
+	grep { $_->{type} eq "DATA" } @$frames;
+unlike($data, qr/not found/, 'block 403 - phase 4 body not leaked');
 
 # Nothing to detect
 #like(http_get('/phase1?what=nothing'), qr/phase1\?what=nothing\' not found/, 'nothing phase 1');
