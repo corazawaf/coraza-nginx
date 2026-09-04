@@ -109,14 +109,15 @@ jobs:
           tar -xzf nginx-src.tar.gz
           cd "nginx-${NGINX_VERSION}"
           # ASan errors are fatal (real heap bugs / UAF — the point of the
-          # soak; -fno-sanitize-recover=address). UBSan is report-only.
+          # soak; -fno-sanitize-recover=address). UBSan recovers so the soak
+          # can classify its logs by ownership after nginx exits.
           # -fno-sanitize=nonnull-attribute,null: nginx core trips benign
           # nullability UB at init (ngx_pstrdup -> memcpy(dst,NULL,0) in
           # ngx_init_cycle) that would otherwise route through the shared
           # sanitizer die-path and kill nginx before it listens — not our bug,
-          # and gcc has no -fsanitize-ignorelist to scope it to our TUs. Real
-          # pure-C UB is gated by the fuzz job. -fno-sanitize* are COMPILE-only;
-          # the link line takes only -fsanitize=... (SAN_LD).
+          # and gcc has no -fsanitize-ignorelist to scope it to our TUs. The
+          # fuzz job separately gates the fuzzable pure-C leaf. -fno-sanitize*
+          # are COMPILE-only; the link line takes only -fsanitize=... (SAN_LD).
           SAN_LD="-fsanitize=address,undefined"
           SAN_CC="$SAN_LD -fno-sanitize=nonnull-attribute,null -fno-sanitize-recover=address"
           ./configure \
@@ -128,6 +129,11 @@ jobs:
             --with-ld-opt="-fuse-ld=mold $SAN_LD $(pkg-config --libs libpcre2-8)"
           eatmydata make -j"$(nproc)" modules
           eatmydata make -j"$(nproc)"
+
+      # Runs before the soak: if the ownership gate stops discriminating, the
+      # soak's UBSan check is silently dead and every later green is worthless.
+      - name: Verify the UBSan ownership gate detects what it claims
+        run: bash tools/test-soak-ubsan-gate.sh
 
       - name: Sanitizer soak (60s @ 4 conc)
         env:

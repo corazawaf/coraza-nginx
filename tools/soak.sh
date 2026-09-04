@@ -257,12 +257,27 @@ problems=0
 if ls "$WORK"/logs/asan* >/dev/null 2>&1; then
     echo "FAIL: ASan report:"; cat "$WORK"/logs/asan*; problems=1
 fi
-# UBSan is report-only here (nginx core trips benign init nullability UB that
-# gcc can't scope out) — print for triage, do NOT fail the soak. Real UB in
-# the connector's pure-C paths is gated by the fuzz job instead.
+# UBSan noise from nginx core / third-party init (benign nullability trips
+# gcc can't scope out) is print-only. A diagnostic whose source location is
+# in OUR src/ is real UB in the connector's pure-C paths and fails the soak.
+# Do not match connector frames deeper in a third-party diagnostic's stack:
+# those identify a caller, not the source location that triggered UBSan. The
+# fuzz job also gates those paths, but the soak drives the live-nginx call sites
+# the fuzzer can't reach.
 if ls "$WORK"/logs/ubsan* >/dev/null 2>&1; then
-    echo "note: UBSan diagnostics (non-fatal, mostly nginx-core init noise):"
+    echo "note: UBSan diagnostics:"
     cat "$WORK"/logs/ubsan*
+    module_dir_re=$(printf '%s\n' "$MODULE_DIR" \
+        | sed 's/[][(){}.^$*+?|\\]/\\&/g')
+    UBSAN_OWNED_SUFFIX='src/ngx_http_coraza_[^[:space:]]*:[0-9]+(:[0-9]+)?: runtime error:'
+    UBSAN_OWNED_PATTERN="^(${module_dir_re}/)?${UBSAN_OWNED_SUFFIX}"
+    ubsan_grep_rc=0
+    grep -qE "$UBSAN_OWNED_PATTERN" "$WORK"/logs/ubsan* || ubsan_grep_rc=$?
+    if [ "$ubsan_grep_rc" -eq 0 ]; then
+        echo "FAIL: UBSan diagnostic from our src/ (see above)"; problems=1
+    elif [ "$ubsan_grep_rc" -ne 1 ]; then
+        echo "FAIL: could not inspect UBSan diagnostics"; problems=1
+    fi
 fi
 if ls "$WORK"/logs/valgrind.* "$WORK"/logs/helgrind.* >/dev/null 2>&1; then
     if grep -qE 'ERROR SUMMARY: [1-9]|definitely lost: [1-9]' \
