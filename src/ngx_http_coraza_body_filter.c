@@ -379,13 +379,16 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                         "coraza: response body chunk too large to inspect");
                     ctx->intervention_triggered = 1;
-                    return NGX_ERROR;
+                    return ngx_http_coraza_body_filter_finalize(r, ctx,
+                        NGX_HTTP_INTERNAL_SERVER_ERROR);
                 }
 
                 if (ngx_http_coraza_read_body_data(r, chain->buf, &data, &len)
                     != NGX_OK)
                 {
-                    return NGX_ERROR;
+                    ctx->intervention_triggered = 1;
+                    return ngx_http_coraza_body_filter_finalize(r, ctx,
+                        NGX_HTTP_INTERNAL_SERVER_ERROR);
                 }
 
                 if (len > 0) {
