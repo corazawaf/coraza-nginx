@@ -197,7 +197,7 @@ jobs:
             valgrind wget zlib1g-dev unzip ccache eatmydata mold
           echo /usr/lib/ccache >> "$GITHUB_PATH"
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ^1.25.x
       - name: libcoraza built-tree cache
@@ -331,7 +331,7 @@ jobs:
             valgrind wget zlib1g-dev unzip ccache eatmydata mold
           echo /usr/lib/ccache >> "$GITHUB_PATH"
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ^1.25.x
       - name: libcoraza built-tree cache
@@ -444,7 +444,7 @@ jobs:
           sudo apt-get install -y flawfinder clang-tidy bear python3 python3-pip gcc make eatmydata
           pip3 install --quiet semgrep
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ^1.25.x
       # Share the same built-tree cache key as every other libcoraza job so a warm
@@ -545,7 +545,7 @@ jobs:
           queries: security-extended
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ^1.25.x
 
@@ -633,7 +633,7 @@ jobs:
           key: nginx-src-${{ hashFiles('.github/versions.env') }}
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ^1.25.x
 
