@@ -727,9 +727,11 @@ ngx_http_coraza_build_waf(ngx_array_t *rules, ngx_log_t *log)
 		ngx_log_error(NGX_LOG_ERR, log, 0,
 					  "coraza: failed to create WAF: %s",
 					  error ? error : "unknown error");
+		coraza_free_string(error);
 		return 0;
 	}
 
+	coraza_free_string(error);
 	return waf;
 }
 
@@ -766,6 +768,12 @@ ngx_http_coraza_init_process(ngx_cycle_t *cycle)
 			char *err = NULL;
 			mmcf->waf = coraza_new_waf(cfg, &err);
 			coraza_free_waf_config(cfg);
+			if (mmcf->waf == 0) {
+				ngx_log_error(NGX_LOG_ERR, cycle->log, 0,
+							  "coraza: failed to create empty WAF: %s",
+							  err ? err : "unknown error");
+			}
+			coraza_free_string(err);
 		}
 	}
 	if (mmcf->waf == 0) {
