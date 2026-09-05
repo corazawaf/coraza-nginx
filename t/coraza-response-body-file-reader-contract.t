@@ -32,7 +32,7 @@ like($body_filter,
     'only in_file buffers with a file object reach the bounded reader');
 
 like($body_filter,
-    qr/ngx_http_coraza_append_response_body_file\(ctx, r,\s*chain->buf\) != NGX_OK\)\s*\{\s*(?:return ngx_http_coraza_body_filter_finalize\(r, ctx,\s*NGX_HTTP_INTERNAL_SERVER_ERROR\);|if \(ctx->headers_delayed\) \{\s*ctx->headers_delayed = 0;\s*return NGX_HTTP_INTERNAL_SERVER_ERROR;\s*\}\s*return ngx_http_filter_finalize_request\()/s,
+    qr/ngx_http_coraza_append_response_body_file\(ctx, r,\s*chain->buf\) != NGX_OK\)\s*\{\s*(?:return ngx_http_coraza_body_filter_finalize\(r, ctx, in,\s*NGX_HTTP_INTERNAL_SERVER_ERROR\);|if \(ctx->headers_delayed\) \{\s*ctx->headers_delayed = 0;\s*return NGX_HTTP_INTERNAL_SERVER_ERROR;\s*\}\s*return ngx_http_filter_finalize_request\()/s,
     'file inspection failures use the normal fail-closed response path');
 
 like($body_filter,

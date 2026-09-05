@@ -127,6 +127,30 @@ http {
             ';
         }
 
+        # A proxied phase-4 REDIRECT whose origin body keeps arriving after the
+        # redirect went out.  Coraza evaluates phase 4 as soon as the response
+        # body reaches SecResponseBodyLimit, so with a 512 KiB origin body
+        # behind 4k proxy buffers the redirect fires at 64 KiB while the pipe
+        # still has hundreds of buffers to deliver in later body-filter calls.
+        # The chain in hand must be marked consumed (an unconsumed pipe buffer
+        # stalls the pipe and the connection never closes), and every later
+        # call must swallow its buffers: nothing checks r->header_only between
+        # the body filter and the write filter, so a pass-through leaks raw
+        # origin bytes after the 302 on HTTP/1.0, which is what http_get speaks.
+        location /proxied-redirect.txt {
+            coraza_delay_response_headers on;
+            proxy_buffer_size 4k;
+            proxy_buffers 8 4k;
+            proxy_pass http://127.0.0.1:8081/big.txt;
+            coraza_rules '
+                SecRuleEngine On
+                SecResponseBodyAccess On
+                SecResponseBodyMimeType text/plain
+                SecResponseBodyLimit 65536
+                SecRule RESPONSE_BODY "@rx BLOCK ME" "id:304,phase:4,log,status:302,redirect:http://www.example.com/blocked"
+            ';
+        }
+
         # Control: identical config, but the body does not contain the trigger,
         # so the delayed 200 is released intact.
         location /pass.txt {
@@ -160,6 +184,9 @@ http {
         location /origin-body-content.txt {
             internal;
         }
+
+        location /big.txt {
+        }
     }
 }
 EOF
@@ -170,13 +197,13 @@ my $denied = "DENIED-BY-PHASE4-ERROR-PAGE\n";
 $t->write_file("/denied-403.html", $denied);
 $t->write_file("/block.txt", $origin);
 $t->write_file("/redirect.txt", $origin);
-$t->write_file("/origin-redirect.txt", $origin);
+$t->write_file("/big.txt", "BLOCK ME\n" . ("x" x (512 * 1024)));
 $t->write_file("/origin-body-content.txt", $origin);
 $t->write_file("/pass.txt", $clean);
 
 $t->run();
 $t->todo_alerts();
-$t->plan(11);
+$t->plan(14);
 
 ###############################################################################
 
@@ -211,6 +238,18 @@ like($redirect, qr{Location: http://www\.example\.com/blocked},
     'delayed redirect keeps the Location header');
 unlike($redirect, qr/\QBLOCK ME\E/,
     'buffered origin body is not leaked on a delayed redirect');
+
+# Same redirect, but the origin body outlives the body limit: the pipe keeps calling
+# the body filter after the 302 has gone out, and every one of those calls
+# must drop its buffers rather than pass them to the write filter.
+my $proxied = http_get('/proxied-redirect.txt');
+like($proxied, qr/^HTTP.*302/,
+    'proxied delayed redirect past the body limit -> redirect status');
+like($proxied, qr{Location: http://www\.example\.com/blocked},
+    'proxied delayed redirect keeps the Location header');
+my ($proxied_body) = $proxied =~ /\r\n\r\n(.*)\z/s;
+is(length($proxied_body // ''), 0,
+    'no origin bytes follow the header-only redirect on later pipe calls');
 
 # A deny on a response that already has its own Location must still finalize.
 my $origin_redir = http_get('/origin-redirect.txt');
