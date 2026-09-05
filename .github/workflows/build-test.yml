@@ -69,6 +69,14 @@ jobs:
         with:
           persist-credentials: false
 
+      # Source-text lint checks (t/README, lint/README): grep-based checks
+      # against src/*.c and friends that used to live in t/ and run through
+      # the nginx prove suite. They need no build, so run them once, early,
+      # on the same cell that runs the full prove suite below.
+      - name: Run source-text lint checks
+        if: matrix.full_tests
+        run: prove lint/*.t
+
       - name: Load version pins
         run: bash .github/scripts/load-versions.sh
 
