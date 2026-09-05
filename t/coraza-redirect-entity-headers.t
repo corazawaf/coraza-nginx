@@ -23,12 +23,15 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http/)->plan(7);
+my $t = Test::Nginx->new()->has(qw/http/)->plan(8);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -78,3 +81,6 @@ unlike($r, qr/^Content-Length: \d/mi, 'Content-Length cleared on redirect');
 unlike($r, qr/^Last-Modified:/mi, 'Last-Modified cleared on redirect');
 unlike($r, qr/^ETag:/mi, 'ETag cleared on redirect');
 unlike($r, qr/^Accept-Ranges:/mi, 'Accept-Ranges cleared on redirect');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

@@ -16,6 +16,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 
 use lib 'lib';
 use Test::Nginx;
+
+use lib '.';
+use coraza_crash_check;
 use Test::Nginx::HTTP2;
 
 ###############################################################################
@@ -23,7 +26,7 @@ use Test::Nginx::HTTP2;
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http http_v2 proxy/)->plan(23);
+my $t = Test::Nginx->new()->has(qw/http http_v2 proxy/)->plan(24);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -219,6 +222,9 @@ for $phase (1 .. 4) {
 	($frame) = grep { $_->{type} eq "DATA" } @$frames;
 	like($frame->{data}, qr/phase${phase}\?what=nothing\' not found/, "nothing phase ${phase}");
 }
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');
 
 ###############################################################################
 

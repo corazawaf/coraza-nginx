@@ -24,12 +24,15 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http/)->plan(5);
+my $t = Test::Nginx->new()->has(qw/http/)->plan(6);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -131,3 +134,6 @@ like(http_get('/on'), qr/^HTTP\S+ 403/,
 my $big = http_get('/big');
 like($big, qr/^HTTP\S+ 200.*AAAA/s,
 	'large (>60KB) response served promptly with SecResponseBodyAccess Off');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

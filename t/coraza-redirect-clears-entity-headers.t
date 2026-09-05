@@ -27,6 +27,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -69,7 +72,7 @@ EOF
 $t->todo_alerts();
 $t->run_daemon(\&http_daemon);
 $t->run()->waitforsocket('127.0.0.1:' . port(8081));
-$t->plan(14);
+$t->plan(15);
 
 ###############################################################################
 
@@ -138,3 +141,6 @@ sub http_daemon {
 }
 
 ###############################################################################
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

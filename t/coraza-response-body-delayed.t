@@ -31,6 +31,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -86,7 +89,7 @@ $t->write_file("/delayed", $body);
 
 $t->run();
 $t->todo_alerts();
-$t->plan(3);
+$t->plan(4);
 
 ###############################################################################
 
@@ -100,3 +103,6 @@ like($r, qr/\Q$body\E/, 'delayed + limit_rate response body delivered intact');
 my ($got) = $r =~ /\r\n\r\n(.*)$/s;
 is(length($got // ''), length($body),
     'delayed + limit_rate response body length matches (no truncation)');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

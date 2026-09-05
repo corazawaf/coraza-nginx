@@ -29,6 +29,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -129,7 +132,7 @@ $t->write_file("/phase4", "should not be moved/blocked, headers delivered before
 $t->write_file("/early-block", "should be moved/blocked before this.");
 $t->run();
 $t->todo_alerts();
-$t->plan(25);
+$t->plan(26);
 
 ###############################################################################
 
@@ -174,3 +177,6 @@ like(http_get('/phase4?what=nothing'), qr/should not be moved\/blocked, headers 
 
 # early block (https://github.com/SpiderLabs/Coraza-nginx/issues/238)
 like(http_get('/early-block'), qr/^HTTP.*403/, 'early block 403 (https://github.com/SpiderLabs/Coraza-nginx/issues/238)');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

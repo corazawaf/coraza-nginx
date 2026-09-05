@@ -18,6 +18,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -59,7 +62,7 @@ EOF
 
 $t->run();
 $t->todo_alerts();
-$t->plan(2);
+$t->plan(3);
 
 ###############################################################################
 
@@ -67,3 +70,6 @@ like(http_get('/?q=boom'), qr!^HTTP\S+ 403!,
 	'rule loaded from coraza_rules_file blocks attack');
 like(http_get('/?q=safe'), qr!^HTTP\S+ 200!,
 	'clean request passes with coraza_rules_file');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

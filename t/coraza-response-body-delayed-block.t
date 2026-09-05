@@ -22,6 +22,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -82,7 +85,7 @@ $t->write_file("/pass.txt", $clean);
 
 $t->run();
 $t->todo_alerts();
-$t->plan(3);
+$t->plan(4);
 
 ###############################################################################
 
@@ -92,3 +95,6 @@ like(http_get('/block.txt'), qr/^HTTP.*403/,
 my $r = http_get('/pass.txt');
 like($r, qr/^HTTP.*200/, 'non-matching delayed body -> released as 200');
 like($r, qr/\Q$clean\E/, 'non-matching delayed body delivered intact');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

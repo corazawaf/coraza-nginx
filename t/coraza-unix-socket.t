@@ -21,6 +21,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -63,7 +66,7 @@ EOF
 
 $t->run();
 $t->todo_alerts();
-$t->plan(1);
+$t->plan(2);
 
 ###############################################################################
 
@@ -82,3 +85,6 @@ while (<$s>) { $reply .= $_; }
 close $s;
 
 like($reply, qr/^HTTP\S+ 403/, 'AF_UNIX connection reported as REMOTE_ADDR "unix"');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

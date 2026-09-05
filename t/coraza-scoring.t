@@ -16,6 +16,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -66,7 +69,7 @@ EOF
 $t->write_file("/absolute", "should be moved/blocked before this.");
 $t->write_file("/iterative", "should be moved/blocked before this.");
 $t->run();
-$t->plan(5);
+$t->plan(6);
 
 ###############################################################################
 
@@ -77,3 +80,6 @@ like(http_get('/iterative?arg1=badarg1'), qr/should be moved\/blocked before thi
 like(http_get('/iterative?arg1=badarg1&arg2=badarg2'), qr/should be moved\/blocked before this./, 'iterative scoring 2 (pass)');
 like(http_get('/iterative?arg1=badarg1&arg2=badarg2&arg3=badarg3'), qr/^HTTP.*403/, 'iterative scoring 3 (block)');
 
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

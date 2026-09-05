@@ -34,6 +34,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 
 use lib 'lib';
 use Test::Nginx;
+
+use lib '.';
+use coraza_crash_check;
 use Test::Nginx::HTTP2;
 
 ###############################################################################
@@ -41,7 +44,7 @@ use Test::Nginx::HTTP2;
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http http_v2/)->plan(2);
+my $t = Test::Nginx->new()->has(qw/http http_v2/)->plan(3);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -87,3 +90,6 @@ my $sid = $s->new_stream({ path => '/conn' });
 my $frames = $s->read(all => [{ sid => $sid, fin => 1 }]);
 my ($frame) = grep { $_->{type} eq 'HEADERS' } @$frames;
 is($frame->{headers}->{':status'}, 200, 'h2: no synthetic Connection, request passes');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

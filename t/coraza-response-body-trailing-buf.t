@@ -33,6 +33,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -82,7 +85,7 @@ $t->write_file("/trailing", "MARK");
 
 $t->run();
 $t->todo_alerts();
-$t->plan(2);
+$t->plan(3);
 
 ###############################################################################
 
@@ -96,3 +99,6 @@ like($r, qr/^HTTP.*403/, 'phase-4 deny on rewritten (trailing-buffer) body');
 my @status = ($r =~ /^HTTP\/\d\.\d\s+\d{3}/mg);
 is(scalar(@status), 1,
     'exactly one status line (phase-4 finalize ran once)');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');
