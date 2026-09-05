@@ -28,11 +28,11 @@ like($body_filter,
     'direct I/O is disabled around reads into the reusable scratch buffer');
 
 like($body_filter,
-    qr/if \(!ngx_buf_in_memory\(chain->buf\).*?ngx_http_coraza_append_response_body_file\(ctx, r,\s*chain->buf\)/s,
-    'file-backed response buffers use the bounded reader');
+    qr/if \(!ngx_buf_in_memory\(chain->buf\)\s*&&\s*chain->buf->in_file\s*&&\s*chain->buf->file\)\s*\{\s*if \(ngx_http_coraza_append_response_body_file\(ctx, r,\s*chain->buf\)/s,
+    'only in_file buffers with a file object reach the bounded reader');
 
 like($body_filter,
-    qr/ngx_http_coraza_append_response_body_file\(ctx, r,\s*chain->buf\) != NGX_OK\).*?ngx_http_coraza_body_filter_finalize\(r, ctx,\s*NGX_HTTP_INTERNAL_SERVER_ERROR\)/s,
+    qr/ngx_http_coraza_append_response_body_file\(ctx, r,\s*chain->buf\) != NGX_OK\)\s*\{\s*(?:return ngx_http_coraza_body_filter_finalize\(r, ctx,\s*NGX_HTTP_INTERNAL_SERVER_ERROR\);|if \(ctx->headers_delayed\) \{\s*ctx->headers_delayed = 0;\s*return NGX_HTTP_INTERNAL_SERVER_ERROR;\s*\}\s*return ngx_http_filter_finalize_request\()/s,
     'file inspection failures use the normal fail-closed response path');
 
 like($body_filter,
