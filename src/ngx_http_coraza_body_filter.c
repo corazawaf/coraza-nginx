@@ -344,6 +344,16 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
             }
 
             ret = ngx_http_coraza_process_intervention(ctx, r, 0);
+            /*
+             * Mirror the r->error_page guard the other three poll sites
+             * (rewrite, pre_access, header_filter) apply right after their
+             * own poll: once nginx is already streaming the configured
+             * error page's body, a fresh deny here must not finalize the
+             * request a second time.
+             */
+            if (r->error_page) {
+                return ngx_http_next_body_filter(r, in);
+            }
             if (ret > 0) {
                 ctx->intervention_triggered = 1;
                 if (ctx->headers_delayed) {
@@ -400,6 +410,14 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
             }
 
             ret = ngx_http_coraza_poll_after_process(ctx, r, 0, pret);
+            /*
+             * Same r->error_page guard as above and as the other three poll
+             * sites: a phase-4 intervention while nginx is already streaming
+             * the configured error page's body must not finalize again.
+             */
+            if (r->error_page) {
+                return ngx_http_next_body_filter(r, in);
+            }
             if (ret > 0) {
                 ctx->intervention_triggered = 1;
                 if (ctx->headers_delayed) {
