@@ -321,6 +321,16 @@ ngx_http_coraza_body_filter_finalize(ngx_http_request_t *r,
 }
 
 
+static ngx_int_t
+ngx_http_coraza_body_filter_internal_error(ngx_http_request_t *r,
+    ngx_http_coraza_ctx_t *ctx, ngx_chain_t *in)
+{
+    ctx->intervention_triggered = 1;
+    return ngx_http_coraza_body_filter_finalize(r, ctx, in,
+        NGX_HTTP_INTERNAL_SERVER_ERROR);
+}
+
+
 ngx_int_t
 ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
@@ -510,7 +520,7 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         if (ctx->headers_delayed) {
             ngx_chain_t *cl = ngx_alloc_chain_link(r->pool);
             if (cl == NULL) {
-                return NGX_ERROR;
+                return ngx_http_coraza_body_filter_internal_error(r, ctx, in);
             }
 
             if (is_last) {
@@ -535,7 +545,8 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                      */
                     b = ngx_calloc_buf(r->pool);
                     if (b == NULL) {
-                        return NGX_ERROR;
+                        return ngx_http_coraza_body_filter_internal_error(r, ctx,
+                            in);
                     }
 
                     *b = *chain->buf;
@@ -564,12 +575,14 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                     if (ngx_http_coraza_read_body_data(r, chain->buf, &data, &len)
                         != NGX_OK)
                     {
-                        return NGX_ERROR;
+                        return ngx_http_coraza_body_filter_internal_error(r, ctx,
+                            in);
                     }
 
                     b = ngx_calloc_buf(r->pool);
                     if (b == NULL) {
-                        return NGX_ERROR;
+                        return ngx_http_coraza_body_filter_internal_error(r, ctx,
+                            in);
                     }
 
                     if (len > 0) {
@@ -580,7 +593,8 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                          */
                         u_char *copy = ngx_pnalloc(r->pool, len);
                         if (copy == NULL) {
-                            return NGX_ERROR;
+                            return ngx_http_coraza_body_filter_internal_error(r,
+                                ctx, in);
                         }
                         ngx_memcpy(copy, data, len);
                         b->pos    = copy;
