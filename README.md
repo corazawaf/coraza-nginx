@@ -272,13 +272,13 @@ You may also take a look at recent bug reports and open issues to get an idea of
 Along with the manual testing, we strongly recommend that you use the nginx test
 utility to make sure that your patch does not adversely affect the behavior or performance of nginx.
 
-The nginx tests are available on: http://hg.nginx.org/nginx-tests/
+The nginx tests are available on: https://github.com/nginx/nginx-tests
 
 To use those tests, make sure you have the Perl utility prove (part of Perl 5)
 and proceed with the following commands:
 
 ```
-$ wget http://hg.nginx.org/nginx-tests/archive/tip.tar.gz
+$ wget https://github.com/nginx/nginx-tests/archive/refs/heads/master.tar.gz -O tip.tar.gz
 $ tar xzf tip.tar.gz
 $ cp /path/to/coraza-nginx/t/* nginx-tests-*/
 $ cd nginx-tests-*
