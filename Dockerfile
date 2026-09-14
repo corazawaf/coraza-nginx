@@ -77,7 +77,7 @@ COPY ./t /tmp/t
 
 RUN apt-get update -qq && \
     apt-get install -qq --no-install-recommends curl perl && \
-    curl http://hg.nginx.org/nginx-tests/archive/tip.tar.gz -o tip.tar.gz && \
+    curl -sSL https://github.com/nginx/nginx-tests/archive/refs/heads/master.tar.gz -o tip.tar.gz && \
     tar xzf tip.tar.gz && \
     cd nginx-tests-* && \
     cp /tmp/t/* . && \
