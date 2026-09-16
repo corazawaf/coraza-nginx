@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.21.1](https://github.com/corazawaf/coraza-nginx/compare/v0.21.0...v0.21.1) (2026-09-16)
+
+
+### Bug Fixes
+
+* finalize delayed-header responses instead of returning a bare status ([#122](https://github.com/corazawaf/coraza-nginx/issues/122)) ([4c85346](https://github.com/corazawaf/coraza-nginx/commit/4c85346d22514fe26d0bc08a689500f1c4a6ed7d))
+* guard body filter error pages and header filter loc conf ([#123](https://github.com/corazawaf/coraza-nginx/issues/123)) ([ae515a5](https://github.com/corazawaf/coraza-nginx/commit/ae515a55664c559577f3cda964170d29bb7ff8a2))
+* intervention poll consistency in the pre-access handler ([#124](https://github.com/corazawaf/coraza-nginx/issues/124)) ([61e8c14](https://github.com/corazawaf/coraza-nginx/commit/61e8c14ae1341e47ffce29b814d23794e4eab90a))
+* reject premature response file EOF ([#120](https://github.com/corazawaf/coraza-nginx/issues/120)) ([57ac5da](https://github.com/corazawaf/coraza-nginx/commit/57ac5da6f48c1370222a3de7dd0559b27c8a2578))
+* reject ruleless Coraza enablement ([#118](https://github.com/corazawaf/coraza-nginx/issues/118)) ([ced32f6](https://github.com/corazawaf/coraza-nginx/commit/ced32f6b509584f5887a82ee322cf710d93d04ed))
+* stop double-submitting proxied headers; free the WAF error string ([#125](https://github.com/corazawaf/coraza-nginx/issues/125)) ([4872414](https://github.com/corazawaf/coraza-nginx/commit/4872414e3d9d87f51026d751c63ae38797871bab))
+* submit the request body to Coraza exactly once ([#126](https://github.com/corazawaf/coraza-nginx/issues/126)) ([cd2a70c](https://github.com/corazawaf/coraza-nginx/commit/cd2a70c95d051f2f55f2af3c684d71320a31a442))
+
+
+### Performance Improvements
+
+* bound file-backed response inspection ([#119](https://github.com/corazawaf/coraza-nginx/issues/119)) ([1706b75](https://github.com/corazawaf/coraza-nginx/commit/1706b75b29f0b17fee05a59738f653999d760dc9))
+* deduplicate WAFs by ordered rule content ([#135](https://github.com/corazawaf/coraza-nginx/issues/135)) ([1f0b73e](https://github.com/corazawaf/coraza-nginx/commit/1f0b73ead9e84622ac13fd81a779dda127963c06))
+* read request tempfiles in 64 KiB chunks ([#115](https://github.com/corazawaf/coraza-nginx/issues/115)) ([6efa914](https://github.com/corazawaf/coraza-nginx/commit/6efa9144d0da19f124f9fbc1c41e68aacb4b0865))
+* skip inaccessible request body buffering ([#113](https://github.com/corazawaf/coraza-nginx/issues/113)) ([7d268d4](https://github.com/corazawaf/coraza-nginx/commit/7d268d4a819bb56d1814fa97780261a648320950))
+* trim request hot-path overhead ([#134](https://github.com/corazawaf/coraza-nginx/issues/134)) ([80bff01](https://github.com/corazawaf/coraza-nginx/commit/80bff0116caa0c567a13f3775fa155f28912ef06))
+
 ## [0.21.0](https://github.com/corazawaf/coraza-nginx/compare/v0.20.1...v0.21.0) (2026-08-30)
 
 
