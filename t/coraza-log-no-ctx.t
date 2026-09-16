@@ -19,6 +19,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -60,7 +63,7 @@ http {
 EOF
 
 $t->run();
-$t->plan(2);
+$t->plan(3);
 
 ###############################################################################
 
@@ -74,3 +77,6 @@ like(http_get($big), qr/^HTTP\S+ 414/,
 # The worker survived the NULL-context log path and still serves normally.
 like(http_get('/'), qr/^HTTP\S+ 200/,
     'worker healthy after logging a context-less request');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

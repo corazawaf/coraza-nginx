@@ -18,6 +18,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -70,7 +73,7 @@ EOF
 
 $t->run();
 $t->todo_alerts();
-$t->plan(3);
+$t->plan(4);
 
 ###############################################################################
 
@@ -85,3 +88,6 @@ like(http_get('/byuri/forbidden/x'), qr/^HTTP\S+ 403/,
 # Positive control: a non-matching URI on the same location passes.
 like(http_get('/byuri/allowed'), qr/^HTTP\S+ 200/,
     'non-matching URI not blocked (control)');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

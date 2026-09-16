@@ -29,6 +29,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -140,7 +143,7 @@ mkdir($t->testdir() . '/subfolder3/subfolder4');
 $t->write_file("/subfolder3/subfolder4/index.html", "should be moved/blocked before this.");
 
 $t->run();
-$t->plan(9);
+$t->plan(10);
 
 ###############################################################################
 
@@ -226,3 +229,6 @@ like($subfolder4, qr/what=subfolder3/, 'subfolder4 / subfolder3');
 
 like($subfolder4, qr/what=subfolder4withE/, 'subfolder4');
 like($subfolder4, qr/-E--/, 'subfolder4 - E section via ctl:auditLogParts=+E');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

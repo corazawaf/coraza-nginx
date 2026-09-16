@@ -14,6 +14,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -92,7 +95,7 @@ $t->write_file("/server_ver_block", "server header matched");
 
 $t->run();
 $t->todo_alerts();
-$t->plan(4);
+$t->plan(5);
 
 ###############################################################################
 
@@ -110,3 +113,6 @@ like(http_get('/server_ver_pass', PeerAddr => $peer8081), qr/^HTTP.*200/,
 
 like(http_get('/server_ver_block', PeerAddr => $peer8081), qr/^HTTP.*403/,
 	'nginx/<ver> synthetic Server header can be matched');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

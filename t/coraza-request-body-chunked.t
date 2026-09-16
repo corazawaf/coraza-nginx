@@ -34,6 +34,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -160,9 +163,7 @@ like(chunked_post('/body-file', ['D' x 4096, 'BADBODY', 'E' x 4096]),
 	qr!^HTTP/1.1 403!,
 	'chunked body spilled to a temp file is inspected');
 
-$t->stop();
-
-unlike($t->read_file('error.log'), qr/signal 11|SIGSEGV|AddressSanitizer/,
+coraza_crash_check::assert_no_crash($t,
 	'no crash handling chunked or temp-file bodies');
 
 ###############################################################################

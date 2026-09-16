@@ -26,6 +26,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -97,7 +100,7 @@ EOF
 
 $t->run();
 $t->todo_alerts();
-$t->plan(4);
+$t->plan(5);
 
 ###############################################################################
 
@@ -117,3 +120,6 @@ like(http_get('/phase4-control'), qr/^HTTP\S+ 418/,
 # Control: a clean request never routes through the error page at all.
 like(http_get('/trigger?x=safe'), qr/^HTTP\S+ 200/,
     'clean request passes without error-page re-entry (control)');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

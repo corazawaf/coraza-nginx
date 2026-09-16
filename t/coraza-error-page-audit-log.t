@@ -34,6 +34,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -96,7 +99,7 @@ $t->write_file('page-plain.html', 'should not reach');
 
 $t->run();
 $t->todo_alerts();
-$t->plan(5);
+$t->plan(6);
 
 ###############################################################################
 
@@ -130,3 +133,6 @@ my @counts = (
 );
 is_deeply(\@counts, [1, 1],
     'exactly one audit record per denial, with and without error_page');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

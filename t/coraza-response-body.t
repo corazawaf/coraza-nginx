@@ -16,6 +16,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -103,7 +106,7 @@ $t->write_file("/body_file_block", $file_body);
 
 $t->run();
 $t->todo_alerts();
-$t->plan(7);
+$t->plan(8);
 
 ###############################################################################
 
@@ -122,3 +125,6 @@ like($r, qr/^HTTP.*403/,
     'phase 4 blocks on a marker beyond the first file chunk');
 unlike($r, qr/\QEND-MARKER\E/,
     'clean phase-4 block does not leak the inspected file body');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

@@ -16,12 +16,18 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->plan(4)->write_file_expand('nginx.conf', <<'EOF');
+# plan() counts only this file's own assertions -- Test::Nginx adds its two
+# teardown checks ("no alerts" / "no sanitizer errors") to the plan itself.
+# Six named checks below plus assert_no_crash()'s one makes seven.
+my $t = Test::Nginx->new()->plan(7)->write_file_expand('nginx.conf', <<'EOF');
 
 %%TEST_GLOBALS%%
 
@@ -111,13 +117,34 @@ EOF
 
 isnt(lines($t, 'e_s2l1.log', 'unique_id "tid-SERVER-DEFAULT-'), 0, 'server default');
 
+# A second request through the same http-default location must mint a
+# different transaction id -- the pattern being logged is a template
+# ($request_id varies per request), not a fixed literal string reused for
+# every transaction.
+http(<<EOF);
+GET /?what=block403 HTTP/1.0
+Host: server1
+
+EOF
+
+my $id1 = transaction_id($t, 'e_s1l1.log', 'tid-HTTP-DEFAULT-');
+my $id2 = transaction_id($t, 'e_s1l1.log', 'tid-HTTP-DEFAULT-', 2);
+ok(defined $id1 && defined $id2 && $id1 ne $id2,
+	'http default: two requests through the same location get distinct transaction ids');
+
 http(<<EOF);
 GET /specific/?what=block403 HTTP/1.0
 Host: server2
 
 EOF
 
-isnt(lines($t, 'e_s2l2.log', 'unique_id "tid-LOCATION-SPECIFIC-'), 0, 'location specific');
+# The location-level coraza_transaction_id must override the server-level
+# default it sits under, not merely add its own log line alongside it: the
+# server2 default template must NOT appear in the location's own log.
+isnt(lines($t, 'e_s2l2.log', 'unique_id "tid-LOCATION-SPECIFIC-'), 0,
+	'location specific: overriding template is used');
+is(lines($t, 'e_s2l2.log', 'unique_id "tid-SERVER-DEFAULT-'), 0,
+	'location specific: server-level template is not also logged (real override, not addition)');
 
 http(<<EOF);
 GET /debuglog/?what=block403 HTTP/1.0
@@ -138,4 +165,28 @@ sub lines {
 	return $value;
 }
 
+# Return the Nth (1-based, default 1) matched full transaction-id line's
+# id-bearing suffix, so two ids from the same file can be compared for
+# uniqueness across requests.
+sub transaction_id {
+	my ($t, $file, $prefix, $n) = @_;
+	$n ||= 1;
+	my $path = $t->testdir() . '/' . $file;
+	open my $fh, '<', $path or return undef;
+	my $seen = 0;
+	while (my $line = <$fh>) {
+		next unless $line =~ /unique_id "(\Q$prefix\E[^"]*)"/;
+		$seen++;
+		if ($seen == $n) {
+			close $fh;
+			return $1;
+		}
+	}
+	close $fh;
+	return undef;
+}
+
 ###############################################################################
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

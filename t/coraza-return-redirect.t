@@ -21,12 +21,15 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http rewrite/)->plan(4);
+my $t = Test::Nginx->new()->has(qw/http rewrite/)->plan(5);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -83,3 +86,6 @@ like($r, qr!Location: \S*/wiki/Main_Page!, 'Location header preserved on return 
 like(http_get('/notfound'), qr/^HTTP\S+ 404/, 'return 404 reaches client with coraza on');
 
 like(http_get('/gone'), qr/gone body/, 'return with inline body reaches client');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

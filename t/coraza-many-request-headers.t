@@ -20,6 +20,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -62,7 +65,7 @@ EOF
 
 $t->run();
 $t->todo_alerts();
-$t->plan(2);
+$t->plan(3);
 
 ###############################################################################
 
@@ -81,3 +84,6 @@ like(many_headers("clean"), qr!^HTTP\S+ 200!,
 	'40-header request traverses multi-part list and passes');
 like(many_headers("boom"), qr!^HTTP\S+ 403!,
 	'header in a later list part is inspected and blocks');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

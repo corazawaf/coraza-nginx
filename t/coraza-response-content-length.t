@@ -20,6 +20,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -73,7 +76,7 @@ $t->write_file("/nonempty", "hello");
 
 $t->run();
 $t->todo_alerts();
-$t->plan(2);
+$t->plan(3);
 
 ###############################################################################
 
@@ -82,3 +85,6 @@ like(http_get('/empty'), qr/^HTTP.*403/,
 
 like(http_get('/nonempty'), qr/^HTTP.*200/,
 	'non-zero Content-Length does not match the zero-length rule');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

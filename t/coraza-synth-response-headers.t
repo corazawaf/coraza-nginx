@@ -21,12 +21,15 @@ BEGIN { chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http/)->plan(9);
+my $t = Test::Nginx->new()->has(qw/http/)->plan(10);
 
 my $root = "$FindBin::Bin/..";
 my $src  = slurp("$root/src/ngx_http_coraza_header_filter.c");
@@ -169,3 +172,6 @@ sub slurp {
     local $/ = undef;
     return <$fh>;
 }
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

@@ -25,6 +25,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -74,7 +77,7 @@ EOF
 
 $t->run();
 $t->todo_alerts();
-$t->plan(5);
+$t->plan(6);
 
 ###############################################################################
 
@@ -88,3 +91,6 @@ like($r307, qr!Location: http://example.org/p!, 'Location present for 307');
 
 # Positive control: a clean request must NOT redirect.
 like(http_get('/r303?x=safe'), qr!^HTTP\S+ 200!, 'clean request not redirected');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

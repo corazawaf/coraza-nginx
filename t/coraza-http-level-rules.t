@@ -22,6 +22,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -77,7 +80,7 @@ EOF
 
 $t->run();
 $t->todo_alerts();
-$t->plan(5);
+$t->plan(6);
 
 ###############################################################################
 
@@ -125,3 +128,6 @@ my $rc = $?;
 isnt($rc, 0, 'nginx rejects coraza on when the http block declares no rules at all');
 like($out, qr/"coraza on" requires at least one inherited or configured rule/,
     'ruleless coraza configuration reports the fail-closed error');
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

@@ -37,12 +37,15 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http/)->plan(13);
+my $t = Test::Nginx->new()->has(qw/http/)->plan(14);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -274,3 +277,6 @@ if ($log =~ /coraza: \S+ loaded via dynlib_open \(libcoraza (\d+)\.(\d+)\.\d+\)/
 } else {
     fail('connector did not log the libcoraza version at load');
 }
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

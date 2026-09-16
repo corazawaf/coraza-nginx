@@ -20,6 +20,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -63,7 +66,7 @@ http {
 EOF
 
 $t->run();
-$t->plan(2);
+$t->plan(3);
 
 my $testdir = $t->testdir();
 
@@ -96,3 +99,6 @@ like($out, qr/invalid number of arguments in "coraza_transaction_id"/,
 	'error names coraza_transaction_id arity');
 
 ###############################################################################
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

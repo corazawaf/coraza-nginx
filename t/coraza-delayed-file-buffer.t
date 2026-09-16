@@ -19,6 +19,9 @@ BEGIN { chdir($FindBin::Bin); }
 use lib 'lib';
 use Test::Nginx;
 
+use lib '.';
+use coraza_crash_check;
+
 ###############################################################################
 
 select STDERR; $| = 1;
@@ -26,7 +29,7 @@ select STDOUT; $| = 1;
 
 my $root = "$FindBin::Bin/..";
 my $src = slurp("$root/src/ngx_http_coraza_body_filter.c");
-my $t = Test::Nginx->new()->has(qw/http/)->plan(12);
+my $t = Test::Nginx->new()->has(qw/http/)->plan(13);
 
 like($src,
     qr/!\s*ngx_buf_in_memory\(chain->buf\)\s*&&\s*chain->buf->in_file\s*&&\s*chain->buf->file\s*!=\s*NULL\s*&&\s*!\s*chain->buf->temp_file.*?\*b\s*=\s*\*chain->buf/s,
@@ -169,16 +172,24 @@ is(length($body // ''), $cap_size,
 # assert the early-flush warning explicitly.
 #
 # NOTE: this pins the cap + intact-body behaviour on the in-memory path only.
-# It does NOT cover the file-backed clone branch this change fixes: with
-# sendfile off nginx copies the file into memory buffers, so the cap trips via
-# the pre-existing "ctx->pending_bytes += len" path, and this assertion still
-# passes with the file-range charge reverted. Covering the clone branch needs a
-# producer of repeated *non-final* non-temp file buffers -- ngx_http_static
-# cannot do it (it emits the whole file as one last_buf buffer, see
-# ngx_http_static_module.c: b->file_last = of.size; b->last_buf = 1), and
-# upstream temp files are excluded by the !temp_file guard. Until such a
-# producer exists here, the file-range charge is pinned by the source-shape
-# assertion near the top of this file.
+# It does NOT cover the file-backed clone branch this change fixes. In this
+# test, ngx_http_copy_filter_module runs before this module's body filter (this
+# module's own `config`
+# build script places it, via ngx_module_order, ahead of the copy filter in
+# nginx's module list -- which for the ngx_http_top_body_filter wrap chain
+# means copy_filter's postconfiguration runs *later* and therefore wraps as
+# the *first*-called filter). With sendfile off here, copy filter resolves
+# every file buffer to memory before Coraza's body filter runs, confirmed with
+# an instrumented local build across every producer tried, including a
+# multi-range request against a static file with sendfile off (the
+# strongest known candidate for repeated non-final, non-temp file buffers).
+# ngx_http_static cannot help either way (it emits the whole file as one
+# last_buf buffer: ngx_http_static_module.c sets b->file_last = of.size;
+# b->last_buf = 1), and upstream temp files are excluded by the !temp_file
+# guard. With sendfile enabled and no in-memory requirement, copy filter may
+# preserve file-backed buffers, so the clone branch is not assumed dead. It is
+# pinned by the source-shape assertion near the top of this file until a stable
+# runtime producer exercises the non-final shape directly.
 like($t->read_file('error.log'),
     qr/coraza: delayed response body exceeded \d+ bytes; flushing headers early/,
     'oversized delayed response tripped the delayed-body cap (in-memory path)');
@@ -192,3 +203,6 @@ sub slurp {
     local $/ = undef;
     return <$fh>;
 }
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');

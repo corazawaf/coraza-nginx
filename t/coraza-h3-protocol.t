@@ -26,6 +26,9 @@ BEGIN { use FindBin; chdir($FindBin::Bin); }
 
 use lib 'lib';
 use Test::Nginx;
+
+use lib '.';
+use coraza_crash_check;
 use Test::Nginx::HTTP3;
 
 ###############################################################################
@@ -34,7 +37,7 @@ select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
 my $t = Test::Nginx->new()->has(qw/http http_v3 cryptx/)
-	->has_daemon('openssl')->plan(4);
+	->has_daemon('openssl')->plan(5);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -156,3 +159,6 @@ sub get_status {
 	return undef unless defined $frame;
 	return $frame->{headers}->{':status'};
 }
+
+coraza_crash_check::assert_no_crash($t,
+	'no worker crash in error.log');
