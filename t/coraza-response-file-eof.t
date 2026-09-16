@@ -11,7 +11,15 @@ use File::Temp qw(tempdir);
 use FindBin;
 
 my $nginx = $ENV{TEST_NGINX_SOURCE};
-my $coraza_include = $ENV{TEST_LIBCORAZA_INCLUDE} || '/usr/local/include';
+# CI installs libcoraza under /usr/local; a distribution package lands in
+# /usr.  Probe both so the harness is not silently skipped on either.  An
+# explicit TEST_LIBCORAZA_INCLUDE always wins; otherwise the first hit wins
+# deliberately -- that mirrors the linker's own search order, so a host with
+# stale headers under /usr/local and the real library under /usr still
+# compiles against the same set the linker would resolve against.
+my ($coraza_include) = grep { -f "$_/coraza/coraza.h" }
+    ($ENV{TEST_LIBCORAZA_INCLUDE} ? ($ENV{TEST_LIBCORAZA_INCLUDE})
+                                  : qw(/usr/local/include /usr/include));
 
 # Walk up looking for the module source tree.  CI copies t/* into an unpacked
 # nginx-tests directory and proves from there, so $FindBin::Bin/../src is the
@@ -57,9 +65,9 @@ for my $dir (@needed) {
 plan skip_all => 'module source tree not found'
     unless defined $root;
 plan skip_all => 'coraza headers not available'
-    unless -f "$coraza_include/coraza/coraza.h";
+    unless defined $coraza_include;
 
-plan tests => 10;
+plan tests => 11;
 
 my $tmp = tempdir(CLEANUP => 1);
 my $source = "$tmp/response-file-eof.c";
@@ -77,6 +85,15 @@ print {$fh} <<'EOF';
 #undef static
 
 static int force_eof;
+static off_t  truncate_at;
+static size_t appended_total;
+static int    append_calls;
+static int    alloc_calls;
+static int    alloc_fail;
+static int    append_fail;
+static int    force_error;
+static int    read_calls;
+static int    short_read;
 static int fail_chain_link;
 static int fail_pcalloc;
 static int fail_pnalloc;
@@ -163,6 +180,13 @@ void *
 ngx_alloc(size_t size, ngx_log_t *log)
 {
     (void) log;
+
+    alloc_calls++;
+
+    if (alloc_fail) {
+        return NULL;
+    }
+
     return malloc(size);
 }
 
@@ -192,8 +216,11 @@ coraza_append_response_body(coraza_transaction_t transaction,
 {
     (void) transaction;
     (void) data;
-    (void) length;
-    return 0;
+
+    append_calls++;
+    appended_total += (size_t) length;
+
+    return append_fail ? -1 : 0;
 }
 
 int
@@ -217,10 +244,34 @@ ssize_t
 ngx_read_file(ngx_file_t *file, u_char *buf, size_t size, off_t offset)
 {
     (void) file;
-    (void) offset;
+
+    read_calls++;
 
     if (force_eof) {
         return 0;
+    }
+
+    if (force_error) {
+        return NGX_ERROR;
+    }
+
+    if (truncate_at > 0) {
+        if (offset >= truncate_at) {
+            return 0;
+        }
+
+        if (offset + (off_t) size > truncate_at) {
+            size = (size_t) (truncate_at - offset);
+        }
+    }
+
+    /*
+     * Short reads are the ordinary pread()/signal case.  Halving each read
+     * keeps the loop honest: the reader must advance by what it actually got
+     * and submit only those bytes, never the full requested size.
+     */
+    if (short_read && size > 1) {
+        size /= 2;
     }
 
     memset(buf, 'A', size);
@@ -235,6 +286,243 @@ ngx_log_error_core(ngx_uint_t level, ngx_log_t *log, ngx_err_t err,
     (void) log;
     (void) err;
     (void) fmt;
+}
+
+static int
+run_chunked_reader_cases(void)
+{
+    ngx_http_coraza_ctx_t  ctx;
+    ngx_http_request_t  request;
+    ngx_connection_t    connection;
+    ngx_pool_t          pool;
+    ngx_log_t           log;
+    ngx_buf_t           buffer;
+    ngx_file_t          file;
+
+    memset(&request, 0, sizeof(request));
+    memset(&connection, 0, sizeof(connection));
+    memset(&pool, 0, sizeof(pool));
+    memset(&log, 0, sizeof(log));
+    memset(&buffer, 0, sizeof(buffer));
+    memset(&file, 0, sizeof(file));
+
+    request.pool = &pool;
+    request.connection = &connection;
+    connection.log = &log;
+
+    /*
+     * Bounded chunked reader, ngx_http_coraza_append_response_body_file().
+     * The range spans more than one 64 KiB chunk so the loop iterates, and
+     * the backing file is short of buf->file_last -- the shape a response
+     * temp/static file takes when it is truncated after the buffer recorded
+     * its length.  The second ngx_read_file() therefore returns 0.
+     */
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&buffer, 0, sizeof(buffer));
+    buffer.in_file = 1;
+    buffer.file = &file;
+    buffer.file_pos = 0;
+
+    /*
+     * Deliberately NOT a whole multiple of the chunk size: the final chunk is
+     * short, so the clamp's else-branch (size = file_last - offset) is
+     * exercised rather than every read being a full 64 KiB.
+     */
+    buffer.file_last = 3 * NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE + 100;
+
+    truncate_at = NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE;
+    appended_total = 0;
+    append_calls = 0;
+
+    if (ngx_http_coraza_append_response_body_file(&ctx, &request, &buffer)
+        != NGX_ERROR)
+    {
+        /* premature EOF mid-range must fail closed, not report success */
+        return 3;
+    }
+
+    if (!ctx.intervention_triggered) {
+        return 4;
+    }
+
+    /* Only the bytes that really existed were inspected. */
+    if (appended_total != NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE
+        || append_calls != 1)
+    {
+        return 5;
+    }
+
+    /* Negative control: an intact multi-chunk range succeeds in full. */
+    memset(&ctx, 0, sizeof(ctx));
+    truncate_at = 0;
+    appended_total = 0;
+    append_calls = 0;
+
+    if (ngx_http_coraza_append_response_body_file(&ctx, &request, &buffer)
+        != NGX_OK)
+    {
+        return 6;
+    }
+
+    if (appended_total
+            != (size_t) (3 * NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE
+                         + 100)
+        || append_calls != 4)
+    {
+        return 7;
+    }
+
+    /*
+     * Coraza rejects an intact chunk (append_fail): the chunked reader must
+     * fail closed and flag intervention, exercising body_filter.c:190.
+     */
+    memset(&ctx, 0, sizeof(ctx));
+    truncate_at = 0;
+    appended_total = 0;
+    append_calls = 0;
+    append_fail = 1;
+
+    if (ngx_http_coraza_append_response_body_file(&ctx, &request, &buffer)
+        != NGX_ERROR)
+    {
+        return 8;
+    }
+
+    if (!ctx.intervention_triggered) {
+        return 9;
+    }
+
+    append_fail = 0;
+
+    /*
+     * Short reads: every byte of the range must still be inspected, and the
+     * reader must advance by what ngx_read_file() returned rather than by the
+     * size it asked for.  Advancing by the requested size would skip the
+     * unread remainder past the WAF.
+     */
+    memset(&ctx, 0, sizeof(ctx));
+    truncate_at = 0;
+    appended_total = 0;
+    append_calls = 0;
+    short_read = 1;
+
+    if (ngx_http_coraza_append_response_body_file(&ctx, &request, &buffer)
+        != NGX_OK)
+    {
+        return 10;
+    }
+
+    if (appended_total
+        != (size_t) (3 * NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE + 100))
+    {
+        return 11;
+    }
+
+    short_read = 0;
+
+    /*
+     * A mid-file range: the reader must start at buf->file_pos, not at 0.
+     * Response chains routinely describe a window into a larger file.
+     */
+    memset(&ctx, 0, sizeof(ctx));
+    truncate_at = 0;
+    appended_total = 0;
+    append_calls = 0;
+
+    buffer.file_pos = NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE;
+    buffer.file_last = 3 * NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE;
+
+    if (ngx_http_coraza_append_response_body_file(&ctx, &request, &buffer)
+        != NGX_OK)
+    {
+        return 12;
+    }
+
+    if (appended_total
+            != (size_t) (2 * NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE)
+        || append_calls != 2)
+    {
+        return 13;
+    }
+
+    /* An empty range must return early without reading anything. */
+    memset(&ctx, 0, sizeof(ctx));
+    appended_total = 0;
+    append_calls = 0;
+
+    buffer.file_pos = NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE;
+    buffer.file_last = NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE;
+
+    if (ngx_http_coraza_append_response_body_file(&ctx, &request, &buffer)
+        != NGX_OK
+        || append_calls != 0)
+    {
+        return 14;
+    }
+
+    /* A read error must fail closed after one attempted read. */
+    memset(&ctx, 0, sizeof(ctx));
+    alloc_calls = 0;
+    appended_total = 0;
+    append_calls = 0;
+    read_calls = 0;
+    force_error = 1;
+
+    buffer.file_pos = 0;
+    buffer.file_last = NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE;
+
+    if (ngx_http_coraza_append_response_body_file(&ctx, &request, &buffer)
+            != NGX_ERROR
+        || !ctx.intervention_triggered
+        || alloc_calls != 1
+        || read_calls != 1
+        || append_calls != 0)
+    {
+        return 15;
+    }
+
+    force_error = 0;
+
+    /* An inverted range must be rejected before allocation or I/O. */
+    memset(&ctx, 0, sizeof(ctx));
+    alloc_calls = 0;
+    append_calls = 0;
+    read_calls = 0;
+
+    buffer.file_pos = NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE;
+    buffer.file_last = 0;
+
+    if (ngx_http_coraza_append_response_body_file(&ctx, &request, &buffer)
+            != NGX_ERROR
+        || !ctx.intervention_triggered
+        || alloc_calls != 0
+        || read_calls != 0
+        || append_calls != 0)
+    {
+        return 16;
+    }
+
+    /* Scratch-buffer allocation failure must stop before read or append. */
+    memset(&ctx, 0, sizeof(ctx));
+    alloc_calls = 0;
+    append_calls = 0;
+    read_calls = 0;
+    alloc_fail = 1;
+
+    buffer.file_pos = 0;
+    buffer.file_last = NGX_HTTP_CORAZA_RESPONSE_BODY_FILE_CHUNK_SIZE;
+
+    if (ngx_http_coraza_append_response_body_file(&ctx, &request, &buffer)
+            != NGX_ERROR
+        || !ctx.intervention_triggered
+        || alloc_calls != 1
+        || read_calls != 0
+        || append_calls != 0)
+    {
+        return 17;
+    }
+
+    return 0;
 }
 
 static int
@@ -357,6 +645,9 @@ main(int argc, char **argv)
     size_t             len;
 
     if (argc == 2) {
+        if (strcmp(argv[1], "chunked-reader") == 0) {
+            return run_chunked_reader_cases();
+        }
         return run_filter_case(argv[1]);
     }
 
@@ -419,6 +710,9 @@ for my $case (qw(chain-link stable-buffer file-read copy-buffer copy-data)) {
     is(system($binary, $case), 0,
         "$case failure finalizes HTTP 500 and clears pending buffers");
 }
+
+is(system($binary, 'chunked-reader'), 0,
+    'bounded chunked response-file reader enforces range and failure paths');
 
 for my $case (qw(success-stable success-memory)) {
     is(system($binary, $case), 0,
