@@ -50,7 +50,7 @@ http {
                 SecRuleEngine On
                 # A benign phase-3 rule: must NOT match the 101 handshake, so
                 # the upgrade passes through with the WAF active.
-                SecRule RESPONSE_HEADERS:X-Block "@streq yes" "id:54,phase:3,deny,log,status:403"
+                SecRule RESPONSE_HEADERS:X-Block "@streq yes" "id:54,phase:3,deny,log,status:403,t:none"
             ';
             proxy_pass http://127.0.0.1:8081;
             proxy_http_version 1.1;
@@ -68,6 +68,11 @@ $t->todo_alerts();
 
 ###############################################################################
 
+# upgrade_request() reads only up to the end of the response headers (see
+# the comment on the sub below) -- it cannot assert anything about a
+# response body, so this test's coverage is headers-only. That is
+# sufficient here: upgrade_daemon() sends no body after the 101 response,
+# so there is no body content to assert against on this handshake.
 my $r = upgrade_request();
 like($r, qr/^HTTP\S+ 101/, '101 Switching Protocols passes through the WAF');
 like($r, qr/Upgrade: websocket/i, 'Upgrade header preserved');
@@ -75,6 +80,19 @@ like($r, qr/Connection: upgrade/i, 'Connection: upgrade forced by connector');
 
 ###############################################################################
 
+# LIMITATION: this helper reads only up to and including the blank line
+# that ends the response headers ("\r\n\r\n") and returns whatever arrived
+# up to that point. It does NOT drain any bytes the peer sends afterward,
+# so its return value cannot be used to assert on a response body.
+#
+# An upgraded connection has no reliable EOF or Content-Length to read a
+# body against -- draining it means either blocking on a read that may
+# never return (the far end can just hold the connection open, as a real
+# WebSocket stream does) or racing an arbitrary timeout that would make
+# this test slow and flaky for no assertion gained. Callers that need a
+# body assertion on an upgraded response need a purpose-built read loop
+# with its own explicit termination condition (framing, a fixed byte
+# count, or the peer closing) -- do not reuse this helper for that.
 sub upgrade_request {
 	my $s = IO::Socket::INET->new(
 		Proto => 'tcp',

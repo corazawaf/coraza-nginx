@@ -30,7 +30,7 @@ like($pre_access,
 	'temp-file reader appends each bounded file chunk');
 
 like($pre_access,
-	qr/while \(offset < body_size\).*?coraza_append_request_body.*?ngx_http_coraza_process_intervention/s,
+	qr/while \(offset < body_size\).*?coraza_append_request_body.*?ret\s*=\s*ngx_http_coraza_process_intervention\(ctx,\s*r,\s*0\);.*?if \(ret < 0\) \{.*?goto done;.*?if \(ret > 0\) \{.*?goto done;/s,
 	'temp-file reader stops promptly on an intervention');
 
 like($pre_access,
