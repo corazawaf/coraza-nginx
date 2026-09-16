@@ -34,8 +34,16 @@ like($pre_access,
 	'temp-file reader stops promptly on an intervention');
 
 like($pre_access,
-	qr/ngx_alloc\(NGX_HTTP_CORAZA_REQUEST_BODY_FILE_CHUNK_SIZE,.*?while \(offset < body_size\).*?ngx_free\(data\)/s,
-	'temp-file reader reuses and releases one chunk buffer');
+	qr/static u_char ngx_http_coraza_request_body_file_chunk\[\s*NGX_HTTP_CORAZA_REQUEST_BODY_FILE_CHUNK_SIZE\]/s,
+	'temp-file reader declares one per-worker static chunk buffer');
+
+like($pre_access,
+	qr/data\s*=\s*ngx_http_coraza_request_body_file_chunk\s*;/,
+	'temp-file reader uses the per-worker static chunk buffer');
+
+unlike($pre_access,
+	qr/ngx_alloc\(NGX_HTTP_CORAZA_REQUEST_BODY_FILE_CHUNK_SIZE|ngx_free\(data\)/,
+	'temp-file reader does not allocate or free a per-request chunk buffer');
 
 unlike($pre_access, qr/\bcoraza_request_body_from_file\b/,
 	'pre-access path no longer delegates file reads to libcoraza');
