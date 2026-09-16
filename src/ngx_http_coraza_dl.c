@@ -24,6 +24,14 @@ typedef int                  (*fn_coraza_rules_add_file)(coraza_waf_config_t, ch
 typedef int                  (*fn_coraza_free_waf_config)(coraza_waf_config_t);
 typedef coraza_waf_t         (*fn_coraza_new_waf)(coraza_waf_config_t, char **);
 typedef int                  (*fn_coraza_free_waf)(coraza_waf_t);
+
+/* Frees a char* returned by the Go runtime (e.g. the char **err reason from
+ * coraza_new_waf()). MUST be used instead of libc free(): libcoraza's own doc
+ * comment for coraza_free_string requires it "to avoid allocator mismatches on
+ * Windows", and freeing a cgo-allocated string with libc free() is undefined
+ * behavior. Exported since libcoraza 1.7.0 (coraza.go:586), this module's hard
+ * version floor, so it is bound required like every other core symbol. */
+typedef void                 (*fn_coraza_free_string)(char *);
 typedef int                  (*fn_coraza_rules_count)(coraza_waf_t);
 typedef coraza_transaction_t (*fn_coraza_new_transaction)(coraza_waf_t);
 typedef coraza_transaction_t (*fn_coraza_new_transaction_with_id)(coraza_waf_t, char *);
@@ -74,6 +82,7 @@ static fn_coraza_rules_add_file          dl_rules_add_file;
 static fn_coraza_free_waf_config         dl_free_waf_config;
 static fn_coraza_new_waf                 dl_new_waf;
 static fn_coraza_free_waf                dl_free_waf;
+static fn_coraza_free_string             dl_free_string;
 static fn_coraza_rules_count             dl_rules_count;
 static fn_coraza_new_transaction         dl_new_transaction;
 static fn_coraza_new_transaction_with_id dl_new_transaction_with_id;
@@ -159,6 +168,8 @@ ngx_http_coraza_dl_open(ngx_log_t *log)
     DL_SYM(dl_free_waf_config,          coraza_free_waf_config);
     DL_SYM(dl_new_waf,                  coraza_new_waf);
     DL_SYM(dl_free_waf,                 coraza_free_waf);
+
+    DL_SYM(dl_free_string,              coraza_free_string);
     DL_SYM(dl_rules_count,              coraza_rules_count);
     DL_SYM(dl_new_transaction,           coraza_new_transaction);
     DL_SYM(dl_new_transaction_with_id,   coraza_new_transaction_with_id);
@@ -261,6 +272,16 @@ coraza_waf_t coraza_new_waf(coraza_waf_config_t config, char **err)
 int coraza_free_waf(coraza_waf_t w)
 {
     return dl_free_waf(w);
+}
+
+/* The NULL check is for the argument, not the symbol: callers pass a char *out
+ * param that libcoraza only sets on failure, so a successful call hands us a
+ * pointer that was never written to. */
+void coraza_free_string(char *s)
+{
+    if (s != NULL) {
+        dl_free_string(s);
+    }
 }
 
 int coraza_rules_count(coraza_waf_t w)
@@ -402,35 +423,23 @@ ngx_http_coraza_is_response_body_processable(coraza_transaction_t t)
 }
 
 /*
- * Bulk header wrappers (libcoraza 1.6+).  These forward to the resolved
- * symbols; callers must first check ngx_http_coraza_bulk_headers_available()
- * because the pointers may be NULL on an older library.
+ * Bulk header wrappers.  These forward directly to the resolved symbols:
+ * both are loaded with the mandatory DL_SYM (see ngx_http_coraza_dl_open()
+ * above), so dl_add_request_headers / dl_add_response_headers are guaranteed
+ * non-NULL here -- a library that does not export them, or that is older
+ * than the enforced 1.7.0 floor, fails dl_open and the worker never starts.
+ * A negative return here is therefore always a genuine runtime pack/submit
+ * failure reported by libcoraza, not a missing symbol; callers already treat
+ * it as the signal to replay per-header.
  */
 int coraza_add_request_headers(coraza_transaction_t t, char *packed,
                                int packed_len, int count)
 {
-    if (dl_add_request_headers == NULL) {
-        return -1;
-    }
     return dl_add_request_headers(t, packed, packed_len, count);
 }
 
 int coraza_add_response_headers(coraza_transaction_t t, char *packed,
                                 int packed_len, int count)
 {
-    if (dl_add_response_headers == NULL) {
-        return -1;
-    }
     return dl_add_response_headers(t, packed, packed_len, count);
-}
-
-/*
- * ngx_http_coraza_bulk_headers_available — 1 when the loaded libcoraza
- * exports both bulk-header entry points, 0 otherwise.  Callers use the
- * per-header path when this returns 0.
- */
-int
-ngx_http_coraza_bulk_headers_available(void)
-{
-    return dl_add_request_headers != NULL && dl_add_response_headers != NULL;
 }

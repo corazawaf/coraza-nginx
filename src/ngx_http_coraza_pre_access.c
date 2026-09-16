@@ -38,6 +38,16 @@ ngx_http_coraza_request_read(ngx_http_request_t *r)
 
 
 /*
+ * Reusable per-worker chunk buffer for ngx_http_coraza_append_request_body_file().
+ * nginx workers are single-threaded and this function never yields to the
+ * event loop between its use and its last read, so no two requests can be
+ * inside this function at once and the buffer needs no locking.
+ */
+static u_char ngx_http_coraza_request_body_file_chunk[
+    NGX_HTTP_CORAZA_REQUEST_BODY_FILE_CHUNK_SIZE];
+
+
+/*
  * Finish the request-body phase after any body submission.  This must also run
  * when request-body access is off: Coraza still evaluates phase-2 rules on
  * headers, URI arguments and other non-body variables in that case.
@@ -125,12 +135,7 @@ ngx_http_coraza_append_request_body_file(ngx_http_coraza_ctx_t *ctx,
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
-    data = ngx_alloc(NGX_HTTP_CORAZA_REQUEST_BODY_FILE_CHUNK_SIZE,
-                     r->connection->log);
-    if (data == NULL) {
-        rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
-        goto done;
-    }
+    data = ngx_http_coraza_request_body_file_chunk;
 
     offset = 0;
     rc = NGX_OK;
@@ -147,7 +152,7 @@ ngx_http_coraza_append_request_body_file(ngx_http_coraza_ctx_t *ctx,
         n = ngx_read_file(&file, data, size, offset);
         if (n == NGX_ERROR) {
             rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
-            goto free;
+            goto done;
         }
 
         if (n == 0) {
@@ -155,7 +160,7 @@ ngx_http_coraza_append_request_body_file(ngx_http_coraza_ctx_t *ctx,
                 "coraza: file-buffered request body ended at %O of %O bytes",
                 offset, body_size);
             rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
-            goto free;
+            goto done;
         }
 
         if (coraza_append_request_body(ctx->coraza_transaction, data,
@@ -165,28 +170,37 @@ ngx_http_coraza_append_request_body_file(ngx_http_coraza_ctx_t *ctx,
                 "coraza: failed to append file-buffered request body chunk "
                 "for inspection");
             rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
-            goto free;
+            goto done;
         }
 
         offset += n;
 
         if (offset < body_size) {
             ret = ngx_http_coraza_process_intervention(ctx, r, 0);
+            /*
+             * On an error_page re-entry pass a prior intervention has
+             * already been finalized, so yield instead of finalizing
+             * again -- the same treatment as the final poll below and as
+             * the two body-filter poll sites.  Yield explicitly rather
+             * than falling through to the cleanup with rc still NGX_OK,
+             * which would report the whole body inspected while the
+             * remaining chunks were never appended.
+             */
+            if (r->error_page) {
+                rc = NGX_DECLINED;
+                goto done;
+            }
             if (ret < 0) {
                 rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
-                goto free;
+                goto done;
             }
             if (ret > 0) {
                 ctx->intervention_triggered = 1;
                 rc = ret;
-                goto free;
+                goto done;
             }
         }
     }
-
-free:
-
-    ngx_free(data);
 
 done:
 
@@ -195,7 +209,12 @@ done:
             ngx_close_file_n " \"%V\" failed", &file.name);
     }
 
-    if (rc != NGX_OK) {
+    /*
+     * NGX_DECLINED is the deliberate error_page-re-entry yield above, not a
+     * failure: the sibling poll sites yield without arming the flag, so this
+     * one must not arm it either.
+     */
+    if (rc != NGX_OK && rc != NGX_DECLINED) {
         ctx->intervention_triggered = 1;
     }
 
@@ -265,8 +284,6 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
 
         dd("asking for the request body, if any. Count: %d",
             r->main->count);
-        /* Ensure the full request body lands in a single buffer for inspection */
-        r->request_body_in_single_buf = 1;
         r->request_body_in_persistent_file = 1;
         if (!r->request_body_in_file_only) {
             // If the above condition fails, then the flag below will have been
@@ -295,13 +312,33 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
         }
     }
 
-    if (ctx->waiting_more_body == 0)
+    if (ctx->waiting_more_body == 0 && ctx->body_submitted == 0)
     {
         int ret = 0;
         int already_inspected = 0;
         ngx_int_t rc;
 
         dd("request body phase is ready to be processed");
+
+        if (r->request_body == NULL) {
+            /*
+             * Nothing to submit (e.g. body access predicate flipped between
+             * checks, or nginx never allocated a request_body). Nothing was
+             * sent to Coraza, so there is no submission to mark: leave
+             * body_submitted clear and let the phase continue normally.
+             */
+            return NGX_DECLINED;
+        }
+
+        /*
+         * Mark the body as submitted before doing the append/process work so
+         * that any re-entry into this handler on the same request (e.g. a
+         * later PREACCESS-phase module re-running the phase) short-circuits
+         * above instead of re-appending the body and doubling it in the
+         * engine (duplicated REQUEST_BODY/ARGS_POST, halved effective
+         * SecRequestBodyLimit, phase 2 evaluated twice).
+         */
+        ctx->body_submitted = 1;
 
         ngx_chain_t *chain = r->request_body->bufs;
 
@@ -314,6 +351,17 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
             /*
              * Request body was saved to a file, probably we don't have a
              * copy of it in memory.
+             *
+             * Invariant: when spilled to a file there is no in-memory
+             * remainder to also walk. This handler always sets
+             * r->request_body_in_single_buf and
+             * r->request_body_in_clean_file (or leaves the file-only flag
+             * nginx already set) before calling
+             * ngx_http_read_client_request_body(), so nginx buffers the
+             * whole body as a single unit and only ever produces bufs *or*
+             * a temp_file for the memory-vs-file choice, never both with
+             * live data in each. Hence skipping the chain below when
+             * temp_file != NULL is safe and does not silently drop bytes.
              */
             dd("request body inspection: file");
 
@@ -352,7 +400,10 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
              * (libcoraza signals failure with a positive sentinel, so test
              * != 0, not < 0.)
              */
-            if (coraza_append_request_body(ctx->coraza_transaction, data, blen) != 0) {
+            if (blen > 0
+                && coraza_append_request_body(ctx->coraza_transaction, data,
+                                              blen) != 0)
+            {
                 ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                     "coraza: failed to append request body chunk for inspection");
                 ctx->intervention_triggered = 1;
@@ -366,6 +417,13 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
 
             /* Check for intervention after each chunk for prompt detection */
             ret = ngx_http_coraza_process_intervention(ctx, r, 0);
+            /*
+             * If nginx has already started streaming the error page body
+             * after a prior intervention, do not attempt another finalize.
+             */
+            if (r->error_page) {
+                return NGX_DECLINED;
+            }
             if (ret < 0) {
                 /* NGX_ERROR from the intervention handler: fail closed. */
                 ctx->intervention_triggered = 1;

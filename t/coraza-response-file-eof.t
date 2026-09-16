@@ -11,6 +11,15 @@ use File::Temp qw(tempdir);
 use FindBin;
 
 my $nginx = $ENV{TEST_NGINX_SOURCE};
+# CI installs libcoraza under /usr/local; a distribution package lands in
+# /usr.  Probe both so the harness is not silently skipped on either.  An
+# explicit TEST_LIBCORAZA_INCLUDE always wins; otherwise the first hit wins
+# deliberately -- that mirrors the linker's own search order, so a host with
+# stale headers under /usr/local and the real library under /usr still
+# compiles against the same set the linker would resolve against.
+my ($coraza_include) = grep { -f "$_/coraza/coraza.h" }
+    ($ENV{TEST_LIBCORAZA_INCLUDE} ? ($ENV{TEST_LIBCORAZA_INCLUDE})
+                                  : qw(/usr/local/include /usr/include));
 
 # Walk up looking for the module source tree.  CI copies t/* into an unpacked
 # nginx-tests directory and proves from there, so $FindBin::Bin/../src is the
@@ -55,18 +64,10 @@ for my $dir (@needed) {
 
 plan skip_all => 'module source tree not found'
     unless defined $root;
-# CI installs libcoraza under /usr/local; a distribution package lands in
-# /usr.  Probe both so the harness is not silently skipped on either.  The
-# first hit wins deliberately -- this mirrors the linker's own search order,
-# so a host with stale headers under /usr/local and the real library under
-# /usr still compiles against the same set the linker would resolve against.
-my ($coraza_inc) = grep { -f "$_/coraza/coraza.h" }
-    qw(/usr/local/include /usr/include);
-
 plan skip_all => 'coraza headers not available'
-    unless defined $coraza_inc;
+    unless defined $coraza_include;
 
-plan tests => 3;
+plan tests => 11;
 
 my $tmp = tempdir(CLEANUP => 1);
 my $source = "$tmp/response-file-eof.c";
@@ -84,15 +85,7 @@ print {$fh} <<'EOF';
 #undef static
 
 static int force_eof;
-
-/*
- * Physical end of the backing file.  0 means "the file is as long as the
- * buffer claims"; a positive value models a response file truncated after
- * buf->file_last was already recorded, so a read at or past it returns 0.
- */
-static off_t truncate_at;
-
-/* Bytes handed to coraza_append_response_body() across the whole range. */
+static off_t  truncate_at;
 static size_t appended_total;
 static int    append_calls;
 static int    alloc_calls;
@@ -101,12 +94,86 @@ static int    append_fail;
 static int    force_error;
 static int    read_calls;
 static int    short_read;
+static int fail_chain_link;
+static int fail_pcalloc;
+static int fail_pnalloc;
+static int finalize_calls;
+static ngx_int_t finalized_status;
+static ngx_chain_t allocated_chain;
+static ngx_buf_t allocated_buffer;
+
+ngx_module_t ngx_http_coraza_module;
+
+ngx_int_t
+ngx_http_coraza_is_redirect_status(ngx_int_t status)
+{
+    (void) status;
+    return 0;
+}
+
+void
+ngx_http_coraza_prepare_redirect(ngx_http_request_t *r, ngx_int_t status)
+{
+    (void) r;
+    (void) status;
+}
+
+ngx_int_t
+ngx_http_coraza_forward_header(ngx_http_request_t *r)
+{
+    (void) r;
+    return NGX_OK;
+}
+
+ngx_int_t
+ngx_http_filter_finalize_request(ngx_http_request_t *r, ngx_module_t *m,
+    ngx_int_t status)
+{
+    (void) r;
+    (void) m;
+    finalize_calls++;
+    finalized_status = status;
+    return status;
+}
 
 void *
 ngx_pnalloc(ngx_pool_t *pool, size_t size)
 {
     (void) pool;
+    if (fail_pnalloc) {
+        return NULL;
+    }
     return malloc(size);
+}
+
+void *
+ngx_palloc(ngx_pool_t *pool, size_t size)
+{
+    (void) pool;
+    return malloc(size);
+}
+
+void *
+ngx_pcalloc(ngx_pool_t *pool, size_t size)
+{
+    (void) pool;
+    (void) size;
+    if (fail_pcalloc) {
+        return NULL;
+    }
+    memset(&allocated_buffer, 0, sizeof(allocated_buffer));
+    return &allocated_buffer;
+}
+
+ngx_chain_t *
+ngx_alloc_chain_link(ngx_pool_t *pool)
+{
+    (void) pool;
+    if (fail_chain_link) {
+        return NULL;
+    }
+    memset(&allocated_chain, 0, sizeof(allocated_chain));
+    return &allocated_chain;
 }
 
 void *
@@ -123,25 +190,55 @@ ngx_alloc(size_t size, ngx_log_t *log)
     return malloc(size);
 }
 
-/*
- * The fixture leaves buf->file->directio unset, so these are never reached;
- * they exist only to satisfy the linker on a Unix tree built with O_DIRECT.
- */
-#if (NGX_HAVE_O_DIRECT)
 ngx_int_t
 ngx_directio_off(ngx_fd_t fd)
 {
     (void) fd;
-    return 0;
+    return NGX_OK;
 }
 
 ngx_int_t
 ngx_directio_on(ngx_fd_t fd)
 {
     (void) fd;
+    return NGX_OK;
+}
+
+int
+ngx_http_coraza_bulk_headers_available(void)
+{
     return 0;
 }
-#endif
+
+int
+coraza_append_response_body(coraza_transaction_t transaction,
+    unsigned char *data, int length)
+{
+    (void) transaction;
+    (void) data;
+
+    append_calls++;
+    appended_total += (size_t) length;
+
+    return append_fail ? -1 : 0;
+}
+
+int
+coraza_process_response_body(coraza_transaction_t transaction)
+{
+    (void) transaction;
+    return 0;
+}
+
+ngx_int_t
+ngx_http_coraza_process_intervention(ngx_http_coraza_ctx_t *ctx,
+    ngx_http_request_t *r, ngx_int_t early_log)
+{
+    (void) ctx;
+    (void) r;
+    (void) early_log;
+    return NGX_OK;
+}
 
 ssize_t
 ngx_read_file(ngx_file_t *file, u_char *buf, size_t size, off_t offset)
@@ -181,19 +278,6 @@ ngx_read_file(ngx_file_t *file, u_char *buf, size_t size, off_t offset)
     return (ssize_t) size;
 }
 
-int
-coraza_append_response_body(coraza_transaction_t t, unsigned char *data,
-    int length)
-{
-    (void) t;
-    (void) data;
-
-    append_calls++;
-    appended_total += (size_t) length;
-
-    return append_fail ? -1 : 0;
-}
-
 void
 ngx_log_error_core(ngx_uint_t level, ngx_log_t *log, ngx_err_t err,
     const char *fmt, ...)
@@ -204,8 +288,8 @@ ngx_log_error_core(ngx_uint_t level, ngx_log_t *log, ngx_err_t err,
     (void) fmt;
 }
 
-int
-main(void)
+static int
+run_chunked_reader_cases(void)
 {
     ngx_http_coraza_ctx_t  ctx;
     ngx_http_request_t  request;
@@ -214,8 +298,6 @@ main(void)
     ngx_log_t           log;
     ngx_buf_t           buffer;
     ngx_file_t          file;
-    u_char             *data;
-    size_t              len;
 
     memset(&request, 0, sizeof(request));
     memset(&connection, 0, sizeof(connection));
@@ -227,24 +309,6 @@ main(void)
     request.pool = &pool;
     request.connection = &connection;
     connection.log = &log;
-    buffer.in_file = 1;
-    buffer.file = &file;
-    buffer.file_pos = 0;
-    buffer.file_last = 18;
-
-    force_eof = 1;
-    if (ngx_http_coraza_read_body_data(&request, &buffer, &data, &len)
-        != NGX_ERROR)
-    {
-        return 1;
-    }
-
-    force_eof = 0;
-    if (ngx_http_coraza_read_body_data(&request, &buffer, &data, &len)
-        != NGX_OK || len != 18)
-    {
-        return 2;
-    }
 
     /*
      * Bounded chunked reader, ngx_http_coraza_append_response_body_file().
@@ -460,6 +524,162 @@ main(void)
 
     return 0;
 }
+
+static int
+run_filter_case(const char *name)
+{
+    ngx_http_request_t  request;
+    ngx_connection_t    connection;
+    ngx_pool_t          pool;
+    ngx_log_t           log;
+    ngx_buf_t           buffer;
+    ngx_file_t          file;
+    ngx_chain_t         pending;
+    ngx_chain_t         input;
+    ngx_http_coraza_ctx_t ctx;
+    void               *request_ctx[1];
+    u_char               payload[18];
+    ngx_int_t            rc;
+
+    memset(&request, 0, sizeof(request));
+    memset(&connection, 0, sizeof(connection));
+    memset(&pool, 0, sizeof(pool));
+    memset(&log, 0, sizeof(log));
+    memset(&buffer, 0, sizeof(buffer));
+    memset(&file, 0, sizeof(file));
+    memset(&pending, 0, sizeof(pending));
+    memset(&input, 0, sizeof(input));
+    memset(&ctx, 0, sizeof(ctx));
+    memset(request_ctx, 0, sizeof(request_ctx));
+    memset(payload, 'A', sizeof(payload));
+
+    request.pool = &pool;
+    request.connection = &connection;
+    request.ctx = request_ctx;
+    connection.log = &log;
+    ngx_http_coraza_module.ctx_index = 0;
+    request_ctx[0] = &ctx;
+
+    buffer.temporary = 1;
+    buffer.pos = payload;
+    buffer.last = payload + sizeof(payload);
+    input.buf = &buffer;
+
+    ctx.headers_delayed = 1;
+    ctx.pending_chain = &pending;
+    ctx.pending_chain_last = &pending.next;
+    ctx.pending_bytes = 18;
+
+    force_eof = 0;
+    fail_chain_link = 0;
+    fail_pcalloc = 0;
+    fail_pnalloc = 0;
+    finalize_calls = 0;
+    finalized_status = 0;
+
+    if (strcmp(name, "chain-link") == 0) {
+        fail_chain_link = 1;
+    } else if (strcmp(name, "stable-buffer") == 0) {
+        buffer.temporary = 0;
+        buffer.in_file = 1;
+        buffer.file = &file;
+        buffer.file_last = 18;
+        fail_pcalloc = 1;
+    } else if (strcmp(name, "file-read") == 0) {
+        buffer.temporary = 0;
+        buffer.in_file = 1;
+        buffer.temp_file = 1;
+        buffer.file = &file;
+        buffer.file_last = 18;
+        force_eof = 1;
+    } else if (strcmp(name, "copy-buffer") == 0) {
+        fail_pcalloc = 1;
+    } else if (strcmp(name, "copy-data") == 0) {
+        fail_pnalloc = 1;
+    } else if (strcmp(name, "success-stable") == 0) {
+        buffer.temporary = 0;
+        buffer.in_file = 1;
+        buffer.file = &file;
+        buffer.file_last = 18;
+    } else if (strcmp(name, "success-memory") != 0) {
+        return 90;
+    }
+
+    rc = ngx_http_coraza_body_filter(&request, &input);
+
+    if (strncmp(name, "success-", 8) == 0) {
+        if (rc != NGX_OK || finalize_calls != 0 || !ctx.headers_delayed
+            || ctx.intervention_triggered || ctx.pending_chain != &pending
+            || pending.next != &allocated_chain
+            || allocated_chain.buf != &allocated_buffer
+            || ctx.pending_bytes != 36)
+        {
+            return 91;
+        }
+        return 0;
+    }
+
+    if (rc != NGX_HTTP_INTERNAL_SERVER_ERROR
+        || !ctx.intervention_triggered || ctx.headers_delayed
+        || ctx.pending_chain != NULL
+        || ctx.pending_chain_last != &ctx.pending_chain
+        || ctx.pending_bytes != 0 || finalize_calls != 1
+        || finalized_status != NGX_HTTP_INTERNAL_SERVER_ERROR)
+    {
+        return 92;
+    }
+
+    return 0;
+}
+
+int
+main(int argc, char **argv)
+{
+    ngx_http_request_t request;
+    ngx_connection_t   connection;
+    ngx_pool_t         pool;
+    ngx_log_t          log;
+    ngx_buf_t          buffer;
+    ngx_file_t         file;
+    u_char            *data;
+    size_t             len;
+
+    if (argc == 2) {
+        if (strcmp(argv[1], "chunked-reader") == 0) {
+            return run_chunked_reader_cases();
+        }
+        return run_filter_case(argv[1]);
+    }
+
+    memset(&request, 0, sizeof(request));
+    memset(&connection, 0, sizeof(connection));
+    memset(&pool, 0, sizeof(pool));
+    memset(&log, 0, sizeof(log));
+    memset(&buffer, 0, sizeof(buffer));
+    memset(&file, 0, sizeof(file));
+    request.pool = &pool;
+    request.connection = &connection;
+    connection.log = &log;
+    buffer.in_file = 1;
+    buffer.file = &file;
+    buffer.file_last = 18;
+
+    force_eof = 1;
+    if (ngx_http_coraza_read_body_data(&request, &buffer, &data, &len)
+        != NGX_ERROR)
+    {
+        return 1;
+    }
+
+    force_eof = 0;
+    if (ngx_http_coraza_read_body_data(&request, &buffer, &data, &len)
+        != NGX_OK || len != 18)
+    {
+        return 2;
+    }
+
+    return 0;
+}
 EOF
 close $fh or die "close $source: $!";
 
@@ -475,7 +695,7 @@ my @includes = map { "-I$_" } (
     "$nginx/src/http/v2",
     "$nginx/src/http/v3",
     "$nginx/objs",
-    $coraza_inc,
+    $coraza_include,
     "$root/src",
 );
 
@@ -484,39 +704,19 @@ is(system($cc, '-D_GNU_SOURCE', '-O2', '-ffunction-sections', '-fdata-sections',
           '-Wl,--gc-sections', '-o', $binary), 0,
     'compiled production response-file reader harness');
 
+is(system($binary), 0, 'file EOF fails closed');
+
+for my $case (qw(chain-link stable-buffer file-read copy-buffer copy-data)) {
+    is(system($binary, $case), 0,
+        "$case failure finalizes HTTP 500 and clears pending buffers");
+}
+
+is(system($binary, 'chunked-reader'), 0,
+    'bounded chunked response-file reader enforces range and failure paths');
+
+for my $case (qw(success-stable success-memory)) {
+    is(system($binary, $case), 0,
+        "$case control retains the delayed response");
+}
+
 ok(-x $binary, 'focused harness is executable');
-
-# The harness exits with the number of the scenario that failed, so a red
-# result names the branch that regressed instead of just "non-zero".
-my %scenario = (
-    1 => 'whole-range reader: premature EOF must fail closed',
-    2 => 'whole-range reader: intact file buffer must succeed',
-    3 => 'chunked reader: premature EOF mid-range must fail closed',
-    4 => 'chunked reader: premature EOF must set intervention_triggered',
-    5 => 'chunked reader: only the bytes that existed are inspected',
-    6 => 'chunked reader: intact multi-chunk range must succeed',
-    7 => 'chunked reader: intact range inspects every 64 KiB chunk',
-    8 => 'chunked reader: Coraza-rejected chunk must fail closed',
-    9 => 'chunked reader: Coraza rejection must set intervention_triggered',
-    10 => 'chunked reader: short reads must still succeed',
-    11 => 'chunked reader: short reads must inspect every byte of the range',
-    12 => 'chunked reader: mid-file range must succeed',
-    13 => 'chunked reader: mid-file range must start at file_pos',
-    14 => 'chunked reader: empty range must return without reading',
-    15 => 'chunked reader: read errors must fail closed before append',
-    16 => 'chunked reader: inverted ranges must fail before allocation or I/O',
-    17 => 'chunked reader: allocation failure must stop before I/O',
-);
-
-my $status = system($binary);
-my $code = $status == -1 ? -1
-    : ($status & 127) ? -($status & 127)
-    : $status >> 8;
-
-is($code, 0, 'file-backed response readers enforce range and failure paths')
-    or diag($scenario{$code}
-        ? "failing scenario $code: $scenario{$code}"
-        : "harness exited with unmapped status $status"
-            . ($status == -1 ? " (system() failed to launch: $!)"
-                : ($status & 127) ? " (killed by signal " . ($status & 127) . ")"
-                : ''));

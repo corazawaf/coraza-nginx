@@ -15,11 +15,11 @@
 #      would stop blocking. They must still return 403.
 #
 #  (B) The post-phase polls (request-headers, request-body, response-headers,
-#      response-body) now skip the CGO intervention fetch when the running
-#      libcoraza is 1.6+ AND the process fn returned != CORAZA_INTERRUPTION. On an
-#      older library the return value is not a reliable interruption signal, so
-#      the connector falls back to an unconditional poll (fail-closed). Whichever
-#      path runs, a deny in each phase must still return 403.
+#      response-body) skip the CGO intervention fetch when the process function
+#      returns CORAZA_OK, fetch it on CORAZA_INTERRUPTION, and fail closed on
+#      CORAZA_ERROR. The mandatory libcoraza >= 1.7 floor makes that return-value
+#      contract available on every supported runtime. A deny in each phase must
+#      still return 403.
 #
 # Every deny below is paired with a benign control that must pass, so a rule that
 # silently stopped matching cannot masquerade as a working negative control
