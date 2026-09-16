@@ -74,10 +74,14 @@ COPY --from=go-builder /usr/local/lib/libcoraza.so /usr/local/lib
 RUN ldconfig -v
 
 COPY ./t /tmp/t
+COPY .github/versions.env .github/scripts/fetch-verify.sh /tmp/ci/
 
 RUN apt-get update -qq && \
     apt-get install -qq --no-install-recommends curl perl && \
-    curl http://hg.nginx.org/nginx-tests/archive/tip.tar.gz -o tip.tar.gz && \
+    . /tmp/ci/versions.env && \
+    bash /tmp/ci/fetch-verify.sh \
+        "https://github.com/nginx/nginx-tests/archive/${NGINX_TESTS_REF}.tar.gz" \
+        "$NGINX_TESTS_SHA256" tip.tar.gz && \
     tar xzf tip.tar.gz && \
     cd nginx-tests-* && \
     cp /tmp/t/* . && \
