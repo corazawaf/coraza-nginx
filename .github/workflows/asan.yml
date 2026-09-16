@@ -129,6 +129,24 @@ jobs:
           eatmydata make -j"$(nproc)" modules
           eatmydata make -j"$(nproc)"
 
+      - name: Run cancellation and reload overlap under sanitizers
+        env:
+          ASAN_OPTIONS: "verify_asan_link_order=0:detect_odr_violation=0"
+        run: |
+          nginx_tests_url="https://github.com/nginx/nginx-tests/archive/"
+          nginx_tests_url+="${NGINX_TESTS_REF}.tar.gz"
+          bash .github/scripts/fetch-verify.sh \
+            "$nginx_tests_url" "$NGINX_TESTS_SHA256" nginx-tests.tar.gz
+          tar xzf nginx-tests.tar.gz
+          cd nginx-tests-*
+          cp ../t/coraza-cancel-reload-overlap.t .
+          nginx_dir="$GITHUB_WORKSPACE/nginx-${NGINX_VERSION}"
+          export TEST_NGINX_BINARY="$nginx_dir/objs/nginx"
+          module_so="$nginx_dir/objs/ngx_http_coraza_module.so"
+          TEST_NGINX_GLOBALS="load_module ${module_so};"
+          export TEST_NGINX_GLOBALS
+          prove coraza-cancel-reload-overlap.t
+
       - name: Sanitizer soak (60s @ 4 conc)
         env:
           # No valgrind: soak.sh runs the ASan/UBSan-built nginx directly and
