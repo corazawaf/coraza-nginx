@@ -28,16 +28,38 @@ like($body_filter,
     'direct I/O is disabled around reads into the reusable scratch buffer');
 
 like($body_filter,
-    qr/if \(!ngx_buf_in_memory\(chain->buf\).*?ngx_http_coraza_append_response_body_file\(ctx, r,\s*chain->buf\)/s,
-    'file-backed response buffers use the bounded reader');
+    qr/if \(!ngx_buf_in_memory\(chain->buf\)\s*&&\s*chain->buf->in_file\s*&&\s*chain->buf->file\)\s*\{\s*if \(ngx_http_coraza_append_response_body_file\(ctx, r,\s*chain->buf\)/s,
+    'only in_file buffers with a file object reach the bounded reader');
 
 like($body_filter,
-    qr/ngx_http_coraza_append_response_body_file\(ctx, r,\s*chain->buf\) != NGX_OK\).*?headers_delayed = 0;.*?NGX_HTTP_INTERNAL_SERVER_ERROR.*?ngx_http_filter_finalize_request/s,
+    qr/ngx_http_coraza_append_response_body_file\(ctx, r,\s*chain->buf\) != NGX_OK\)\s*\{\s*(?:return ngx_http_coraza_body_filter_finalize\(r, ctx, in,\s*NGX_HTTP_INTERNAL_SERVER_ERROR\);|if \(ctx->headers_delayed\) \{\s*ctx->headers_delayed = 0;\s*return NGX_HTTP_INTERNAL_SERVER_ERROR;\s*\}\s*return ngx_http_filter_finalize_request\()/s,
     'file inspection failures use the normal fail-closed response path');
 
 like($body_filter,
     qr/if \(!ngx_buf_in_memory\(chain->buf\)\s*&& chain->buf->in_file\s*&& chain->buf->file != NULL\s*&& !chain->buf->temp_file\).*?\*b = \*chain->buf/s,
     'stable delayed file ranges are retained without a body-sized pool copy');
+
+my $delayed_copy_start = index($body_filter,
+    'When response headers are being delayed');
+my $delayed_copy_end = index($body_filter,
+    "    if (ctx->headers_delayed) {\n        if (is_request_processed)",
+    $delayed_copy_start);
+
+ok($delayed_copy_start >= 0 && $delayed_copy_end > $delayed_copy_start,
+    'located the delayed buffer preparation block');
+
+my $delayed_copy = $delayed_copy_end > $delayed_copy_start
+    ? substr($body_filter, $delayed_copy_start,
+        $delayed_copy_end - $delayed_copy_start)
+    : '';
+
+unlike($delayed_copy, qr/return NGX_ERROR;/,
+    'delayed buffer preparation failures use the finalizer');
+
+my @delayed_errors = $delayed_copy =~
+    /return\s+ngx_http_coraza_body_filter_internal_error\(r,\s*ctx,\s*in\);/g;
+is(scalar @delayed_errors, 5,
+    'every delayed buffer preparation failure uses the internal-error helper');
 
 like($body_filter,
     qr/if \(is_last\).*?coraza_process_response_body\(ctx->coraza_transaction\)/s,

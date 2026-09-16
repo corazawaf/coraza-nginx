@@ -84,11 +84,15 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
             server_addr = "unix";
         } else {
             u_char addr[NGX_SOCKADDR_STRLEN];
-            ngx_server_addr.len = NGX_SOCKADDR_STRLEN;
+
+            /* The unconditional call above already populated
+             * connection->local_sockaddr/local_socklen, so format that
+             * cached address directly. A second helper call has no new
+             * address to discover and ultimately reaches the same
+             * ngx_sock_ntop() formatting step. */
+            ngx_server_addr.len = ngx_sock_ntop(connection->local_sockaddr,
+                connection->local_socklen, addr, NGX_SOCKADDR_STRLEN, 0);
             ngx_server_addr.data = addr;
-            if (ngx_connection_local_sockaddr(r->connection, &ngx_server_addr, 0) != NGX_OK) {
-                return NGX_HTTP_INTERNAL_SERVER_ERROR;
-            }
             server_port = ngx_inet_get_port(connection->local_sockaddr);
             if (ngx_str_to_char(ngx_server_addr, &server_addr, r->pool) != NGX_OK) {
                 return NGX_HTTP_INTERNAL_SERVER_ERROR;
@@ -176,14 +180,13 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
         ngx_int_t  bulk_done = 0;
 
         /*
-         * Fast path (libcoraza 1.6+): pack every request header into one
-         * buffer and hand Coraza the whole set in a single cgo crossing,
-         * instead of one crossing per header.  Falls through to the
-         * per-header loop below if the bulk symbol is absent or the pack
-         * fails (e.g. an over-range header length -- treated as fail-closed
-         * there too).
+         * Fast path: pack every request header into one buffer and hand
+         * Coraza the whole set in a single cgo crossing, instead of one
+         * crossing per header.  Falls through to the per-header loop below
+         * if the pack fails (e.g. an over-range header length -- treated as
+         * fail-closed there too).
          */
-        if (ngx_http_coraza_bulk_headers_available()) {
+        {
             ngx_http_coraza_header_t *pairs;
             ngx_uint_t nheaders = 0;
             ngx_list_part_t *cp = part;

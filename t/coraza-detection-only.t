@@ -8,14 +8,32 @@
 # SecRuleEngine On instead only logs and lets the request through under
 # DetectionOnly.
 #
-# Two locations share the IDENTICAL phase-1 deny rule, differing only in
-# SecRuleEngine. Asserting the DetectionOnly location returns 200 alone would
-# be consistent with the rule silently never running at all, so this also
-# greps the error log for the rule's msg to prove it matched. A benign
-# request to each location is the negative control, proving the 403/200 split
-# above is the rule engine mode and not some other difference between the two
-# locations.
+# Two locations carry the same phase-1 deny rule (same variable, operator,
+# disruptive action and status; ids differ only because Coraza requires them
+# to be unique) and differ in SecRuleEngine. The DetectionOnly location adds
+# `auditlog` plus a SecAuditLog file: that changes only what gets recorded,
+# never whether the rule intervenes. Asserting the DetectionOnly location
+# returns 200 alone would be consistent with the rule silently never running
+# at all, so this also checks that audit log for the rule's msg to prove it
+# matched. A benign request to each location is the negative control,
+# proving the 403/200 split above is the rule engine mode and not some other
+# difference between the two locations.
 # See src/ngx_http_coraza_module.c (phase evaluation / intervention handling).
+#
+# ROOT CAUSE (VERIFIED, static read + CI, 2026-09-03): a match under
+# DetectionOnly is NOT observable via nginx's error.log through this
+# connector. coraza_process_logging() (src/ngx_http_coraza_dl.c) is a bare
+# `int (*)(coraza_transaction_t)` call into libcoraza with no callback
+# parameter of any kind -- grep every fn_coraza_* typedef in
+# ngx_http_coraza_dl.c and none of them is a logging callback. Nothing in
+# ngx_http_coraza_log.c or ngx_http_coraza_module.c wraps that call with
+# ngx_log_error(); libcoraza's audit engine writes wherever SecAuditLog (or
+# SecDebugLog) points it, entirely independent of the nginx log. This is why
+# grepping error.log for the msg (CI, 2026-09-03) found nothing: it was
+# asking the wrong oracle, not evidence that DetectionOnly fails to log.
+# t/coraza-config-auditlog.t already proves the right oracle -- SecAuditLog
+# <file> plus SecAuditLogParts -- picks up matched-rule content end-to-end
+# for this connector, so this file uses the same idiom below.
 
 ###############################################################################
 
@@ -34,7 +52,7 @@ use Test::Nginx;
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http/)->plan(5);
+my $t = Test::Nginx->new()->has(qw/http/)->plan(6);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -49,14 +67,14 @@ http {
     %%TEST_GLOBALS_HTTP%%
 
     server {
-        listen       127.0.0.1:8080;
+        listen       127.0.0.1:%%PORT_8080%%;
         server_name  localhost;
 
         location /on {
             coraza on;
             coraza_rules '
                 SecRuleEngine On
-                SecRule ARGS:x "@streq bad" "id:50,phase:1,t:none,deny,status:403,log,msg:\'detectiononly-probe\'"
+                SecRule ARGS:x "@streq bad" "id:50,phase:1,deny,status:403,log,msg:\'detectiononly-probe\',t:none"
             ';
             return 200 "TEST-OK-IF-YOU-SEE-THIS";
         }
@@ -65,7 +83,11 @@ http {
             coraza on;
             coraza_rules '
                 SecRuleEngine DetectionOnly
-                SecRule ARGS:x "@streq bad" "id:51,phase:1,t:none,deny,status:403,log,msg:\'detectiononly-probe\'"
+                SecRule ARGS:x "@streq bad" "id:51,phase:1,deny,status:403,log,auditlog,msg:\'detectiononly-probe\',t:none"
+                SecAuditEngine On
+                SecAuditLogParts ABKZ
+                SecAuditLog %%TESTDIR%%/auditlog-detect.txt
+                SecAuditLogType Serial
             ';
             return 200 "TEST-OK-IF-YOU-SEE-THIS";
         }
@@ -81,7 +103,7 @@ $t->run();
 my $blocked = http_get('/on?x=bad');
 like($blocked, qr!^HTTP/\S+ 403!, 'SecRuleEngine On blocks the matching request');
 
-# SecRuleEngine DetectionOnly: the identical rule matches but must not block.
+# SecRuleEngine DetectionOnly: the same rule matches but must not block.
 my $detected = http_get('/detect?x=bad');
 like($detected, qr!^HTTP/\S+ 200!, 'SecRuleEngine DetectionOnly does not block a matching request');
 
@@ -91,21 +113,19 @@ like(http_get('/detect?x=fine'), qr!^HTTP/\S+ 200!, 'benign request passes under
 
 $t->stop();
 
-# GAP, deliberately not asserted: nothing here proves the DetectionOnly rule
-# actually MATCHED. The 200 above is equally consistent with "matched, and
-# DetectionOnly correctly declined to block" and with "never ran at all", and
-# this test cannot tell them apart.
-#
-# The obvious oracle -- grepping error.log for the rule's msg -- was tried and
-# found no line (CI, 2026-09-03), so either DetectionOnly does not log through
-# this path or the connector does not surface the msg to nginx's error log.
-# That is its own question, tracked in the ledger alongside the related
-# ARGS_POST gap; it was dropped here rather than guessed at, because a wrong
-# oracle that goes green would settle the wrong contract.
-#
-# What this file does pin is still worth having: the On/DetectionOnly split is
-# observable end-to-end (403 vs 200) on an identical rule, so a regression that
-# made DetectionOnly block, or made On stop blocking, fails here.
+# Proves the DetectionOnly rule actually matched rather than silently not
+# running at all -- without this the 200 above is consistent with either.
+# error.log is not the oracle for this (see the ROOT CAUSE note above); the
+# SecAuditLog file the /detect location was configured with is.
+my $d = $t->testdir();
+my $detect_audit = do {
+	local $/ = undef;
+	open my $fh, "<", "$d/auditlog-detect.txt"
+		or die "could not open: $!";
+	<$fh>;
+};
+like($detect_audit, qr/detectiononly-probe/,
+	'SecRuleEngine DetectionOnly rule logged a match via SecAuditLog for the tripping request');
 
 unlike($t->read_file('error.log'), qr/signal 11|SIGSEGV|AddressSanitizer/,
 	'no crash handling SecRuleEngine DetectionOnly');

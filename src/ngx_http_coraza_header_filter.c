@@ -76,8 +76,9 @@ ngx_http_coraza_add_response_header(ngx_http_request_t *r,
 
     /*
      * Bulk path: buffer the pair for a single coraza_add_response_headers()
-     * crossing later, rather than one cgo call per header.  The collector is
-     * armed by the header filter only when libcoraza exposes the bulk symbol.
+     * crossing later, rather than one cgo call per header.  The bulk entry
+     * points are mandatory symbols, so the header filter arms the collector
+     * unconditionally and only an allocation failure leaves it NULL.
      *
      * Copy name and value into r->pool: several resolvers synthesize their
      * value in a function-local stack buffer (Content-Length, Last-Modified,
@@ -309,6 +310,7 @@ ngx_http_coraza_resolv_header_connection(ngx_http_request_t *r, ngx_str_t name, 
     ngx_http_coraza_ctx_t *ctx = NULL;
     ngx_http_core_loc_conf_t *clcf = NULL;
     char *connection = NULL;
+    size_t connection_len = 0;
     ngx_str_t value;
 
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
@@ -330,16 +332,23 @@ ngx_http_coraza_resolv_header_connection(ngx_http_request_t *r, ngx_str_t name, 
 
     if (r->headers_out.status == NGX_HTTP_SWITCHING_PROTOCOLS) {
         connection = "upgrade";
+        connection_len = sizeof("upgrade") - 1;
     } else if (r->keepalive) {
         connection = "keep-alive";
+        connection_len = sizeof("keep-alive") - 1;
         if (clcf->keepalive_header)
         {
             u_char buf[1024];
-            ngx_sprintf(buf, "timeout=%T%Z", clcf->keepalive_header);
+            u_char *p2;
             ngx_str_t name2 = ngx_string("Keep-Alive");
 
+            /* %Z writes the NUL terminator and ngx_sprintf returns a
+             * pointer past the last byte written, so (p2 - buf - 1) is the
+             * string length excluding that NUL -- no strlen() rescan. */
+            p2 = ngx_sprintf(buf, "timeout=%T%Z", clcf->keepalive_header);
+
             value.data = buf;
-            value.len = strlen((char *)buf);
+            value.len = (size_t) (p2 - buf - 1);
 
             if (ngx_http_coraza_add_response_header(r, ctx, &name2, &value)
                 != NGX_OK)
@@ -349,10 +358,11 @@ ngx_http_coraza_resolv_header_connection(ngx_http_request_t *r, ngx_str_t name, 
         }
     } else {
         connection = "close";
+        connection_len = sizeof("close") - 1;
     }
 
     value.data = (u_char *) connection;
-    value.len = strlen(connection);
+    value.len = connection_len;
 
     return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
 }
@@ -430,12 +440,26 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     }
 
     mcf = ngx_http_get_module_loc_conf(r, ngx_http_coraza_module);
+    if (mcf == NULL) {
+        return ngx_http_next_header_filter(r);
+    }
 
     if (ctx->intervention_triggered) {
         return ngx_http_next_header_filter(r);
     }
 
-    /* Skip if already processed (can happen with subrequests or error pages) */
+    /*
+     * ctx->processed is deliberately sticky for the lifetime of this ctx: it
+     * guards against this filter running twice for the same ctx, not against
+     * running once per "logical" response. An internal redirect
+     * (error_page, X-Accel-Redirect) reuses the same r/ctx across the hop,
+     * but nginx invokes the header filter chain only once, for the final
+     * response actually sent to the client -- redirected phases never reach
+     * this filter, so there is nothing here for the flag to wrongly
+     * suppress. A subrequest gets its own r and, unless it creates one, a
+     * NULL ctx (see ngx_http_coraza_create_ctx() callers), so it is
+     * unaffected by the parent's flag. Do not reset this flag.
+     */
     if (ctx && ctx->processed)
     {
         return ngx_http_next_header_filter(r);
@@ -444,19 +468,16 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     ctx->processed = 1;
 
     /*
-     * Arm the bulk collector when libcoraza can take all response headers in
-     * one cgo crossing (1.6+).  Every ngx_http_coraza_add_response_header()
-     * below then buffers into ctx->resp_hdr_collect instead of crossing per
-     * header; we flush the whole set once, just before
-     * coraza_process_response_headers().  If arming fails (allocation) or the
-     * symbol is absent, resp_hdr_collect stays NULL and the per-header path is
-     * used unchanged.
+     * Arm the bulk collector so all response headers go in one cgo crossing.
+     * Every ngx_http_coraza_add_response_header() below then buffers into
+     * ctx->resp_hdr_collect instead of crossing per header; we flush the
+     * whole set once, just before coraza_process_response_headers(). If
+     * arming fails (allocation), resp_hdr_collect stays NULL and the
+     * per-header path is used unchanged.
      */
-    if (ngx_http_coraza_bulk_headers_available()) {
-        ctx->resp_hdr_collect = ngx_array_create(r->pool, 16,
-            sizeof(ngx_http_coraza_header_t));
-        /* NULL on failure is fine: falls back to the direct path. */
-    }
+    ctx->resp_hdr_collect = ngx_array_create(r->pool, 16,
+        sizeof(ngx_http_coraza_header_t));
+    /* NULL on failure is fine: falls back to the direct path. */
 
     /*
      *
@@ -498,6 +519,35 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
         /* skip deleted headers (hash == 0): their key/value pointers may be
          * stale, like nginx does in its own header filter */
         if (data[i].hash == 0) {
+            continue;
+        }
+
+        /*
+         * The first pass above already submitted Server / Date /
+         * Last-Modified by reading r->headers_out.server / .date /
+         * .last_modified directly. On a proxied response nginx's upstream
+         * module points those dedicated fields at the very same
+         * ngx_table_elt_t entries that also live in this list (it does not
+         * copy them), so submitting every list entry unconditionally here
+         * would hand Coraza a second copy of each -- a SecRule counting or
+         * concatenating RESPONSE_HEADERS would see the value twice.
+         *
+         * Guard on pointer identity against exactly the dedicated fields the
+         * first pass consumes, never on header name: a response may
+         * legitimately carry a second, distinct header of the same name that
+         * nginx did not hoist into a dedicated slot (e.g. a second
+         * Last-Modified added by another module), and dropping that by name
+         * would hide it from the WAF entirely -- a detection bypass, which is
+         * strictly worse than a duplicate. Content-Length and Content-Type
+         * are read from computed/ngx_str_t fields (content_length_n,
+         * content_type), not from a list-resident ngx_table_elt_t, so they
+         * need no guard here.
+         */
+        if (&data[i] == r->headers_out.server
+            || &data[i] == r->headers_out.date
+            || (&data[i] == r->headers_out.last_modified
+                && r->headers_out.last_modified_time != -1))
+        {
             continue;
         }
 
@@ -618,45 +668,8 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     }
     if (ret > 0) {
         ctx->intervention_triggered = 1;
-        if (r->headers_out.location) {
-            /* Redirect: send status + Location through normal filter chain.
-             * ngx_http_filter_finalize_request would generate a new error
-             * page with fresh headers, discarding our Location header.
-             * Clear status_line so the core filter builds it from status
-             * (proxy sets status_line from upstream, e.g. "404 Not Found"). */
-            r->headers_out.status = ret;
-            r->headers_out.status_line.len = 0;
-            r->err_status = 0;
-            r->header_only = 1;
-
-            /* Clear entity/representation headers carried over from the
-             * original response so the synthesized 3xx redirect is not
-             * protocol-inconsistent (RFC 9110 §15.4 / §8.3-8.8): a body-less
-             * redirect must not advertise Content-Length, Content-Type,
-             * Content-Encoding, Last-Modified, ETag or Accept-Ranges that
-             * describe the representation we are discarding. */
-            r->headers_out.content_length_n = -1;
-            if (r->headers_out.content_length) {
-                r->headers_out.content_length->hash = 0;
-                r->headers_out.content_length = NULL;
-            }
-            ngx_str_null(&r->headers_out.content_type);
-            r->headers_out.content_type_len = 0;
-            r->headers_out.last_modified_time = -1;
-            if (r->headers_out.last_modified) {
-                r->headers_out.last_modified->hash = 0;
-                r->headers_out.last_modified = NULL;
-            }
-            if (r->headers_out.content_encoding) {
-                r->headers_out.content_encoding->hash = 0;
-                r->headers_out.content_encoding = NULL;
-            }
-            if (r->headers_out.etag) {
-                r->headers_out.etag->hash = 0;
-                r->headers_out.etag = NULL;
-            }
-            ngx_http_clear_accept_ranges(r);
-
+        if (ngx_http_coraza_is_redirect_status(ret) && r->headers_out.location) {
+            ngx_http_coraza_prepare_redirect(r, ret);
             return ngx_http_next_header_filter(r);
         }
         return ngx_http_filter_finalize_request(r, &ngx_http_coraza_module, ret);
@@ -722,4 +735,76 @@ ngx_int_t
 ngx_http_coraza_forward_header(ngx_http_request_t *r)
 {
     return ngx_http_next_header_filter(r);
+}
+
+
+/*
+ * The intervention statuses for which ngx_http_coraza_process_intervention()
+ * installs a redirect Location.  Both filters must test the STATUS, never
+ * merely the presence of r->headers_out.location: an origin response may carry
+ * a Location of its own -- an upstream 302 whose headers or body then trip a
+ * deny -- and keying off the header alone answers that deny with a header-only
+ * response carrying the origin's target instead of the configured error page.
+ *
+ * Shared so the header filter and the body filter's delayed path cannot drift.
+ */
+ngx_int_t
+ngx_http_coraza_is_redirect_status(ngx_int_t status)
+{
+    return status == NGX_HTTP_MOVED_PERMANENTLY
+           || status == NGX_HTTP_MOVED_TEMPORARILY
+           || status == NGX_HTTP_SEE_OTHER
+           || status == NGX_HTTP_TEMPORARY_REDIRECT
+           || status == NGX_HTTP_PERMANENT_REDIRECT;
+}
+
+
+/*
+ * Turn the in-flight response into a body-less redirect carrying the Location
+ * header that ngx_http_coraza_process_intervention() already installed.
+ *
+ * A redirect intervention must NOT go through ngx_http_filter_finalize_request():
+ * that builds a fresh error page with fresh headers and drops our Location, so
+ * the client gets the redirect status with nowhere to go.  Both the header
+ * filter and the delayed path in the body filter therefore prepare the response
+ * here and then send it down the normal filter chain instead.
+ *
+ * status_line is cleared so the core filter rebuilds it from status; a proxied
+ * response arrives with status_line already set from upstream (e.g.
+ * "404 Not Found") and would otherwise contradict the new status.
+ */
+void
+ngx_http_coraza_prepare_redirect(ngx_http_request_t *r, ngx_int_t status)
+{
+    r->headers_out.status = status;
+    r->headers_out.status_line.len = 0;
+    r->err_status = 0;
+    r->header_only = 1;
+
+    /* Clear entity/representation headers carried over from the original
+     * response so the synthesized 3xx redirect is not protocol-inconsistent
+     * (RFC 9110 §15.4 / §8.3-8.8): a body-less redirect must not advertise
+     * Content-Length, Content-Type, Content-Encoding, Last-Modified, ETag or
+     * Accept-Ranges that describe the representation we are discarding. */
+    r->headers_out.content_length_n = -1;
+    if (r->headers_out.content_length) {
+        r->headers_out.content_length->hash = 0;
+        r->headers_out.content_length = NULL;
+    }
+    ngx_str_null(&r->headers_out.content_type);
+    r->headers_out.content_type_len = 0;
+    r->headers_out.last_modified_time = -1;
+    if (r->headers_out.last_modified) {
+        r->headers_out.last_modified->hash = 0;
+        r->headers_out.last_modified = NULL;
+    }
+    if (r->headers_out.content_encoding) {
+        r->headers_out.content_encoding->hash = 0;
+        r->headers_out.content_encoding = NULL;
+    }
+    if (r->headers_out.etag) {
+        r->headers_out.etag->hash = 0;
+        r->headers_out.etag = NULL;
+    }
+    ngx_http_clear_accept_ranges(r);
 }
