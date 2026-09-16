@@ -177,6 +177,19 @@ ngx_http_coraza_append_request_body_file(ngx_http_coraza_ctx_t *ctx,
 
         if (offset < body_size) {
             ret = ngx_http_coraza_process_intervention(ctx, r, 0);
+            /*
+             * On an error_page re-entry pass a prior intervention has
+             * already been finalized, so yield instead of finalizing
+             * again -- the same treatment as the final poll below and as
+             * the two body-filter poll sites.  Yield explicitly rather
+             * than falling through to the cleanup with rc still NGX_OK,
+             * which would report the whole body inspected while the
+             * remaining chunks were never appended.
+             */
+            if (r->error_page) {
+                rc = NGX_DECLINED;
+                goto done;
+            }
             if (ret < 0) {
                 rc = NGX_HTTP_INTERNAL_SERVER_ERROR;
                 goto done;
@@ -196,7 +209,12 @@ done:
             ngx_close_file_n " \"%V\" failed", &file.name);
     }
 
-    if (rc != NGX_OK) {
+    /*
+     * NGX_DECLINED is the deliberate error_page-re-entry yield above, not a
+     * failure: the sibling poll sites yield without arming the flag, so this
+     * one must not arm it either.
+     */
+    if (rc != NGX_OK && rc != NGX_DECLINED) {
         ctx->intervention_triggered = 1;
     }
 
@@ -294,13 +312,33 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
         }
     }
 
-    if (ctx->waiting_more_body == 0)
+    if (ctx->waiting_more_body == 0 && ctx->body_submitted == 0)
     {
         int ret = 0;
         int already_inspected = 0;
         ngx_int_t rc;
 
         dd("request body phase is ready to be processed");
+
+        if (r->request_body == NULL) {
+            /*
+             * Nothing to submit (e.g. body access predicate flipped between
+             * checks, or nginx never allocated a request_body). Nothing was
+             * sent to Coraza, so there is no submission to mark: leave
+             * body_submitted clear and let the phase continue normally.
+             */
+            return NGX_DECLINED;
+        }
+
+        /*
+         * Mark the body as submitted before doing the append/process work so
+         * that any re-entry into this handler on the same request (e.g. a
+         * later PREACCESS-phase module re-running the phase) short-circuits
+         * above instead of re-appending the body and doubling it in the
+         * engine (duplicated REQUEST_BODY/ARGS_POST, halved effective
+         * SecRequestBodyLimit, phase 2 evaluated twice).
+         */
+        ctx->body_submitted = 1;
 
         ngx_chain_t *chain = r->request_body->bufs;
 
@@ -313,6 +351,17 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
             /*
              * Request body was saved to a file, probably we don't have a
              * copy of it in memory.
+             *
+             * Invariant: when spilled to a file there is no in-memory
+             * remainder to also walk. This handler always sets
+             * r->request_body_in_single_buf and
+             * r->request_body_in_clean_file (or leaves the file-only flag
+             * nginx already set) before calling
+             * ngx_http_read_client_request_body(), so nginx buffers the
+             * whole body as a single unit and only ever produces bufs *or*
+             * a temp_file for the memory-vs-file choice, never both with
+             * live data in each. Hence skipping the chain below when
+             * temp_file != NULL is safe and does not silently drop bytes.
              */
             dd("request body inspection: file");
 
@@ -368,6 +417,13 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
 
             /* Check for intervention after each chunk for prompt detection */
             ret = ngx_http_coraza_process_intervention(ctx, r, 0);
+            /*
+             * If nginx has already started streaming the error page body
+             * after a prior intervention, do not attempt another finalize.
+             */
+            if (r->error_page) {
+                return NGX_DECLINED;
+            }
             if (ret < 0) {
                 /* NGX_ERROR from the intervention handler: fail closed. */
                 ctx->intervention_triggered = 1;

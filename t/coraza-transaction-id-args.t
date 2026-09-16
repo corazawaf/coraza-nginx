@@ -48,6 +48,7 @@ http {
     %%TEST_GLOBALS_HTTP%%
 
     coraza_transaction_id "tid-A";
+    coraza_rules 'SecRuleEngine On';
 
     server {
         listen       127.0.0.1:8080;

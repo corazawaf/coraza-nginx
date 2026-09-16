@@ -7,4 +7,4 @@ For more information about those tests, read the subsection "Testing your
 patch" on the project's README file.
 
 For more about nginx tests, check their repository:
-http://hg.nginx.org/nginx-tests/
+https://github.com/nginx/nginx-tests

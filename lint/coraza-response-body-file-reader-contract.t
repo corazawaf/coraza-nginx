@@ -39,6 +39,28 @@ like($body_filter,
     qr/if \(!ngx_buf_in_memory\(chain->buf\)\s*&& chain->buf->in_file\s*&& chain->buf->file != NULL\s*&& !chain->buf->temp_file\).*?\*b = \*chain->buf/s,
     'stable delayed file ranges are retained without a body-sized pool copy');
 
+my $delayed_copy_start = index($body_filter,
+    'When response headers are being delayed');
+my $delayed_copy_end = index($body_filter,
+    "    if (ctx->headers_delayed) {\n        if (is_request_processed)",
+    $delayed_copy_start);
+
+ok($delayed_copy_start >= 0 && $delayed_copy_end > $delayed_copy_start,
+    'located the delayed buffer preparation block');
+
+my $delayed_copy = $delayed_copy_end > $delayed_copy_start
+    ? substr($body_filter, $delayed_copy_start,
+        $delayed_copy_end - $delayed_copy_start)
+    : '';
+
+unlike($delayed_copy, qr/return NGX_ERROR;/,
+    'delayed buffer preparation failures use the finalizer');
+
+my @delayed_errors = $delayed_copy =~
+    /return\s+ngx_http_coraza_body_filter_internal_error\(r,\s*ctx,\s*in\);/g;
+is(scalar @delayed_errors, 5,
+    'every delayed buffer preparation failure uses the internal-error helper');
+
 like($body_filter,
     qr/if \(is_last\).*?coraza_process_response_body\(ctx->coraza_transaction\)/s,
     'last file buffer still finalizes phase-4 inspection');
