@@ -87,7 +87,7 @@ $body
 }
 
 EOF_T
-	my $out = `$nginx -t -p $testdir/ -c $name 2>&1`;
+	my $out = `"$nginx" -t -p "$testdir/" -c "$name" 2>&1`;
 	return ($?, $out);
 }
 
