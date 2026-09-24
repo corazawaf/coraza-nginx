@@ -64,7 +64,7 @@ http {
 EOF_CONF
 
 $t->run();
-$t->plan(12);
+$t->plan(14);
 
 my $testdir = $t->testdir();
 
@@ -160,6 +160,16 @@ EOF_B
 isnt($rc, 0, 'SecRemoteRules split by a line continuation is rejected');
 like($out, qr/"SecRemoteRules" \(.*split\.rules:2\) is not implemented/,
 	'split-word rejection reports the line the record starts on');
+
+# 2d. relative path: resolved against the configuration prefix (the directory
+#     of the -c file here), scanned there, and reported with the resolved path
+($rc, $out) = conf_test($t, 'rel.conf', <<'EOF_B');
+    coraza on;
+    coraza_rules_file remote.rules;
+EOF_B
+isnt($rc, 0, 'a relative rules file path is resolved and scanned');
+like($out, qr/"SecRemoteRules" \(\Q$testdir\E\/remote\.rules:3\) is not implemented/,
+	'relative-path rejection reports the resolved path');
 
 # 3. controls: a commented-out SecRemoteRules must not trip the scan, and
 #    SecRemoteRulesFailAction is an implemented directive that must still pass;

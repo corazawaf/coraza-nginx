@@ -437,9 +437,11 @@ ngx_http_coraza_rules_scan_done(ngx_http_coraza_rules_scan_t *s)
 }
 
 /* Scan a rules file for unsupported directives before the workers try to
- * load it. Top level only: `Include`d files are not followed. An unreadable
- * file is reported as a warning rather than an error -- the path may resolve
- * differently for the worker, and the worker still fails closed on it. */
+ * load it. Top level only: `Include`d files are not followed. The path is
+ * resolved against the configuration prefix like other nginx file directives
+ * and stored resolved, so the workers open the very file scanned here. An
+ * unreadable file is a warning rather than an error: the worker fails closed
+ * on it with its own message. */
 static char *
 ngx_http_coraza_check_rules_file(ngx_conf_t *cf, ngx_str_t *path)
 {
@@ -455,6 +457,7 @@ ngx_http_coraza_check_rules_file(ngx_conf_t *cf, ngx_str_t *path)
 	if (ngx_conf_full_name(cf->cycle, &full, 1) != NGX_OK) {
 		return NGX_CONF_ERROR;
 	}
+	*path = full;
 
 	ngx_memzero(&file, sizeof(ngx_file_t));
 	file.name = full;

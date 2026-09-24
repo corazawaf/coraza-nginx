@@ -128,6 +128,9 @@ server {
 }
 ```
 
+A relative path is resolved against the configuration prefix, like other
+nginx file directives.
+
 `SecRemoteRules` is rejected at configuration time: the Coraza engine does not
 implement it, so it would otherwise pass `nginx -t` and then make every worker
 fail to start. Rules must come from local files or inline text. Every record of
