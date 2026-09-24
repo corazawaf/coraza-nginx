@@ -64,7 +64,7 @@ http {
 EOF_CONF
 
 $t->run();
-$t->plan(14);
+$t->plan(16);
 
 my $testdir = $t->testdir();
 
@@ -160,6 +160,22 @@ EOF_B
 isnt($rc, 0, 'SecRemoteRules split by a line continuation is rejected');
 like($out, qr/"SecRemoteRules" \(.*split\.rules:2\) is not implemented/,
 	'split-word rejection reports the line the record starts on');
+
+# 2e. the directive opens a backtick action list that is never closed: coraza
+#     errors out on "backticks left open", so the record is judged on what it
+#     has rather than silently accepted
+$t->write_file('open.rules', <<'RULES');
+SecRuleEngine On
+SecRemoteRules https://example.org/rules.conf `
+  id:4
+RULES
+($rc, $out) = conf_test($t, 'open.conf', <<'EOF_B');
+    coraza on;
+    coraza_rules_file %%TESTDIR%%/open.rules;
+EOF_B
+isnt($rc, 0, 'SecRemoteRules opening an unclosed backtick list is rejected');
+like($out, qr/"SecRemoteRules" \(.*open\.rules:2\) is not implemented/,
+	'unclosed-backtick rejection reports the record line');
 
 # 2d. relative path: resolved against the configuration prefix (the directory
 #     of the -c file here), scanned there, and reported with the resolved path

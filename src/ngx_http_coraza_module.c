@@ -429,11 +429,18 @@ ngx_http_coraza_rules_scan(ngx_http_coraza_rules_scan_t *s, const u_char *p,
 }
 
 /* End of input: the last line may lack its '\n'. A record left open by a
- * trailing continuation is never evaluated by coraza either. */
+ * trailing continuation is never evaluated by coraza either, but an action
+ * list left open is an error there, so its record is judged on what it has. */
 static const char *
 ngx_http_coraza_rules_scan_done(ngx_http_coraza_rules_scan_t *s)
 {
-	return ngx_http_coraza_rules_scan_eol(s);
+	const char *bad;
+
+	bad = ngx_http_coraza_rules_scan_eol(s);
+	if (bad == NULL && s->in_backticks) {
+		bad = ngx_http_coraza_rules_scan_word(s);
+	}
+	return bad;
 }
 
 /* Scan a rules file for unsupported directives before the workers try to
