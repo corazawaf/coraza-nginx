@@ -274,8 +274,7 @@ ngx_http_coraza_create_ctx(ngx_http_request_t *r)
  * remote-rules directive, SecRemoteRulesFailAction, parses fine.
  */
 static const char *ngx_http_coraza_unsupported_directives[] = {
-	"SecRemoteRules",
-	NULL
+	"SecRemoteRules"
 };
 
 /* Streaming scan of SecLang text for the directives above. The state is
@@ -302,13 +301,19 @@ ngx_http_coraza_rules_scan_init(ngx_http_coraza_rules_scan_t *s)
 static const char *
 ngx_http_coraza_rules_scan_word(ngx_http_coraza_rules_scan_t *s)
 {
-	const char **d;
+	const char *d;
+	size_t      i;
 
-	for (d = ngx_http_coraza_unsupported_directives; *d != NULL; d++) {
-		if (s->wlen == ngx_strlen(*d)
-			&& ngx_strncasecmp(s->word, (u_char *) *d, s->wlen) == 0)
+	for (i = 0;
+		 i < sizeof(ngx_http_coraza_unsupported_directives)
+			 / sizeof(ngx_http_coraza_unsupported_directives[0]);
+		 i++)
+	{
+		d = ngx_http_coraza_unsupported_directives[i];
+		if (s->wlen == ngx_strlen(d)
+			&& ngx_strncasecmp(s->word, (u_char *) d, s->wlen) == 0)
 		{
-			return *d;
+			return d;
 		}
 	}
 	return NULL;
