@@ -130,9 +130,11 @@ server {
 
 `SecRemoteRules` is rejected at configuration time: the Coraza engine does not
 implement it, so it would otherwise pass `nginx -t` and then make every worker
-fail to start. Rules must come from local files or inline text. Every line of
-`coraza_rules` text and of each `coraza_rules_file` is checked; rules files are
-scanned at their top level only (`Include`d files are not followed).
+fail to start. Rules must come from local files or inline text. Every record of
+`coraza_rules` text and of each `coraza_rules_file` is checked (backslash
+continuations and backtick action lists are followed the way Coraza's parser
+does); rules files are scanned at their top level only (`Include`d files are
+not followed).
 
 coraza_rules
 -----------------

@@ -277,16 +277,26 @@ static const char *ngx_http_coraza_unsupported_directives[] = {
 	"SecRemoteRules"
 };
 
-/* Streaming scan of SecLang text for the directives above. The state is
- * bounded (one line counter, the first word of the current line), so a rules
- * file of any size can be checked from a small read buffer: only the first
- * word of each line matters, and a word longer than any directive name we
- * know is not ours. Comment lines are skipped. Directive names are matched
- * case-insensitively as whole words, the way the SecLang parser does. */
+/* Streaming scan of SecLang text for the directives above, mirroring how
+ * coraza's parser (internal/seclang/parser.go, parseString) assembles logical
+ * records from physical lines: each line is trimmed; blank and "#" lines are
+ * ignored wherever they appear; a line ending in "\" continues the record on
+ * the next line with the backslash removed and nothing inserted; a line ending
+ * in "`" opens an action list that runs until a line starting with "`". The
+ * directive is the first space-delimited word of the assembled record, matched
+ * case-insensitively. The state is bounded (line counters, a few flags, the
+ * first word of the current record), so a rules file of any size can be
+ * checked from a small read buffer. A word longer than any directive name we
+ * know is not ours. */
 typedef struct {
-	ngx_uint_t  line;      /* 1-based line of the word being collected */
-	ngx_uint_t  skip;      /* the rest of the current line is irrelevant */
-	size_t      wlen;      /* bytes collected in word[] */
+	ngx_uint_t  line;          /* 1-based physical line being read */
+	ngx_uint_t  rec_line;      /* line where the current record started */
+	unsigned    in_record:1;   /* a record is being assembled */
+	unsigned    in_backticks:1;
+	unsigned    word_done:1;   /* the record's first word is complete */
+	u_char      first;         /* first non-blank byte of this line, or 0 */
+	u_char      last;          /* last non-blank byte of this line so far */
+	size_t      wlen;          /* bytes collected in word[] */
 	u_char      word[32];
 } ngx_http_coraza_rules_scan_t;
 
@@ -297,7 +307,7 @@ ngx_http_coraza_rules_scan_init(ngx_http_coraza_rules_scan_t *s)
 	s->line = 1;
 }
 
-/* The word of the current line is complete: is it one we refuse? */
+/* The record is complete: is its directive one we refuse? */
 static const char *
 ngx_http_coraza_rules_scan_word(ngx_http_coraza_rules_scan_t *s)
 {
@@ -319,8 +329,56 @@ ngx_http_coraza_rules_scan_word(ngx_http_coraza_rules_scan_t *s)
 	return NULL;
 }
 
-/* Feed the next chunk. Returns the refused directive as soon as its line is
- * complete (s->line then tells where), or NULL to keep feeding. */
+/* A physical line is complete: does it end the record, and if so, is the
+ * record refused? */
+static const char *
+ngx_http_coraza_rules_scan_eol(ngx_http_coraza_rules_scan_t *s)
+{
+	const char *bad;
+	unsigned    cont;
+
+	if (s->first == 0 || s->first == '#') {
+		s->first = 0;                      /* blank or comment: ignored */
+		s->last = 0;
+		return NULL;
+	}
+
+	if (!s->in_backticks && s->last == '`') {
+		s->in_backticks = 1;
+	} else if (s->in_backticks && s->first == '`') {
+		s->in_backticks = 0;
+	}
+
+	if (s->in_backticks) {
+		cont = 1;
+	} else if (s->last == '\\') {
+		cont = 1;
+		/* The backslash is dropped and the next line is glued to this one,
+		 * so a word cut by the continuation goes on collecting. */
+		if (!s->word_done && s->wlen > 0 && s->word[s->wlen - 1] == '\\') {
+			s->wlen--;
+		}
+	} else {
+		cont = 0;
+	}
+
+	s->first = 0;
+	s->last = 0;
+
+	if (cont) {
+		return NULL;
+	}
+
+	bad = ngx_http_coraza_rules_scan_word(s);
+	s->in_record = 0;
+	s->word_done = 0;
+	s->wlen = 0;
+	return bad;
+}
+
+/* Feed the next chunk. Returns the refused directive as soon as its record is
+ * complete (s->rec_line then tells where it started), or NULL to keep
+ * feeding. */
 static const char *
 ngx_http_coraza_rules_scan(ngx_http_coraza_rules_scan_t *s, const u_char *p,
 	size_t len)
@@ -330,43 +388,52 @@ ngx_http_coraza_rules_scan(ngx_http_coraza_rules_scan_t *s, const u_char *p,
 
 	for (; p < end; p++) {
 		if (*p == '\n') {
-			bad = ngx_http_coraza_rules_scan_word(s);
+			bad = ngx_http_coraza_rules_scan_eol(s);
 			if (bad != NULL) {
 				return bad;
 			}
 			s->line++;
-			s->skip = 0;
-			s->wlen = 0;
 			continue;
 		}
-		if (s->skip) {
-			continue;
-		}
-		if (*p == ' ' || *p == '\t' || *p == '\r') {
-			if (s->wlen > 0) {
-				s->skip = 1;           /* first word done, keep it for '\n' */
+
+		if (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\v'
+			|| *p == '\f')
+		{
+			/* Leading blanks are trimmed; a blank after the word ends it. */
+			if (s->first != 0 && s->first != '#' && s->wlen > 0) {
+				s->word_done = 1;
 			}
 			continue;
 		}
-		if (s->wlen == 0 && *p == '#') {
-			s->skip = 1;               /* comment line */
+
+		if (s->first == 0) {
+			s->first = *p;
+			if (*p != '#' && !s->in_record) {
+				s->in_record = 1;
+				s->rec_line = s->line;
+			}
+		}
+		s->last = *p;
+
+		if (s->first == '#' || s->word_done) {
 			continue;
 		}
 		if (s->wlen < sizeof(s->word)) {
 			s->word[s->wlen++] = *p;
 		} else {
 			s->wlen = 0;               /* too long to be a directive we know */
-			s->skip = 1;
+			s->word_done = 1;
 		}
 	}
 	return NULL;
 }
 
-/* End of input: the last line may lack its '\n'. */
+/* End of input: the last line may lack its '\n'. A record left open by a
+ * trailing continuation is never evaluated by coraza either. */
 static const char *
 ngx_http_coraza_rules_scan_done(ngx_http_coraza_rules_scan_t *s)
 {
-	return ngx_http_coraza_rules_scan_word(s);
+	return ngx_http_coraza_rules_scan_eol(s);
 }
 
 /* Scan a rules file for unsupported directives before the workers try to
@@ -426,7 +493,7 @@ ngx_http_coraza_check_rules_file(ngx_conf_t *cf, ngx_str_t *path)
 						   "the Coraza engine; the WAF would fail to build "
 						   "in every worker after fork. Remove it: rules "
 						   "must come from local files or inline text",
-						   bad, &full, scan.line);
+						   bad, &full, scan.rec_line);
 		return NGX_CONF_ERROR;
 	}
 
@@ -459,7 +526,7 @@ ngx_conf_set_rules(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 							   "not implemented by the Coraza engine; the WAF "
 							   "would fail to build in every worker after fork. "
 							   "Remove it: rules must come from local files or "
-							   "inline text", bad, scan.line);
+							   "inline text", bad, scan.rec_line);
 			return NGX_CONF_ERROR;
 		}
 	}

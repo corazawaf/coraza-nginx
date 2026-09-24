@@ -10,7 +10,9 @@
 # failed to build its WAF (issue #139). Both entry points are covered: inline
 # text (any line of it) and a rules file (top level, comments ignored,
 # case-insensitive, scanned through a small buffer so file size and long lines
-# do not matter).
+# do not matter). Records are assembled the way coraza's parser does it, so
+# backslash continuations and backtick action lists are neither bypass nor
+# false positive.
 
 ###############################################################################
 
@@ -62,7 +64,7 @@ http {
 EOF_CONF
 
 $t->run();
-$t->plan(10);
+$t->plan(12);
 
 my $testdir = $t->testdir();
 
@@ -143,14 +145,41 @@ isnt($rc, 0, 'SecRemoteRules past the read buffer is still rejected');
 like($out, qr/"SecRemoteRules" \(.*big\.rules:803\) is not implemented/,
 	'large-file rejection reports the right line (no trailing newline)');
 
+# 2c. the directive name itself cut by a backslash continuation: coraza glues
+#     the next (trimmed) line to this one, so the record still reads
+#     "SecRemoteRules ..."; the report points at the line the record starts on
+$t->write_file('split.rules', <<'RULES');
+SecRuleEngine On
+SecRemoteRul\
+    es https://example.org/rules.conf
+RULES
+($rc, $out) = conf_test($t, 'split.conf', <<'EOF_B');
+    coraza on;
+    coraza_rules_file %%TESTDIR%%/split.rules;
+EOF_B
+isnt($rc, 0, 'SecRemoteRules split by a line continuation is rejected');
+like($out, qr/"SecRemoteRules" \(.*split\.rules:2\) is not implemented/,
+	'split-word rejection reports the line the record starts on');
+
 # 3. controls: a commented-out SecRemoteRules must not trip the scan, and
 #    SecRemoteRulesFailAction is an implemented directive that must still pass;
-#    so must a longer word that merely starts with the directive name
+#    so must a longer word that merely starts with the directive name, and
+#    the words "SecRemoteRules" at the start of a continuation line or of a
+#    line inside a backtick action list, which belong to the record above
 $t->write_file('ok.rules', <<'RULES');
 SecRuleEngine On
 # SecRemoteRules https://example.org/rules.conf   -- commented out
 SecRemoteRulesFailAction Abort
 SecRemoteRulesX not-a-real-directive-but-not-ours-to-refuse
+SecRule ARGS "@rx foo" \
+    # a comment inside a continued record is ignored, the record goes on
+
+SecRemoteRules https://example.org/rules.conf is only text in this msg" \
+    "id:2,phase:1,pass"
+SecRule ARGS "@rx bar" `
+SecRemoteRules https://example.org/rules.conf
+    id:3,phase:1,pass
+`
 RULES
 ($rc, $out) = conf_test($t, 'ok.conf', <<'EOF_B');
     coraza on;
