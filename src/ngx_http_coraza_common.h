@@ -94,6 +94,7 @@ typedef struct {
     unsigned intervention_triggered:1;
     unsigned headers_delayed:1;
     unsigned response_body_processable:1; /* body inspection needed for this tx */
+    unsigned response_phase4_done:1;      /* phase 4 finalised in the header filter */
 } ngx_http_coraza_ctx_t;
 
 

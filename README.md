@@ -223,10 +223,15 @@ String can contain variables.
 
 When enabled (the default), response headers are held back from the client
 until phase-4 response body inspection completes, so a phase-4 rule can still
-return a clean error page. When disabled, headers are sent as soon as they are
-ready, which means a late phase-4 intervention can no longer replace a response
-whose headers have already gone out. Operators whose ruleset has no phase-4
-response rules can turn this off to restore normal header streaming.
+return a clean error page. The delay only applies when the body will actually
+be inspected, that is `SecResponseBodyAccess On` and a Content-Type listed in
+`SecResponseBodyMimeType`; otherwise phase 4 is finalised on the response
+headers alone, before they are sent, and the response streams (a phase-4 rule
+on `ARGS`, `TX` or the response headers still denies it cleanly). When
+disabled, headers are sent as soon as they are ready, which means a late
+phase-4 intervention can no longer replace a response whose headers have
+already gone out. Operators whose ruleset has no phase-4 response rules can
+turn this off to restore normal header streaming.
 
 ## Configuration merging
 
