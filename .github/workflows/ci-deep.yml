@@ -270,9 +270,19 @@ jobs:
           echo "CORAZA_MODULE_SO=$PWD/objs/ngx_http_coraza_module.so" >> "$GITHUB_ENV"
       - name: Memcheck soak (300s @ 8 conc, WITH suppressions)
         env:
+          TMPDIR: ${{ runner.temp }}/soak-evidence
           USE_VALGRIND: "1"
         run: |
+          mkdir -p "$TMPDIR"
           bash tools/soak.sh "$SERVER_BIN" 300 8
+      - name: Upload failed soak evidence
+        if: failure()
+        # actions/upload-artifact v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: soak-memcheck-${{ matrix.server }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/soak-evidence/
+          if-no-files-found: ignore
 
   helgrind:
     name: Valgrind Helgrind soak (${{ matrix.server }}/${{ matrix.arch }})
@@ -404,9 +414,19 @@ jobs:
           echo "CORAZA_MODULE_SO=$PWD/objs/ngx_http_coraza_module.so" >> "$GITHUB_ENV"
       - name: Helgrind soak (300s @ 8 conc, --error-exitcode=99, WITH suppressions)
         env:
+          TMPDIR: ${{ runner.temp }}/soak-evidence
           USE_HELGRIND: "1"
         run: |
+          mkdir -p "$TMPDIR"
           bash tools/soak.sh "$SERVER_BIN" 300 8
+      - name: Upload failed soak evidence
+        if: failure()
+        # actions/upload-artifact v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: soak-helgrind-${{ matrix.server }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/soak-evidence/
+          if-no-files-found: ignore
 
   scanners:
     name: Security scanners
@@ -674,8 +694,18 @@ jobs:
 
       - name: Sanitizer soak (300s @ 8 conc)
         env:
+          TMPDIR: ${{ runner.temp }}/soak-evidence
           ASAN_OPTIONS: "verify_asan_link_order=0"
           CORAZA_MODULE_SO: ${{ github.workspace }}/nginx-${{ env.NGINX_VERSION }}/objs/ngx_http_coraza_module.so
         run: |
+          mkdir -p "$TMPDIR"
           bash tools/soak.sh \
             "$GITHUB_WORKSPACE/nginx-${NGINX_VERSION}/objs/nginx" 300 4
+      - name: Upload failed soak evidence
+        if: failure()
+        # actions/upload-artifact v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: soak-sanitizer
+          path: ${{ runner.temp }}/soak-evidence/
+          if-no-files-found: ignore
