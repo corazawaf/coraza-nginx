@@ -231,8 +231,6 @@ ngx_http_coraza_create_ctx(ngx_http_request_t *r)
 
 	dd("transaction created");
 
-	ngx_http_set_ctx(r, ctx, ngx_http_coraza_module);
-
 	/*
 	 * Register the cleanup now that the transaction exists, so that any
 	 * failure below (e.g. the ngx_pstrdup) still frees the transaction.
@@ -261,6 +259,9 @@ ngx_http_coraza_create_ctx(ngx_http_request_t *r)
 	{
 		ngx_str_null(&ctx->transaction_id);
 	}
+
+	/* Publish only after construction and cleanup registration succeed. */
+	ngx_http_set_ctx(r, ctx, ngx_http_coraza_module);
 
 	return ctx;
 }

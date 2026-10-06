@@ -1,0 +1,29 @@
+---
+name: Context construction contracts
+
+'on':
+  push:
+    branches: [main, master, dev, "[0-9][0-9]-*"]
+  pull_request: {}
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  context-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repo
+        # actions/checkout v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - name: Install compiler and test runner
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -y -qq --no-install-recommends install gcc libc6-dev perl
+      - name: Test constructor and cleanup ownership
+        run: prove -v ci/context-construction.t
