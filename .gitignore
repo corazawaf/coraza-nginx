@@ -1,4 +1,5 @@
 .vscode/
+/_codeql_detected_source_root
 
 # fuzz build artifacts
 fuzz/fuzz_str_to_char
