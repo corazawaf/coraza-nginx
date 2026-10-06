@@ -170,9 +170,12 @@ if [ "$up" -ne 1 ]; then
     echo "--- error.log ---"; cat "$WORK/logs/error.log" 2>/dev/null || echo "(none written)"
     # valgrind/helgrind print startup aborts to their own --log-file, not
     # stderr — dump them too or a sub-second crash shows nothing.
-    if ls "$WORK"/logs/valgrind.* "$WORK"/logs/helgrind.* >/dev/null 2>&1; then
+    shopt -s nullglob
+    diagnostic_logs=("$WORK"/logs/valgrind.* "$WORK"/logs/helgrind.*)
+    shopt -u nullglob
+    if [ "${#diagnostic_logs[@]}" -gt 0 ]; then
         echo "--- valgrind/helgrind log ---"
-        cat "$WORK"/logs/valgrind.* "$WORK"/logs/helgrind.* 2>/dev/null || true
+        cat "${diagnostic_logs[@]}" || true
     fi
     kill "$NGINX_PID" 2>/dev/null || true
     exit 1
@@ -279,15 +282,43 @@ if ls "$WORK"/logs/ubsan* >/dev/null 2>&1; then
         echo "FAIL: could not inspect UBSan diagnostics"; problems=1
     fi
 fi
-if ls "$WORK"/logs/valgrind.* "$WORK"/logs/helgrind.* >/dev/null 2>&1; then
-    if grep -qE 'ERROR SUMMARY: [1-9]|definitely lost: [1-9]' \
-            "$WORK"/logs/valgrind.* "$WORK"/logs/helgrind.* 2>/dev/null; then
-        echo "FAIL: valgrind/helgrind errors:"
-        grep -E 'ERROR SUMMARY|definitely lost' \
-            "$WORK"/logs/valgrind.* "$WORK"/logs/helgrind.* 2>/dev/null
-        problems=1
+# Expand each report family independently: an unmatched glob must not hide
+# reports from the other tool. Match RUN's Valgrind precedence when both flags
+# are set, and require evidence from the tool that actually ran.
+shopt -s nullglob
+valgrind_logs=("$WORK"/logs/valgrind.*)
+helgrind_logs=("$WORK"/logs/helgrind.*)
+shopt -u nullglob
+selected_logs=()
+if [ "${USE_VALGRIND:-0}" = "1" ]; then
+    selected_logs=("${valgrind_logs[@]}")
+    if [ "${#valgrind_logs[@]}" -eq 0 ]; then
+        echo "FAIL: missing valgrind report"; problems=1
+    fi
+elif [ "${USE_HELGRIND:-0}" = "1" ]; then
+    selected_logs=("${helgrind_logs[@]}")
+    if [ "${#helgrind_logs[@]}" -eq 0 ]; then
+        echo "FAIL: missing helgrind report"; problems=1
     fi
 fi
+for selected_log in "${selected_logs[@]}"; do
+    if [ ! -s "$selected_log" ]; then
+        echo "FAIL: empty selected-tool report: $selected_log"; problems=1
+    fi
+done
+for diagnostic_log in "${valgrind_logs[@]}" "${helgrind_logs[@]}"; do
+    diagnostic_rc=0
+    # Do not use -q: it can mask read errors after finding a match.
+    grep -E 'ERROR SUMMARY: [1-9]|definitely lost: [1-9]' \
+        "$diagnostic_log" >/dev/null || diagnostic_rc=$?
+    if [ "$diagnostic_rc" -eq 0 ]; then
+        echo "FAIL: valgrind/helgrind errors:"
+        cat "$diagnostic_log"
+        problems=1
+    elif [ "$diagnostic_rc" -ne 1 ]; then
+        echo "FAIL: could not inspect $diagnostic_log"; problems=1
+    fi
+done
 if grep -nE '\[alert\]|\[emerg\]' "$WORK/logs/error.log" 2>/dev/null; then
     echo "FAIL: alert/emerg in error.log"; problems=1
 fi
