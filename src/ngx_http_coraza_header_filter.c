@@ -714,6 +714,54 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * minutes or hours on a real event stream, i.e. the client gets nothing
      * (issue #81).  See ngx_http_coraza_is_sse_response() above for the
      * security trade-off this accepts.
+     *
+     * Finally, we skip the statuses that carry no content at all.  Returning
+     * NGX_OK here skips every header filter below this module at
+     * ngx_http_send_header() time; they run later, from
+     * ngx_http_coraza_forward_header().  Two of those deferrals corrupt the
+     * response framing:
+     *
+     *   - 304 Not Modified / 204 No Content: content handlers read
+     *     r->header_only only AFTER ngx_http_send_header() returns, and it is
+     *     nginx's own final header filter -- skipped here -- that sets it.
+     *     The static handler therefore streams the file for a response that
+     *     must transfer no content at all (RFC 9110 section 15.4.5), and the
+     *     delayed flush emits those headers followed by a body.  The HEAD
+     *     form of this is already excluded above; these two statuses are the
+     *     status-code form.  See t/coraza-delayed-not-modified.t.
+     *
+     *     Only the 304 half has end-to-end coverage, and that is a property of
+     *     nginx rather than a gap in the tests: 304 is produced by
+     *     ngx_http_not_modified_filter, a header filter ABOVE this one, so it
+     *     rewrites headers_out.status after the static handler has already
+     *     committed to streaming a body -- which is exactly the race being
+     *     guarded.  Nothing in stock nginx sets headers_out.status to 204 from
+     *     a filter: ngx_http_static_handler hard-codes 200, `return 204` and a
+     *     204 from ngx_http_dav_module are handler return codes that go through
+     *     ngx_http_send_special_response with no body at all, proxied 204s have
+     *     u->length forced to 0 above this module, and an `error_page =204`
+     *     redirect is already rejected by the !r->error_page conjunct above.
+     *     So NGX_HTTP_NO_CONTENT is defensive depth for a third-party or future
+     *     single-call handler, not a branch reachable from this test suite.
+     *     Every route was tried against an unpatched build and none leaked a
+     *     body; do not re-attempt a 204 wire test without a fixture module.
+     *
+     *   - 206 Partial Content: ngx_http_range_body_filter sits ABOVE this
+     *     module, so a single-call handler's body passes it before the range
+     *     HEADER filter has created its context.  The body is never sliced,
+     *     and the range header filter then stamps 206 + Content-Range + a
+     *     short Content-Length onto a full-length body -- a response-framing
+     *     desync.  A status test cannot catch this one, because the status is
+     *     still 200 when this filter runs; the range header filter promotes it
+     *     to 206 later.  So clear r->allow_ranges (and r->single_range) before
+     *     delaying, which tells that filter to leave the response whole.  See
+     *     t/coraza-delayed-range.t.
+     *
+     * Note this deliberately does NOT restrict the delay to 200 OK.  Phase-4
+     * rules must still be able to intercept a redirect or an origin 401/403
+     * before its headers reach the client, which is exactly what
+     * t/coraza-proxy.t and t/coraza-response-body-delayed-block.t cover; a
+     * status == NGX_HTTP_OK test breaks those with "header already sent".
      */
     if (mcf->delay_response_headers
         && r->method != NGX_HTTP_HEAD && !r->header_only && !r->error_page
@@ -776,6 +824,8 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
         && r->method != NGX_HTTP_HEAD && !r->header_only && !r->error_page
         && r == r->main
         && r->headers_out.status != NGX_HTTP_SWITCHING_PROTOCOLS
+        && r->headers_out.status != NGX_HTTP_NO_CONTENT
+        && r->headers_out.status != NGX_HTTP_NOT_MODIFIED
         && !ngx_http_coraza_is_sse_response(r))
     {
         /*
@@ -784,6 +834,37 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
          * the body into memory for the inspection.
          */
         r->filter_need_in_memory = 1;
+
+        /*
+         * Suppress byte-range processing for this response: the range header
+         * filter runs after the body has already passed the range body
+         * filter, so a 206 it produced here would describe a body that was
+         * never sliced.  Serving the entity whole is the correct, safe
+         * degradation while the headers are held.
+         *
+         * This clears the flag only; it deliberately does NOT use
+         * ngx_http_clear_accept_ranges(), which would also unset an
+         * Accept-Ranges header copied from an upstream origin.  For a
+         * non-cacheable proxied response ngx_http_upstream_copy_allow_ranges()
+         * copies that header into headers_out.accept_ranges without ever
+         * setting allow_ranges, so such a response keeps advertising
+         * Accept-Ranges while we serve it whole.  That inconsistency is
+         * cosmetic -- a client that acts on it gets the full entity under a
+         * 200, which is exactly what RFC 9110 section 14.2 permits -- and
+         * suppressing it here would strip Accept-Ranges from every clean
+         * proxied response, which is a visible behaviour change well beyond
+         * this fix and is asserted against by the positive control in
+         * t/coraza-redirect-clears-entity-headers.t.
+         *
+         * single_range is belt-and-braces: ngx_http_range_header_filter()
+         * returns early on !r->allow_ranges before single_range is ever read.
+         * It is kept deliberately so that a partial revert of the
+         * allow_ranges line cannot silently re-enable range slicing on a body
+         * this filter has already let through unsliced.
+         */
+        r->allow_ranges = 0;
+        r->single_range = 0;
+
         ctx->headers_delayed = 1;
         ctx->pending_chain = NULL;
         ctx->pending_chain_last = &ctx->pending_chain;
