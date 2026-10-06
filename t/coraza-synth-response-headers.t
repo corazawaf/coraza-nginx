@@ -5,8 +5,8 @@
 # The header filter synthesizes several connection-specific / computed response
 # headers (Connection, Keep-Alive, Transfer-Encoding, Vary) and feeds them to
 # the WAF so RESPONSE_HEADERS rules can inspect values nginx computes late.
-# Each runtime check pins one synthesis branch: a phase-3 rule matching the
-# synthesized value must fire, proving the header reached Coraza.
+# Runtime checks below cover Connection and Keep-Alive delivery. Source-text
+# assertions are contract lint only and provide no execution coverage.
 
 ###############################################################################
 
@@ -29,7 +29,7 @@ use coraza_crash_check;
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http/)->plan(10);
+my $t = Test::Nginx->new()->has(qw/http/)->plan(8);
 
 my $root = "$FindBin::Bin/..";
 my $src  = slurp("$root/src/ngx_http_coraza_header_filter.c");
@@ -145,24 +145,14 @@ like($r, qr/text\/event-stream/, 'SSE content-type preserved');
 # be gated on !ngx_http_coraza_is_sse_response(r).
 like($src,
     qr/delay_response_headers.*?&&\s*!ngx_http_coraza_is_sse_response\(r\)/s,
-    'header delay is skipped for SSE responses (delay guard excludes is_sse)');
+    'contract lint: delay guard excludes is_sse');
 
-# The Transfer-Encoding and Vary resolvers cannot be driven at runtime: both
-# r->chunked and r->gzip_vary are set by filters that run AFTER the Coraza
-# header filter (Coraza registers last, so it runs first), so those flags are
-# always 0 when the resolvers execute. Pin the synthesis code by source grep
-# instead -- the same contract idiom used for the delayed file-buffer clone.
-like($src,
-    qr/r->chunked.*?ngx_string\("chunked"\).*?ngx_http_coraza_add_response_header/s,
-    'Transfer-Encoding: chunked is synthesized to the WAF when r->chunked');
-
-like($src,
-    qr/r->gzip_vary\s*&&\s*clcf->gzip_vary.*?ngx_string\("Accept-Encoding"\).*?ngx_http_coraza_add_response_header/s,
-    'Vary: Accept-Encoding is synthesized AND delivered to the WAF when gzip_vary applies');
+# Transfer-Encoding and gzip Vary execution coverage lives in
+# ci/header-transform-fidelity.t; source text is not its behavioral oracle.
 
 like($src,
     qr/r->headers_out\.status\s*==\s*NGX_HTTP_SWITCHING_PROTOCOLS.*?connection\s*=\s*"upgrade".*?ngx_http_coraza_add_response_header/s,
-    'Connection: upgrade is synthesized AND delivered to the WAF on 101 Switching Protocols');
+    'contract lint: upgrade resolver calls the header collector');
 
 ###############################################################################
 

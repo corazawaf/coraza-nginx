@@ -11,6 +11,8 @@
  */
 
 
+/* NGX_BUILD must be defined before common.h first includes nginx.h. */
+#include <ngx_config.h>
 #include "ngx_http_coraza_common.h"
 
 static ngx_http_output_header_filter_pt ngx_http_next_header_filter;
@@ -132,6 +134,7 @@ static ngx_int_t
 ngx_http_coraza_resolv_header_server(ngx_http_request_t *r, ngx_str_t name, off_t offset)
 {
     static char ngx_http_server_full_string[] = NGINX_VER;
+    static char ngx_http_server_build_string[] = NGINX_VER_BUILD;
     static char ngx_http_server_string[] = "nginx";
 
     ngx_http_core_loc_conf_t *clcf = NULL;
@@ -142,9 +145,12 @@ ngx_http_coraza_resolv_header_server(ngx_http_request_t *r, ngx_str_t name, off_
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
     if (r->headers_out.server == NULL) {
-        if (clcf->server_tokens) {
+        if (clcf->server_tokens == NGX_HTTP_SERVER_TOKENS_ON) {
             value.data = (u_char *)ngx_http_server_full_string;
             value.len = sizeof(ngx_http_server_full_string) - 1;
+        } else if (clcf->server_tokens == NGX_HTTP_SERVER_TOKENS_BUILD) {
+            value.data = (u_char *)ngx_http_server_build_string;
+            value.len = sizeof(ngx_http_server_build_string) - 1;
         } else {
             value.data = (u_char *)ngx_http_server_string;
             value.len = sizeof(ngx_http_server_string) - 1;
@@ -181,6 +187,36 @@ ngx_http_coraza_resolv_header_date(ngx_http_request_t *r, ngx_str_t name, off_t 
 }
 
 
+static ngx_flag_t
+ngx_http_coraza_will_chunk(ngx_http_request_t *r)
+{
+    ngx_http_core_loc_conf_t *clcf;
+
+    /* The terminal HTTP/2 and HTTP/3 filters bypass chunked entirely.
+     * For HTTP/1, mirror the public-state selection in nginx's chunked
+     * header filter, which runs after this collector. Gzip and range have
+     * already finalized content_length_n and the representation here. */
+    if (r->http_version != NGX_HTTP_VERSION_11
+        || r->headers_out.status < NGX_HTTP_OK
+        || r->headers_out.status == NGX_HTTP_NO_CONTENT
+        || r->headers_out.status == NGX_HTTP_NOT_MODIFIED
+        || r != r->main
+        || r->method == NGX_HTTP_HEAD
+        || (r->method == NGX_HTTP_CONNECT
+            && r->headers_out.status < NGX_HTTP_SPECIAL_RESPONSE))
+    {
+        return 0;
+    }
+
+    clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
+    if (clcf->chunked_transfer_encoding
+        && (r->headers_out.content_length_n == -1 || r->expect_trailers))
+    {
+        return 1;
+    }
+    return 0;
+}
+
 static ngx_int_t
 ngx_http_coraza_resolv_header_content_length(ngx_http_request_t *r, ngx_str_t name, off_t offset)
 {
@@ -190,6 +226,11 @@ ngx_http_coraza_resolv_header_content_length(ngx_http_request_t *r, ngx_str_t na
     u_char *p;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
+
+    /* Chunked clears a known length when HTTP/1.1 trailers are expected. */
+    if (r->expect_trailers && ngx_http_coraza_will_chunk(r)) {
+        return NGX_OK;
+    }
 
     if (r->headers_out.content_length_n >= 0)
     {
@@ -210,14 +251,45 @@ static ngx_int_t
 ngx_http_coraza_resolv_header_content_type(ngx_http_request_t *r, ngx_str_t name, off_t offset)
 {
     ngx_http_coraza_ctx_t *ctx = NULL;
+    ngx_str_t value;
+    u_char *p;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
     if (r->headers_out.content_type.len > 0)
     {
+        value = r->headers_out.content_type;
+
+        /* Match core's final Content-Type without changing headers_out: core
+         * still needs to append the charset when it writes the response. */
+        if (r->headers_out.content_type_len == value.len
+            && r->headers_out.charset.len)
+        {
+            if (r->headers_out.charset.len
+                > NGX_MAX_SIZE_T_VALUE - (sizeof("; charset=") - 1)
+                || value.len > NGX_MAX_SIZE_T_VALUE
+                               - (sizeof("; charset=") - 1)
+                               - r->headers_out.charset.len)
+            {
+                return NGX_ERROR;
+            }
+
+            value.len += sizeof("; charset=") - 1
+                         + r->headers_out.charset.len;
+            value.data = ngx_pnalloc(r->pool, value.len);
+            if (value.data == NULL) {
+                return NGX_ERROR;
+            }
+
+            p = ngx_cpymem(value.data, r->headers_out.content_type.data,
+                          r->headers_out.content_type.len);
+            p = ngx_cpymem(p, "; charset=", sizeof("; charset=") - 1);
+            ngx_memcpy(p, r->headers_out.charset.data,
+                       r->headers_out.charset.len);
+        }
 
         return ngx_http_coraza_add_response_header(r, ctx, &name,
-            &r->headers_out.content_type);
+            &value);
     }
 
     return NGX_OK;
@@ -370,16 +442,13 @@ ngx_http_coraza_resolv_header_connection(ngx_http_request_t *r, ngx_str_t name, 
 static ngx_int_t
 ngx_http_coraza_resolv_header_transfer_encoding(ngx_http_request_t *r, ngx_str_t name, off_t offset)
 {
-    ngx_http_coraza_ctx_t *ctx = NULL;
-
-    if (r->chunked) {
+    if (ngx_http_coraza_will_chunk(r)) {
+        ngx_http_coraza_ctx_t *ctx;
         ngx_str_t value = ngx_string("chunked");
 
         ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
-
         return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
     }
-
     return NGX_OK;
 }
 
@@ -394,6 +463,12 @@ ngx_http_coraza_resolv_header_vary(ngx_http_request_t *r, ngx_str_t name, off_t 
     if (r->gzip_vary && clcf->gzip_vary) {
         ngx_str_t value = ngx_string("Accept-Encoding");
 
+#if (NGX_HTTP_V3)
+        /* QPACK's static Vary entry uses a lower-case field-name token. */
+        if (r->http_version == NGX_HTTP_VERSION_30) {
+            ngx_str_set(&value, "accept-encoding");
+        }
+#endif
         ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
         return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
@@ -460,7 +535,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * NULL ctx (see ngx_http_coraza_create_ctx() callers), so it is
      * unaffected by the parent's flag. Do not reset this flag.
      */
-    if (ctx && ctx->processed)
+    if (ctx->processed)
     {
         return ngx_http_next_header_filter(r);
     }

@@ -62,7 +62,7 @@ coraza_dependency="ngx_http_postpone_filter_module \
 
 if test -n "$ngx_module_link"; then
 	ngx_module_type=HTTP_FILTER
-	ngx_module_name="$ngx_addon_name"
+	ngx_module_name="$ngx_addon_name ngx_http_coraza_headers_module"
 	ngx_module_srcs="$ngx_addon_dir/src/ngx_http_coraza_module.c \
                      $ngx_addon_dir/src/ngx_http_coraza_pre_access.c \
                      $ngx_addon_dir/src/ngx_http_coraza_header_filter.c \
@@ -78,9 +78,11 @@ if test -n "$ngx_module_link"; then
 
     ngx_module_order="ngx_http_chunked_filter_module \
                       ngx_http_v2_filter_module \
+                      ngx_http_v3_filter_module \
+                      ngx_http_coraza_headers_module \
                       ngx_http_range_header_filter_module \
                       ngx_http_gzip_filter_module \
-                      $ngx_module_name \
+                      $ngx_addon_name \
                       $coraza_dependency";
 
 	. auto/module
@@ -111,4 +113,19 @@ else
 	NGX_ADDON_DEPS="$NGX_ADDON_DEPS \
                     $ngx_addon_dir/src/ddebug.h \
                     $ngx_addon_dir/src/ngx_http_coraza_common.h";
+fi
+
+# Static builds ignore ngx_module_order. Insert the header-only companion
+# before the range header filter in registration order, hence after it and
+# gzip in execution order. Keep the body filter at its existing position.
+if test "$ngx_module_link" != DYNAMIC; then
+    coraza_filters=
+    for coraza_filter in $HTTP_FILTER_MODULES; do
+        test "$coraza_filter" = ngx_http_coraza_headers_module && continue
+        if test "$coraza_filter" = ngx_http_range_header_filter_module; then
+            coraza_filters="$coraza_filters ngx_http_coraza_headers_module"
+        fi
+        coraza_filters="$coraza_filters $coraza_filter"
+    done
+    HTTP_FILTER_MODULES="$coraza_filters"
 fi
