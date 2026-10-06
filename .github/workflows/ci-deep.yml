@@ -12,10 +12,8 @@ name: CI Deep
 #   * scanners GATE: flawfinder (--error-level=4), clang-tidy against a real
 #     bear-captured compile DB (cert-*/security warnings-as-errors), semgrep
 #     (--error). libcoraza is built here so coraza.h resolves for clang-tidy.
-#   * fuzz runs the SAME breadth flags as ci-fast (fuzz/run.sh: value-profile,
-#     large max_len, dict, rss ceiling), just longer. ngx_str_to_char() is
-#     trivial, so 600s already exhausts it — the connector's real depth is in
-#     the memcheck/helgrind soak below, which is where long wall-clock pays off.
+#   * fuzz runs both pure-C targets with the same breadth flags as the fast
+#     route (fuzz/run.sh), longer duration, and per-target artifacts.
 #   * memcheck AND helgrind run under tools/soak.sh, which passes
 #     --suppressions=valgrind.suppress and --error-exitcode=99 for BOTH tools.
 #   * libcoraza is a cgo Go shared lib dlopen'd at runtime; its runtime noise
@@ -34,16 +32,12 @@ on:
   workflow_dispatch:
     inputs:
       fuzz_seconds:
-        # ngx_str_to_char() is a trivial pure-C fn (one branch, alloc+memcpy+NUL,
-        # no loops/sub-parsing): with value-profile the state-space is exhausted
-        # in minutes — ~306k exec/s locally, new_units flatlines almost at once.
-        # 600s is already generous; longer is pure repetition. Deeper coverage of
-        # this connector lives in the memcheck/helgrind SOAK, not here.
-        description: "Fuzz wall-clock (seconds) — 600 already exhausts this fn"
+        # The duration applies to each target in the matrix.
+        description: "Fuzz wall-clock per target (seconds)"
         required: false
         default: "600"
       fuzz_jobs:
-        description: "Parallel libFuzzer jobs (1 is plenty for this tiny fn)"
+        description: "Parallel libFuzzer jobs per target"
         required: false
         default: "1"
 
@@ -56,11 +50,16 @@ permissions:
 
 jobs:
   fuzz:
-    # amd64-only: the target (ngx_str_to_char) is arch-agnostic pure C
-    # (alloc+memcpy+NUL) — an arm64 fuzz cell adds ~no coverage, and arm64
-    # connector correctness is already exercised by the arm64 memcheck/helgrind
-    # soaks below.
-    name: Fuzz (ngx_str_to_char)
+    # Both pure-C targets run on amd64; the server build matrix covers arm64.
+    name: Fuzz (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: fuzz_str_to_char
+            corpus: corpus
+          - target: fuzz_pack_headers
+            corpus: corpus_pack_headers
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     env:
@@ -98,8 +97,7 @@ jobs:
             SECS="$FUZZ_SECONDS_INPUT"
             JOBS="$FUZZ_JOBS_INPUT"
           else
-            # Monthly: 600s single-job. This fn's state-space is exhausted well
-            # inside that; more time/cores is repetition (see input comment).
+            # Monthly: 600s per target, one libFuzzer job each.
             SECS="600"
             JOBS="1"
           fi
@@ -107,34 +105,52 @@ jobs:
           echo "FUZZ_SECS=$SECS" >> "$GITHUB_ENV"
           echo "FUZZ_JOBS=$JOBS" >> "$GITHUB_ENV"
 
-      - name: Build fuzz target
-        run: bash fuzz/build.sh "$GITHUB_WORKSPACE/fuzz/fuzz_str_to_char"
+      - name: Verify both fuzz targets are configured
+        run: python3 -m unittest discover -s ci -p 'test_fuzz_workflows.py'
 
-      - name: Fuzz (parallel, deep-parity breadth)
-        run: bash fuzz/run.sh "$FUZZ_SECS" "$FUZZ_JOBS"
+      - name: Build fuzz targets
+        run: bash fuzz/build.sh
 
-      - name: Minimize + persist corpus
+      - name: Fuzz ${{ matrix.target }} (parallel, deep-parity breadth)
+        env:
+          FUZZ_BIN: ${{ github.workspace }}/fuzz/${{ matrix.target }}
+          CORPUS_DIR: ${{ github.workspace }}/fuzz/${{ matrix.corpus }}
+        run: |
+          set -o pipefail
+          bash fuzz/run.sh "$FUZZ_SECS" "$FUZZ_JOBS" 2>&1 |
+            tee "fuzz-${{ matrix.target }}.log"
+
+      - name: Minimize + persist ${{ matrix.target }} corpus
         if: success()
         run: |
-          cd fuzz
-          mkdir -p corpus-min
-          ./fuzz_str_to_char -merge=1 corpus-min/ corpus/
-          echo "merged: $(find corpus-min -type f | wc -l) units"
+          mkdir -p "fuzz/corpus-min-${{ matrix.target }}"
+          "fuzz/${{ matrix.target }}" -merge=1 \
+            "fuzz/corpus-min-${{ matrix.target }}/" "fuzz/${{ matrix.corpus }}/"
+          count=$(find "fuzz/corpus-min-${{ matrix.target }}" -type f | wc -l)
+          echo "merged: $count units"
 
       - name: Upload crash artifacts
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: fuzz-deep-crashes
+          name: fuzz-deep-crashes-${{ matrix.target }}
           path: ${{ github.workspace }}/fuzz/crash-*
+          retention-days: 30
+
+      - name: Upload fuzz execution log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-deep-log-${{ matrix.target }}
+          path: ${{ github.workspace }}/fuzz-${{ matrix.target }}.log
           retention-days: 30
 
       - name: Upload minimized corpus
         if: success()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: fuzz-corpus
-          path: ${{ github.workspace }}/fuzz/corpus-min
+          name: fuzz-corpus-${{ matrix.target }}
+          path: ${{ github.workspace }}/fuzz/corpus-min-${{ matrix.target }}
           retention-days: 30
 
   memcheck:
