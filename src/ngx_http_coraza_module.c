@@ -87,9 +87,13 @@ ngx_http_coraza_process_intervention(ngx_http_coraza_ctx_t *ctx, ngx_http_reques
 		{
 			ngx_table_elt_t *h;
 			h = ngx_list_push(&r->headers_out.headers);
-			if (h != NULL)
+			if (h == NULL) {
+				coraza_free_intervention(intervention);
+				return NGX_HTTP_INTERNAL_SERVER_ERROR;
+			}
 			{
 				size_t len = ngx_strlen(intervention->data);
+				ngx_memzero(h, sizeof(ngx_table_elt_t));
 				/*
 				 * Defend against response splitting / header injection.
 				 * If a rule builds the redirect target from
@@ -118,13 +122,38 @@ ngx_http_coraza_process_intervention(ngx_http_coraza_ctx_t *ctx, ngx_http_reques
 				ngx_str_set(&h->key, "Location");
 				h->value.len = 0;
 				h->value.data = ngx_pnalloc(r->pool, len);
-				if (h->value.data != NULL)
-				{
-					ngx_memcpy(h->value.data, intervention->data, len);
-					h->value.len = len;
-					h->hash = 1;
-					r->headers_out.location = h;
+				if (h->value.data == NULL) {
+					coraza_free_intervention(intervention);
+					return NGX_HTTP_INTERNAL_SERVER_ERROR;
 				}
+				ngx_memcpy(h->value.data, intervention->data, len);
+				h->value.len = len;
+
+				/* Publish only after allocation succeeds.  Retire every old
+				 * Location, including duplicates outside the dedicated pointer. */
+				{
+					ngx_list_part_t *part;
+					ngx_table_elt_t *header;
+					ngx_uint_t i;
+
+					for (part = &r->headers_out.headers.part;
+					     part != NULL; part = part->next)
+					{
+						header = part->elts;
+						for (i = 0; i < part->nelts; i++) {
+							if (header[i].hash
+							    && header[i].key.len == sizeof("Location") - 1
+							    && ngx_strncasecmp(header[i].key.data,
+							                       (u_char *) "Location",
+							                       sizeof("Location") - 1) == 0)
+							{
+								header[i].hash = 0;
+							}
+						}
+					}
+				}
+				h->hash = 1;
+				r->headers_out.location = h;
 			}
 		}
 
