@@ -441,8 +441,10 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y flawfinder clang-tidy bear python3 python3-pip gcc make eatmydata
-          pip3 install --quiet semgrep
+          sudo apt-get install -y flawfinder clang-tidy bear python3 \
+            python3-pip python3-yaml pipx curl gcc make eatmydata
+          pipx install --quiet semgrep==1.169.0
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
@@ -492,11 +494,26 @@ jobs:
               2>&1 | tee -a clang-tidy.log || FAIL=1
           done
           [ "$FAIL" -eq 0 ]
+      - name: Scanner versions and effective checks
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p scanner-tools
+          dpkg-query -W flawfinder 'clang-tidy*' > scanner-tools/packages.txt
+          flawfinder --version > scanner-tools/flawfinder-version.txt
+          clang-tidy --version > scanner-tools/clang-tidy-version.txt
+          checks='-*,cert-*,clang-analyzer-security.*'
+          checks+=',-clang-analyzer-security.insecureAPI.'
+          checks+='DeprecatedOrUnsafeBufferHandling'
+          clang-tidy --list-checks --checks="$checks" \
+            > scanner-tools/clang-tidy-checks.txt
+          find src -type f -print0 | sort -z | \
+            xargs -0 -r sha256sum > scanner-tools/source-sha256.txt
+      - name: Scanner contract tests
+        run: python3 ci/scanner-contract-test.py
+
       - name: semgrep (gating)
         run: |
-          set -o pipefail
-          semgrep scan --error --config p/c --config p/security-audit \
-            "$GITHUB_WORKSPACE/src/" 2>&1 | tee semgrep.log
+          python3 ci/scanner-semgrep.py gating src scanner-evidence
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -505,7 +522,8 @@ jobs:
           path: |
             ${{ github.workspace }}/flawfinder.log
             ${{ github.workspace }}/clang-tidy.log
-            ${{ github.workspace }}/semgrep.log
+            ${{ github.workspace }}/scanner-evidence/
+            ${{ github.workspace }}/scanner-tools/
             ${{ github.workspace }}/compile_commands.json
           retention-days: 14
 
