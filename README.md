@@ -25,6 +25,10 @@ This pulls in libcoraza automatically. Built for Ubuntu 24.04 (noble), 26.04 (re
 
 # Compilation
 
+The former repository-root `build.sh` for Vagrant and nginx 1.18.0 has been
+retired. Use the nginx source build below; the `./build.sh` command in the
+libcoraza example runs from the libcoraza checkout.
+
 If you have any doubts, please read the [GitHub build Action](https://github.com/corazawaf/coraza-nginx/blob/main/.github/workflows/build-test.yml) for additional information.
 
 Before compiling this software make sure that you have libcoraza >= 1.7.0 installed.
@@ -63,6 +67,7 @@ shims are unused in any given translation unit, and nginx builds with `-Werror`:
 ```sh
 ./configure --add-dynamic-module=/path/to/coraza-nginx --with-compat \
     --with-cc-opt="-Wno-unused-function"
+make modules
 ```
 
 The Debian package build sets its own CFLAGS and does not need this flag.
