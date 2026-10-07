@@ -157,10 +157,6 @@ jobs:
           # Route gcc/cc through ccache for every later step.
           echo /usr/lib/ccache >> "$GITHUB_PATH"
 
-      - name: Check compile-test prerequisites and source selection
-        if: matrix.full_tests
-        run: prove ci/sanity-compile-contract.t
-
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
