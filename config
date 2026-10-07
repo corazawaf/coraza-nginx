@@ -10,16 +10,18 @@
 
 ngx_addon_name="ngx_http_coraza_module"
 
-# Require libcoraza >= 1.7.0 at build time.
+# Require libcoraza >= 1.8.0 at build time.
 #
 # From 1.5 the coraza_process_* calls use the tri-state coraza_result_t
 # contract (CORAZA_ERROR = -1, CORAZA_OK = 0, CORAZA_INTERRUPTION = 1), so
-# "failed" means `ret < 0`; the bulk-header submit entry points arrive in 1.6.
-# coraza_version_num() first appears in 1.7.0 and reports the library version.
+# "failed" means `ret < 0`; the bulk-header submit entry points arrive in 1.6;
+# coraza_version_num() in 1.7; coraza_is_response_body_accessible(), which the
+# header filter needs to tell whether a response body will be inspected
+# (issue #140), in 1.8.
 #
-# Compile-only probe (nginx's auto/feature): coraza_version_num() is declared in
-# coraza.h from 1.7.0, so `sizeof(coraza_version_num())` compiles iff the header
-# is >= 1.7 -- configure then fails cleanly against older headers rather than
+# Compile-only probe (nginx's auto/feature): coraza_is_response_body_accessible()
+# is declared in coraza.h from 1.8.0, so `sizeof(...)` of a call to it compiles
+# iff the header is >= 1.8 -- configure then fails cleanly against older headers rather than
 # silently building against an old ABI. sizeof leaves its operand unevaluated, so
 # this needs no reference to the symbol at link and nothing is run: no -lcoraza,
 # no libcoraza.so on any path, and cross-compilation works. It uses the same
@@ -27,21 +29,21 @@ ngx_addon_name="ngx_http_coraza_module"
 # --with-cc-opt=-I<dir> is picked up. The exact version number is re-checked at
 # runtime when the module dlopen's libcoraza (ngx_http_coraza_dl_open) -- this is
 # the build-time half.
-ngx_feature="libcoraza >= 1.7.0 (coraza_version_num)"
+ngx_feature="libcoraza >= 1.8.0 (coraza_is_response_body_accessible)"
 ngx_feature_name=
 ngx_feature_run=no
 ngx_feature_incs="#include <coraza/coraza.h>"
 ngx_feature_path=
 ngx_feature_libs=
-ngx_feature_test="(void) sizeof(coraza_version_num());"
+ngx_feature_test="(void) sizeof(coraza_is_response_body_accessible((coraza_transaction_t) 0));"
 . auto/feature
 
 if test $ngx_found != yes; then
     cat << END
 
-$0: error: the coraza-nginx module requires libcoraza >= 1.7.0, but the
-libcoraza available at build time is older or does not report its version
-(coraza_version_num). Install libcoraza >= 1.7.0 and retry.
+$0: error: the coraza-nginx module requires libcoraza >= 1.8.0, but the
+libcoraza available at build time is older (coraza.h does not declare
+coraza_is_response_body_accessible). Install libcoraza >= 1.8.0 and retry.
 
 END
     exit 1

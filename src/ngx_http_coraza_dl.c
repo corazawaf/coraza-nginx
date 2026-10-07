@@ -57,6 +57,7 @@ typedef int                  (*fn_coraza_update_status_code)(coraza_transaction_
  * SecResponseBodyMimeType).  Must be called after
  * coraza_process_response_headers(). */
 typedef int                  (*fn_coraza_is_response_body_processable)(coraza_transaction_t);
+typedef int                  (*fn_coraza_is_response_body_accessible)(coraza_transaction_t);
 
 /* Bulk header submission, present in libcoraza 1.6+.  Adds every request /
  * response header in a single cgo crossing from a packed buffer
@@ -104,6 +105,7 @@ static fn_coraza_process_logging         dl_process_logging;
 static fn_coraza_update_status_code      dl_update_status_code;
 
 static fn_coraza_is_response_body_processable dl_is_response_body_processable;
+static fn_coraza_is_response_body_accessible  dl_is_response_body_accessible;
 
 /* Bulk-header entry points (libcoraza 1.6+) — required (>= 1.7 is enforced). */
 static fn_coraza_add_request_headers     dl_add_request_headers;
@@ -190,20 +192,30 @@ ngx_http_coraza_dl_open(ngx_log_t *log)
     /* Version gate. coraza_version_num() first appears in 1.7.0 and reports the
      * version of the library actually dlopen'd -- the authoritative check for a
      * module that resolves everything at runtime.  A library that does not
-     * export it, or reports < 1.7.0, is unsupported: fail so the worker refuses
-     * to start (fail closed) rather than run against an old ABI. */
+     * export it, or reports < 1.8.0, is unsupported: fail so the worker refuses
+     * to start (fail closed) rather than run against an old ABI.  1.8 added
+     * coraza_is_response_body_accessible(), which the header filter needs to
+     * tell whether the response body will be inspected (issue #140). */
     DL_SYM(dl_version_num, coraza_version_num);
     {
         int version = dl_version_num();
-        if (version < 10700) {
+        if (version < 10800) {
             ngx_log_error(NGX_LOG_EMERG, log, 0,
-                          "coraza: libcoraza >= 1.7.0 required, but the loaded "
+                          "coraza: libcoraza >= 1.8.0 required, but the loaded "
                           "library reports %d.%d.%d",
                           version / 10000, version / 100 % 100, version % 100);
             dynlib_close(dl_handle);
             dl_handle = NULL;
             return NGX_ERROR;
         }
+    }
+
+    /* 1.8 export; resolved after the version gate so an older library gets the
+     * ">= 1.8.0 required" message rather than a bare missing-symbol error. */
+    DL_SYM(dl_is_response_body_accessible, coraza_is_response_body_accessible);
+
+    {
+        int version = dl_version_num();
         ngx_log_error(NGX_LOG_NOTICE, log, 0,
                       "coraza: %s loaded via dynlib_open (libcoraza %d.%d.%d)",
                       CORAZA_DYNLIB_BASENAME DYNLIB_EXT,
@@ -407,6 +419,20 @@ int
 ngx_http_coraza_is_response_body_processable(coraza_transaction_t t)
 {
     return dl_is_response_body_processable(t);
+}
+
+/*
+ * ngx_http_coraza_is_response_body_accessible — wrapper around the
+ * coraza_is_response_body_accessible symbol (libcoraza >= 1.8, required).
+ *
+ * Returns 1 when SecResponseBodyAccess is on for the transaction.  coraza's
+ * IsResponseBodyProcessable() only checks the Content-Type against
+ * SecResponseBodyMimeType, so "will the body be inspected" needs both.
+ */
+int
+ngx_http_coraza_is_response_body_accessible(coraza_transaction_t t)
+{
+    return dl_is_response_body_accessible(t);
 }
 
 /*
