@@ -27,7 +27,7 @@ This pulls in libcoraza automatically. Built for Ubuntu 24.04 (noble), 26.04 (re
 
 If you have any doubts, please read the [GitHub build Action](https://github.com/corazawaf/coraza-nginx/blob/main/.github/workflows/build-test.yml) for additional information.
 
-Before compiling this software make sure that you have libcoraza >= 1.7.0 installed.
+Before compiling this software make sure that you have libcoraza >= 1.8.0 installed.
 You can download it from the [libcoraza git repository](https://github.com/corazawaf/libcoraza). For information pertaining to the compilation and installation of libcoraza please consult the documentation provided along with it.
 
 To build libcoraza from source (requires Go 1.21+):
@@ -223,10 +223,15 @@ String can contain variables.
 
 When enabled (the default), response headers are held back from the client
 until phase-4 response body inspection completes, so a phase-4 rule can still
-return a clean error page. When disabled, headers are sent as soon as they are
-ready, which means a late phase-4 intervention can no longer replace a response
-whose headers have already gone out. Operators whose ruleset has no phase-4
-response rules can turn this off to restore normal header streaming.
+return a clean error page. The delay only applies when the body will actually
+be inspected, that is `SecResponseBodyAccess On` and a Content-Type listed in
+`SecResponseBodyMimeType`; otherwise phase 4 is finalised on the response
+headers alone, before they are sent, and the response streams (a phase-4 rule
+on `ARGS`, `TX` or the response headers still denies it cleanly). When
+disabled, headers are sent as soon as they are ready, which means a late
+phase-4 intervention can no longer replace a response whose headers have
+already gone out. Operators whose ruleset has no phase-4 response rules can
+turn this off to restore normal header streaming.
 
 ## Disruptive actions and the audit log
 

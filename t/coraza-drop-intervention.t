@@ -61,7 +61,7 @@ use coraza_crash_check;
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http proxy/)->plan(37);
+my $t = Test::Nginx->new()->has(qw/http proxy/)->plan(39);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -207,6 +207,21 @@ http {
                 SecResponseBodyMimeType text/plain
                 SecResponseBodyLimit 65536
                 SecRule RESPONSE_BODY "@rx DROPME" "id:8113,phase:4,drop,log,msg:\'drop-p4-control-probe\',t:none"
+            ';
+            proxy_pass http://127.0.0.1:%%PORT_8081%%;
+        }
+
+        # --- phase:4 bare `drop` with the body NOT inspected -----------------
+        #
+        # SecResponseBodyAccess Off sends phase 4 through the HEADER filter's
+        # early finalisation instead of the body filter, so this is a third
+        # filter site and must drop the same way, not serve a tidy 444.
+        location /drop-p4-noinspect {
+            coraza on;
+            coraza_rules '
+                SecRuleEngine On
+                SecResponseBodyAccess Off
+                SecRule ARGS:x "@streq bad" "id:8117,phase:4,drop,log,msg:\'drop-p4-noinspect-probe\',t:none"
             ';
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
         }
@@ -530,6 +545,12 @@ my ($p4_first) = raw_get_keepalive_pair('/drop-p4');
 is($p4_first, '',
 	'phase:4 drop writes nothing even with a second request already queued');
 
+# Phase 4 on an uninspected body runs from the header filter, before any
+# header is sent; a drop there must still write nothing.
+my ($p4n_first) = raw_get_keepalive_pair('/drop-p4-noinspect?x=bad');
+is($p4n_first, '',
+	'phase:4 drop on an uninspected body writes nothing with a second request queued');
+
 # --- phase:3 / phase:4 negative controls -------------------------------------
 #
 # Same locations, same rules, non-matching data. Proves the assertions above
@@ -543,6 +564,10 @@ like($p3_ok, qr!ORIGIN-REACHED!,
 my $p4_ok = raw_get('/drop-p4-control');
 like($p4_ok, qr!ORIGIN-REACHED-BENIGN-PAYLOAD!,
 	'negative control: non-matching phase:4 response is returned intact');
+
+my $p4n_ok = raw_get('/drop-p4-noinspect?x=fine');
+like($p4n_ok, qr!ORIGIN-REACHED!,
+	'negative control: non-matching phase:4 uninspected response is returned intact');
 
 # --- deny,status:444 is not a drop -------------------------------------------
 #

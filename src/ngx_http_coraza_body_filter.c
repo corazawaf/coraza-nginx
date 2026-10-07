@@ -496,10 +496,12 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         }
 
         /*
-         * Always call coraza_process_response_body() on the last buffer,
-         * even when body inspection is disabled. This triggers phase 4
-         * rule evaluation which can match on non-body variables (ARGS,
-         * TX, etc.).
+         * Finalise phase 4 on the last buffer: coraza_process_response_body()
+         * evaluates the phase-4 rules, which can match on non-body variables
+         * (ARGS, TX, etc.) as well as on the inspected body.  When the body is
+         * not inspected the header filter has already done this before the
+         * headers went out (response_phase4_done, issue #140), and phase 4
+         * must not run a second time on the same transaction.
          *
          * Gate on the per-buffer is_last, NOT the accumulated
          * is_request_processed: phase 4 is a one-shot finalize.  A filter
@@ -508,7 +510,7 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
          * this block on that trailing buffer and evaluate phase 4 twice on an
          * already-finalized transaction.
          */
-        if (is_last) {
+        if (is_last && !ctx->response_phase4_done) {
             int ret;
             int pret;
 
