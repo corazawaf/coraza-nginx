@@ -1,3 +1,27 @@
+libnginx-mod-http-coraza (0.22.0-1) unstable; urgency=low
+
+  * New upstream release 0.22.0.
+  * Require libcoraza >= 1.8.0; support for 1.7 is dropped. The connector needs
+    coraza_is_response_body_accessible(), new in 1.8, to know whether a
+    response body will be inspected: configure fails against older headers
+    and the worker refuses to start against an older shared library.
+  * Response headers are no longer held back when the body will not be
+    inspected (SecResponseBodyAccess Off, or a Content-Type outside
+    SecResponseBodyMimeType): phase 4 is finalised before the headers go out,
+    so streaming responses (chunked JSON, NDJSON, SSE) reach the client at
+    once while phase-4 rules on non-body variables still deny cleanly.
+  * SecRemoteRules is rejected at nginx -t instead of failing in every worker.
+  * Fail-closed fixes: delayed-header responses are finalised instead of
+    returning a bare status, premature response file EOF is rejected, a
+    ruleless "coraza on" is rejected at startup, the request body is
+    submitted to the engine exactly once, proxied headers are no longer
+    submitted twice.
+  * Performance: WAFs are deduplicated by rule content across locations,
+    request body access off skips the body submission, request tempfiles are
+    read in 64 KiB chunks, file-backed response inspection is bounded.
+
+ -- Pierre Pomes <pierre.pomes@gmail.com>  Wed, 07 Oct 2026 12:00:00 +0000
+
 libnginx-mod-http-coraza (0.21.0-1) unstable; urgency=low
 
   * New upstream release 0.21.0.
