@@ -28,7 +28,7 @@ use coraza_crash_check;
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http proxy/)->plan(9);
+my $t = Test::Nginx->new()->has(qw/http proxy/)->plan(15);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -52,7 +52,8 @@ http {
             coraza_delay_response_headers off;
             coraza_rules '
                 SecRuleEngine On
-                SecResponseBodyAccess Off
+                SecResponseBodyAccess On
+                SecResponseBodyMimeType text/plain
             ';
             proxy_buffering off;
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
@@ -62,7 +63,8 @@ http {
             coraza on;
             coraza_rules '
                 SecRuleEngine On
-                SecResponseBodyAccess Off
+                SecResponseBodyAccess On
+                SecResponseBodyMimeType text/plain
             ';
             proxy_buffering off;
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
@@ -73,7 +75,44 @@ http {
             coraza_delay_response_headers on;
             coraza_rules '
                 SecRuleEngine On
+                SecResponseBodyAccess On
+                SecResponseBodyMimeType text/plain
+            ';
+            proxy_buffering off;
+            proxy_pass http://127.0.0.1:%%PORT_8081%%;
+        }
+
+        # Body not inspected (issue #140): access Off, or a Content-Type
+        # outside SecResponseBodyMimeType. Phase 4 is finalised before the
+        # headers go out, so the response streams even with the delay on,
+        # and a phase-4 non-body rule still denies it cleanly.
+        location /uninspected-off {
+            coraza on;
+            coraza_rules '
+                SecRuleEngine On
                 SecResponseBodyAccess Off
+            ';
+            proxy_buffering off;
+            proxy_pass http://127.0.0.1:%%PORT_8081%%;
+        }
+
+        location /uninspected-mime {
+            coraza on;
+            coraza_rules '
+                SecRuleEngine On
+                SecResponseBodyAccess On
+                SecResponseBodyMimeType text/html
+            ';
+            proxy_buffering off;
+            proxy_pass http://127.0.0.1:%%PORT_8081%%;
+        }
+
+        location /uninspected-block {
+            coraza on;
+            coraza_rules '
+                SecRuleEngine On
+                SecResponseBodyAccess Off
+                SecRule ARGS "@streq block" "id:153,phase:4,deny,log,status:403"
             ';
             proxy_buffering off;
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
@@ -127,6 +166,23 @@ like($full, qr/^HTTP\S+ 200.*DELAYED-BODY/s,
 
 ($early, $full) = timed_get('/delay-on');
 is($early, '', 'explicit response-body delay on withholds headers until body');
+
+# Issue #140: a body that will not be inspected is not held back.
+($early, $full) = timed_get('/uninspected-off');
+like($early, qr/^HTTP\S+ 200.*X-Delayed-Upstream: yes/s,
+    'body access off: headers forwarded before the upstream body');
+like($full, qr/DELAYED-BODY/, 'body access off: body still forwarded');
+
+($early, $full) = timed_get('/uninspected-mime');
+like($early, qr/^HTTP\S+ 200.*X-Delayed-Upstream: yes/s,
+    'content-type outside the MIME list: headers forwarded before the body');
+like($full, qr/DELAYED-BODY/, 'content-type outside the MIME list: body forwarded');
+
+($early, $full) = timed_get('/uninspected-block?q=block');
+like($full, qr/^HTTP\S+ 403/,
+    'uninspected body: phase-4 non-body rule still denies cleanly');
+unlike($full, qr/DELAYED-BODY/,
+    'uninspected body: denied response carries no upstream body');
 
 like(http_get('/block-default?q=block'), qr/^HTTP\S+ 403/,
     'default delay preserves clean phase-4 non-body block');
