@@ -284,8 +284,13 @@ actually served -- and the connector's error-log line reads
 on the wire, so it is not what is recorded; the rule id and message in the
 audit record still identify which rule blocked. At the **response-phase filter**
 sites the same `deny,status:200` really is served as a zero-body `200`, and
-there it is recorded as `200`. In every case the recorded status is the status
-the client received.
+there it is recorded as `200`.
+
+The recorded status matches what the client received whenever the block lands
+before response headers are sent. If a phase-4 rule fires after the headers are
+already on the wire (`coraza_delay_response_headers off`, SSE, or a body larger
+than the delayed-body cap), the client has the origin's status line and the
+connection is cut mid-body; the audit record still shows the blocking status.
 
 ## Configuration merging
 

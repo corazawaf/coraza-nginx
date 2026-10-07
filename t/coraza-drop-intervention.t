@@ -91,6 +91,7 @@ http {
         # never reach the origin.
         location /drop {
             coraza on;
+            coraza_transaction_id "drop-$request_id";
             coraza_rules '
                 SecRuleEngine On
                 SecRule ARGS:x "@streq bad" "id:8100,phase:1,drop,log,msg:\'drop-probe\',t:none"
@@ -246,6 +247,7 @@ http {
         # the assertion is that a real 403 response comes back.
         location /deny200-p1 {
             coraza on;
+            coraza_transaction_id "deny200p1-$request_id";
             coraza_rules '
                 SecRuleEngine On
                 SecRule ARGS:x "@streq bad" "id:8115,phase:1,deny,status:200,log,msg:\'deny200-p1-probe\',t:none"
@@ -637,7 +639,9 @@ unlike($errlog, qr/Access denied with code 0\b/,
 
 # The drop that really was blocked is recorded with the status the connector
 # actually enforced (444, nginx's "connection closed without response").
-like($errlog, qr/Access denied with code 444\b/,
+# /drop carries its own transaction-id prefix because the deny,status:444
+# locations also log "code 444"; without it this would pass on their lines.
+like($errlog, qr/Access denied with code 444, unique_id "drop-/,
 	'a dropped request is logged as denied with the status it was blocked with');
 
 # --- the audit record must agree with the wire -------------------------------
@@ -664,7 +668,8 @@ like($errlog, qr/Access denied with code 444\b/,
 unlike($errlog, qr/Access denied with code 200\b/,
 	'no phase-site deny is logged with a status the client was not served');
 
-like($errlog, qr/Access denied with code 403\b/,
+# Matched on /deny200-p1's own prefix: /deny403 also logs "code 403".
+like($errlog, qr/Access denied with code 403, unique_id "deny200p1-/,
 	'a phase-site deny,status:200 is logged with the 403 it was served as');
 
 # Drop one known-benign nginx-core UBSan diagnostic before the crash gate.
