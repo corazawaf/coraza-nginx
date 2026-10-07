@@ -61,6 +61,11 @@ my @delayed_errors = $delayed_copy =~
 is(scalar @delayed_errors, 5,
     'every delayed buffer preparation failure uses the internal-error helper');
 
+# A delayed copy must keep the sync flag: SSI emits empty sync markers, and a
+# copy without it is a zero-size non-special buffer that the writer rejects.
+like($delayed_copy, qr/b->sync\s*=\s*chain->buf->sync;/,
+    'delayed buffer copies preserve the sync flag');
+
 # Phase 4 is finalised on the last buffer -- unless the header filter already
 # did it, before the headers went out, because the body is not inspected
 # (issue #140): the same transaction must never see phase 4 twice.
