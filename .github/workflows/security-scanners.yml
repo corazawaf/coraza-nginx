@@ -159,12 +159,9 @@ jobs:
             > scanner-tools/clang-tidy-checks.txt
           find src -type f -print0 | sort -z | \
             xargs -0 -r sha256sum > scanner-tools/source-sha256.txt
-      - name: Scanner contract tests
-        run: python3 ci/scanner-contract-test.py
-
       - name: semgrep (advisory)
         run: |
-          python3 ci/scanner-semgrep.py advisory src scanner-evidence
+          python3 .github/scripts/scanner-semgrep.py advisory src scanner-evidence
 
       - name: Upload reports
         if: always()

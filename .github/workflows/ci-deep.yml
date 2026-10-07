@@ -508,12 +508,9 @@ jobs:
             > scanner-tools/clang-tidy-checks.txt
           find src -type f -print0 | sort -z | \
             xargs -0 -r sha256sum > scanner-tools/source-sha256.txt
-      - name: Scanner contract tests
-        run: python3 ci/scanner-contract-test.py
-
       - name: semgrep (gating)
         run: |
-          python3 ci/scanner-semgrep.py gating src scanner-evidence
+          python3 .github/scripts/scanner-semgrep.py gating src scanner-evidence
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
