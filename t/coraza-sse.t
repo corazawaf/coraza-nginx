@@ -67,7 +67,7 @@ http {
                 SecRuleEngine DetectionOnly
                 SecResponseBodyAccess On
                 SecResponseBodyMimeType text/plain text/html text/event-streamx
-                SecRule REQUEST_URI "@beginsWith /notsse" "id:190,phase:1,pass,nolog,ctl:forceResponseBodyVariable=on"
+                SecRule REQUEST_URI "@beginsWith /notsse" "id:190,t:none,phase:1,pass,nolog,ctl:forceResponseBodyVariable=on"
             ';
             proxy_pass http://127.0.0.1:8081;
             proxy_read_timeout 5s;
@@ -98,7 +98,7 @@ http {
             coraza_rules '
                 SecRuleEngine On
                 SecResponseBodyAccess On
-                SecRule ARGS "@streq attack4" "id:182,phase:4,status:403,deny,log"
+                SecRule ARGS "@streq attack4" "id:182,t:none,phase:4,status:403,deny,log"
             ';
             proxy_pass http://127.0.0.1:8081/events;
             proxy_read_timeout 5s;
