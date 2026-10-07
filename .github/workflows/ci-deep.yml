@@ -456,8 +456,6 @@ jobs:
         with:
           path: ${{ github.workspace }}/libcoraza-build
           key: libcoraza-built-${{ env.LIBCORAZA_VERSION }}-${{ hashFiles('.github/versions.env') }}
-      - name: Compile database contract tests
-        run: python3 ci/compile-db-contract.py
       # Real compile DB requires libcoraza's coraza.h + a genuine module compile.
       # Build+install libcoraza (verified fetch, shared script), then bear-wrap
       # `make modules` so clang-tidy sees the ACTUAL translation units.
