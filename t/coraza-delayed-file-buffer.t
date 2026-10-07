@@ -109,9 +109,12 @@ http {
             sendfile off;
             output_buffers 8 8k;
             coraza on;
+            # Inspected, so the headers are delayed and the cap can trip:
+            # since issue #140 an uninspected body is no longer held back.
             coraza_rules '
                 SecRuleEngine On
-                SecResponseBodyAccess Off
+                SecResponseBodyAccess On
+                SecResponseBodyMimeType application/octet-stream
                 SecRule ARGS "@streq observe" "id:163,phase:4,pass,log"
             ';
         }
