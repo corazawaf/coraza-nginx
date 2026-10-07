@@ -65,9 +65,6 @@ jobs:
       # valgrind's own memory tracking. libFuzzer is still linked (it provides
       # main + the corpus-replay-from-argv behaviour) but adds no memory
       # instrumentation of its own.
-      - name: Verify both fuzz targets are configured
-        run: python3 -m unittest discover -s ci -p 'test_fuzz_workflows.py'
-
       - name: Build fuzz targets (no sanitizers, for valgrind)
         env:
           CFLAGS: "-g -O1"

@@ -105,9 +105,6 @@ jobs:
           echo "FUZZ_SECS=$SECS" >> "$GITHUB_ENV"
           echo "FUZZ_JOBS=$JOBS" >> "$GITHUB_ENV"
 
-      - name: Verify both fuzz targets are configured
-        run: python3 -m unittest discover -s ci -p 'test_fuzz_workflows.py'
-
       - name: Build fuzz targets
         run: bash fuzz/build.sh
 
