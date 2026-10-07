@@ -1,14 +1,30 @@
 #!/usr/bin/perl
-# A benign upstream Location must be replaced, not appended to, by policy.
-use strict;
+
+# Tests for Coraza-nginx connector (Location replacement on policy redirect).
+#
+# A benign upstream Location must be replaced, not appended to, when a rule
+# issues a policy redirect: the response carries exactly one Location header.
+
+###############################################################################
+
 use warnings;
+use strict;
+
 use Test::More;
 use IO::Socket::INET;
+
 BEGIN { use FindBin; chdir($FindBin::Bin); }
+
 use lib 'lib';
 use Test::Nginx;
+
 use lib '.';
 use coraza_crash_check;
+
+###############################################################################
+
+select STDERR; $| = 1;
+select STDOUT; $| = 1;
 
 my $t = Test::Nginx->new()->has(qw/http proxy/);
 $t->write_file_expand('nginx.conf', <<'CONF');
