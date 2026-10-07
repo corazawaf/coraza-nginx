@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-# Run from nginx-tests with ci/*.t and t/* copied alongside Test::Nginx.
+# Run from nginx-tests with t/* copied alongside Test::Nginx.
 # The producer cannot complete until the client has captured the early result.
 # Open streams never send a terminating chunk, including on the release signal.
 use strict;
