@@ -309,15 +309,20 @@ ngx_http_coraza_resolv_header_content_type(ngx_http_request_t *r, ngx_str_t name
  *
  * SECURITY TRADE-OFF: Content-Type is chosen by the upstream, so an origin
  * that emits text/event-stream opts this response out of the phase-4 header
- * delay.  Phase 4 still RUNS on such a response (the body filter always calls
- * coraza_process_response_body()), and phase 1-3 are untouched -- what is lost
- * is only the ability to turn a phase-4 match into a clean error page, because
- * the headers are already on the wire.  A late match degrades to a connection
- * reset instead.  That is the same trade-off 101 Switching Protocols already
- * accepts, and it is inherent: streaming and full-response WAF buffering are
- * mutually exclusive by construction.  Operators who do not proxy untrusted
- * origins and want the delay unconditionally can leave their upstreams from
- * emitting text/event-stream, or disable streaming endpoints at the proxy.
+ * delay.  This only matters for an INSPECTED stream (text/event-stream listed
+ * in SecResponseBodyMimeType with body access on): phase 4 then runs in the
+ * body filter on a last_buf that never comes, so what is lost is the ability
+ * to turn a phase-4 match into a clean error page -- a late match degrades to
+ * a connection reset -- and phases 1-3 are untouched.  An uninspected stream
+ * (the common case, text/event-stream is not in the default MIME list) does
+ * not take this exemption at all: the header filter finalises phase 4 before
+ * the headers go out, so a phase-4 rule on ARGS or TX still denies it cleanly
+ * (issue #140).  The inspected-stream trade-off is the same one 101 Switching
+ * Protocols already accepts, and it is inherent: streaming and full-response
+ * WAF buffering are mutually exclusive by construction.  Operators who do not
+ * proxy untrusted origins and want the delay unconditionally can keep their
+ * upstreams from emitting text/event-stream, or disable streaming endpoints at
+ * the proxy.
  */
 static ngx_int_t
 ngx_http_coraza_is_sse_response(ngx_http_request_t *r)
@@ -723,10 +728,12 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * first so the library can evaluate SecResponseBodyAccess and the
      * Content-Type against SecResponseBodyMimeType.
      *
-     * The library answers this directly:
-     *   - SecResponseBodyAccess Off  → 0 (no inspection needed)
-     *   - Content-Type not in SecResponseBodyMimeType → 0
-     *   - Otherwise → 1
+     * It takes two predicates: coraza_is_response_body_processable() only
+     * checks the Content-Type against SecResponseBodyMimeType -- coraza core
+     * consults SecResponseBodyAccess separately, when the body is read -- so
+     * under SecResponseBodyAccess Off it still answers 1 for a listed type.
+     * coraza_is_response_body_accessible() (libcoraza >= 1.8, required) is
+     * the missing half (issue #140).
      *
      * coraza_is_response_body_processable is a required symbol (libcoraza
      * >= 1.4.0, pinned in debian/control) resolved with the mandatory DL_SYM:
@@ -735,7 +742,8 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * and the pointer is never NULL by the time this runs.
      */
     ctx->response_body_processable =
-        ngx_http_coraza_is_response_body_processable(ctx->coraza_transaction);
+        ngx_http_coraza_is_response_body_accessible(ctx->coraza_transaction)
+        && ngx_http_coraza_is_response_body_processable(ctx->coraza_transaction);
 
     ret = ngx_http_coraza_poll_after_process(ctx, r, 0, pret);
     if (r->error_page) {
@@ -765,9 +773,9 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * r->header_only for HEAD, but check r->method explicitly so a delayed HEAD
      * can never stall), error pages (already an error response), and
      * subrequests (handled independently).
-     * We also skip the delay when body inspection is not needed
-     * (SecResponseBodyAccess Off or Content-Type mismatch): in that case
-     * there is no phase-4 buffering and the response must not be held back.
+     * A body that will not be inspected (SecResponseBodyAccess Off or
+     * Content-Type outside SecResponseBodyMimeType) never reaches this point:
+     * the branch above finalised phase 4 and forwarded the headers.
      *
      * We also skip 101 Switching Protocols: an upgraded connection (e.g.
      * WebSocket) becomes a raw bidirectional tunnel with no HTTP response
@@ -786,16 +794,71 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
         && r->method != NGX_HTTP_HEAD && !r->header_only && !r->error_page
         && r == r->main
         && r->headers_out.status != NGX_HTTP_SWITCHING_PROTOCOLS
+        && !ctx->response_body_processable)
+    {
+        /*
+         * Body not inspected (SecResponseBodyAccess Off, or a Content-Type
+         * outside SecResponseBodyMimeType): nothing the body filter could
+         * feed the engine can change the phase-4 outcome, and every non-body
+         * variable phase 4 can read (RESPONSE_STATUS, RESPONSE_HEADERS, ARGS,
+         * TX -- CRS 959100 blocks on the outbound score a 5xx raised in phase
+         * 3) is known now.  So finalise phase 4 here, before any header goes
+         * out: a deny still gets a clean error page, and a clean result means
+         * there is no reason to hold the headers back -- the response streams.
+         * Holding them anyway stalled every non-SSE stream (chunked JSON,
+         * NDJSON) until last_buf or the delayed-body cap (issue #140).  The
+         * body filter sees response_phase4_done and does not run phase 4
+         * again on last_buf.
+         *
+         * This runs before the SSE test on purpose: text/event-stream is
+         * normally outside SecResponseBodyMimeType, so an SSE response takes
+         * this path and phase 4 still runs for it -- a phase-4 rule on ARGS
+         * or TX denies the stream cleanly instead of being skipped because
+         * its last_buf never comes.
+         */
+        pret = coraza_process_response_body(ctx->coraza_transaction);
+        ctx->response_phase4_done = 1;
+        if (ngx_http_coraza_process_body_failed(pret)) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "coraza: response body phase processing failed");
+            ctx->intervention_triggered = 1;
+            return ngx_http_filter_finalize_request(r, &ngx_http_coraza_module,
+                                                    NGX_HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        ret = ngx_http_coraza_poll_after_process(ctx, r, 0, pret);
+        if (r->error_page) {
+            return ngx_http_next_header_filter(r);
+        }
+        if (ret > 0) {
+            ctx->intervention_triggered = 1;
+            if (ngx_http_coraza_is_redirect_status(ret) && r->headers_out.location) {
+                ngx_http_coraza_prepare_redirect(r, ret);
+                return ngx_http_next_header_filter(r);
+            }
+            return ngx_http_filter_finalize_request(r, &ngx_http_coraza_module, ret);
+        }
+        if (ret < 0) {
+            ctx->intervention_triggered = 1;
+            return ngx_http_filter_finalize_request(r, &ngx_http_coraza_module,
+                                                    NGX_HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        return ngx_http_next_header_filter(r);
+    }
+
+    if (mcf->delay_response_headers
+        && r->method != NGX_HTTP_HEAD && !r->header_only && !r->error_page
+        && r == r->main
+        && r->headers_out.status != NGX_HTTP_SWITCHING_PROTOCOLS
         && !ngx_http_coraza_is_sse_response(r))
     {
         /*
-         * Delay sending headers until phase 4 completes so that
-         * phase 4 rules can still return a clean error page.
-         * Only force body into memory when body inspection is needed.
+         * Body inspected: delay sending headers until phase 4 completes so
+         * that phase 4 rules can still return a clean error page, and force
+         * the body into memory for the inspection.
          */
-        if (ctx->response_body_processable) {
-            r->filter_need_in_memory = 1;
-        }
+        r->filter_need_in_memory = 1;
         ctx->headers_delayed = 1;
         ctx->pending_chain = NULL;
         ctx->pending_chain_last = &ctx->pending_chain;

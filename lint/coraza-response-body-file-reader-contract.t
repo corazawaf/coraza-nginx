@@ -61,9 +61,12 @@ my @delayed_errors = $delayed_copy =~
 is(scalar @delayed_errors, 5,
     'every delayed buffer preparation failure uses the internal-error helper');
 
+# Phase 4 is finalised on the last buffer -- unless the header filter already
+# did it, before the headers went out, because the body is not inspected
+# (issue #140): the same transaction must never see phase 4 twice.
 like($body_filter,
-    qr/if \(is_last\).*?coraza_process_response_body\(ctx->coraza_transaction\)/s,
-    'last file buffer still finalizes phase-4 inspection');
+    qr/if \(is_last && !ctx->response_phase4_done\).*?coraza_process_response_body\(ctx->coraza_transaction\)/s,
+    'last file buffer still finalizes phase-4 inspection, unless the header filter already did');
 
 done_testing();
 

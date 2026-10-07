@@ -94,6 +94,7 @@ typedef struct {
     unsigned intervention_triggered:1;
     unsigned headers_delayed:1;
     unsigned response_body_processable:1; /* body inspection needed for this tx */
+    unsigned response_phase4_done:1;      /* phase 4 finalised in the header filter */
 } ngx_http_coraza_ctx_t;
 
 
@@ -252,6 +253,7 @@ ngx_int_t ngx_http_coraza_dl_open(ngx_log_t *log);
 void ngx_http_coraza_dl_close(ngx_log_t *log);
 int ngx_http_coraza_is_request_body_accessible(coraza_transaction_t t);
 int ngx_http_coraza_is_response_body_processable(coraza_transaction_t t);
+int ngx_http_coraza_is_response_body_accessible(coraza_transaction_t t);
 /* Bulk header entry points. Both are loaded with the mandatory DL_SYM in
  * ngx_http_coraza_dl_open() and require the enforced >= 1.7.0 floor, so they
  * are always available -- no runtime capability check needed. */
