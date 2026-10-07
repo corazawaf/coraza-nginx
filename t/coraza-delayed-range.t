@@ -42,7 +42,7 @@ use coraza_crash_check;
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http/)->plan(12);
+my $t = Test::Nginx->new()->has(qw/http/)->plan(14);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -121,6 +121,7 @@ cmp_ok(defined $content_length ? $content_length : -1, '>', 0,
 	'single range: response declares a Content-Length');
 is(length($body), $content_length,
 	'single range: body bytes on the wire equal Content-Length');
+is($body, $BODY, 'single range: delayed path returns the complete entity');
 
 # --- multipart range, delay ON (the bug) ------------------------------------
 
@@ -135,6 +136,7 @@ like($r, qr!^HTTP/1\.1 200 !,
 ($content_length, $body) = split_response($r);
 is(length($body), $content_length,
 	'multipart range: body bytes on the wire equal Content-Length');
+is($body, $BODY, 'multipart range: delayed path returns the complete entity');
 
 # A multipart/byteranges response from the delayed path is the specific shape
 # that cannot be produced coherently here: the body already passed the range

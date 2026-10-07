@@ -767,15 +767,29 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
         && r->method != NGX_HTTP_HEAD && !r->header_only && !r->error_page
         && r == r->main
         && r->headers_out.status != NGX_HTTP_SWITCHING_PROTOCOLS
-        && !ctx->response_body_processable)
+        && (!ctx->response_body_processable
+            || r->headers_out.status == NGX_HTTP_NO_CONTENT
+            || r->headers_out.status == NGX_HTTP_NOT_MODIFIED))
     {
         /*
          * Body not inspected (SecResponseBodyAccess Off, or a Content-Type
-         * outside SecResponseBodyMimeType): nothing the body filter could
+         * outside SecResponseBodyMimeType), or a status that carries no body
+         * at all (204, 304): nothing the body filter could
          * feed the engine can change the phase-4 outcome, and every non-body
          * variable phase 4 can read (RESPONSE_STATUS, RESPONSE_HEADERS, ARGS,
          * TX -- CRS 959100 blocks on the outbound score a 5xx raised in phase
-         * 3) is known now.  So finalise phase 4 here, before any header goes
+         * 3) is known now.
+         *
+         * 204 and 304 belong here even when the Content-Type IS listed: a
+         * proxied origin may send "304 Not Modified" with a Content-Type (an
+         * nginx-generated 304 cannot, ngx_http_not_modified_filter clears it),
+         * and for such a response nginx's final header filter sets
+         * r->header_only once the headers go out, so the only body-filter call
+         * is the upstream's last_buf after the headers are on the wire.  Phase
+         * 4 would then run too late: a deny meets "header already sent" and
+         * the client gets an aborted response instead of a clean error page.
+         * Finalising here keeps the deny clean and lets the bodyless response
+         * stream.  See t/coraza-delayed-bodyless-phase4.t.  So finalise phase 4 here, before any header goes
          * out: a deny still gets a clean error page, and a clean result means
          * there is no reason to hold the headers back -- the response streams.
          * Holding them anyway stalled every non-SSE stream (chunked JSON,
@@ -824,8 +838,8 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
         && r->method != NGX_HTTP_HEAD && !r->header_only && !r->error_page
         && r == r->main
         && r->headers_out.status != NGX_HTTP_SWITCHING_PROTOCOLS
-        && r->headers_out.status != NGX_HTTP_NO_CONTENT
-        && r->headers_out.status != NGX_HTTP_NOT_MODIFIED
+        && r->headers_out.status != NGX_HTTP_NO_CONTENT   /* both already */
+        && r->headers_out.status != NGX_HTTP_NOT_MODIFIED  /* finalised above */
         && !ngx_http_coraza_is_sse_response(r))
     {
         /*

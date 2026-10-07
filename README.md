@@ -233,12 +233,16 @@ phase-4 intervention can no longer replace a response whose headers have
 already gone out. Operators whose ruleset has no phase-4 response rules can
 turn this off to restore normal header streaming.
 
-While headers are held, the response is served whole: byte ranges are
-suppressed, so a request carrying `Range:` receives the entire entity with a
-`200` rather than a `206`. RFC 9110 section 14.2 permits a server to ignore
-`Range`. This is required for correctness -- the body passes the range body
-filter before the delayed range header filter has built its context, so a
-`206` produced here would describe a body that was never sliced.
+While headers are held, a response that nginx itself would slice (a static
+file, or a cached proxied response) is served whole: nginx's byte-range
+handling is suppressed, so a request carrying `Range:` receives the entire
+entity with a `200` rather than a `206`. RFC 9110 section 14.2 permits a server
+to ignore `Range`. This is required for correctness -- the body passes the
+range body filter before the delayed range header filter has built its
+context, so a `206` produced here would describe a body that was never sliced.
+A `206` produced by the origin itself -- nginx forwards `Range` to the upstream
+for a non-cacheable `proxy_pass` location -- is not touched: its body was
+sliced by the origin and passes through intact.
 
 For static and cached responses `Accept-Ranges` is not advertised. A
 non-cacheable proxied response may still carry an `Accept-Ranges` header
