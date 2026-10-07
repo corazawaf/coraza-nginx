@@ -17,8 +17,28 @@ my $root = "$FindBin::Bin/..";
 my $control = slurp("$root/debian/control");
 my $dl = slurp("$root/src/ngx_http_coraza_dl.c");
 
-like($control, qr/\blibcoraza1\s+\(>=\s*1\.7\)/,
+like($control, qr/\blibcoraza1\s+\(>=\s*1\.8\)/,
 	'Debian package pins the libcoraza runtime ABI');
+
+# libcoraza >= 1.8 is the floor (issue #140): the header filter needs
+# coraza_is_response_body_accessible() to tell whether a response body will be
+# inspected, so the loader must refuse anything older and must resolve the
+# symbol as required -- after the version gate, so an older library gets the
+# ">= 1.8.0 required" message instead of a bare missing-symbol error.
+like($dl, qr/version\s*<\s*10800/,
+	'loader version gate refuses libcoraza older than 1.8.0');
+
+unlike($dl, qr/version\s*<\s*10700/,
+	'loader version gate no longer stops at 1.7.0');
+
+like($dl, qr/DL_SYM\(dl_is_response_body_accessible,\s*coraza_is_response_body_accessible\)/s,
+	'response-body access helper is resolved as a required symbol');
+
+like($dl, qr/version\s*<\s*10800.*DL_SYM\(dl_is_response_body_accessible/s,
+	'response-body access helper is resolved after the version gate');
+
+like($dl, qr/return\s+dl_is_response_body_accessible\(t\)/,
+	'response-body access helper wrapper calls the resolved symbol');
 
 unlike($dl, qr/Optional.*coraza_is_response_body_processable/s,
 	'response-body helper is not documented as optional');
