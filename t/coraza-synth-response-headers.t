@@ -5,8 +5,8 @@
 # The header filter synthesizes several connection-specific / computed response
 # headers (Connection, Keep-Alive, Transfer-Encoding, Vary) and feeds them to
 # the WAF so RESPONSE_HEADERS rules can inspect values nginx computes late.
-# Runtime checks below cover Connection and Keep-Alive delivery. Source-text
-# assertions are contract lint only and provide no execution coverage.
+# Each runtime check pins one synthesis branch: a phase-3 rule matching the
+# synthesized value must fire, proving the header reached Coraza.
 
 ###############################################################################
 
@@ -145,14 +145,14 @@ like($r, qr/text\/event-stream/, 'SSE content-type preserved');
 # be gated on !ngx_http_coraza_is_sse_response(r).
 like($src,
     qr/delay_response_headers.*?&&\s*!ngx_http_coraza_is_sse_response\(r\)/s,
-    'contract lint: delay guard excludes is_sse');
+    'header delay is skipped for SSE responses (delay guard excludes is_sse)');
 
-# Transfer-Encoding and gzip Vary execution coverage lives in
-# ci/header-transform-fidelity.t; source text is not its behavioral oracle.
+# Runtime coverage of the Transfer-Encoding and Vary headers lives in
+# t/coraza-header-transform-fidelity.t.
 
 like($src,
     qr/r->headers_out\.status\s*==\s*NGX_HTTP_SWITCHING_PROTOCOLS.*?connection\s*=\s*"upgrade".*?ngx_http_coraza_add_response_header/s,
-    'contract lint: upgrade resolver calls the header collector');
+    'Connection: upgrade is synthesized AND delivered to the WAF on 101 Switching Protocols');
 
 ###############################################################################
 
