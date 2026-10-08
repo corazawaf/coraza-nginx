@@ -41,7 +41,7 @@ engine, so the real parsing there is fuzzed upstream in Coraza itself.
 
 ## Boundary contracts
 
-`bash ci/packer-contract.sh` runs standalone ASan/UBSan contracts and is also
+`bash fuzz/packer_contract.sh` runs standalone ASan/UBSan contracts and is also
 required by the two-target `fuzz/build.sh` route used in `fuzzing.yml`.
 It checks zero/ordinary/max-name success, field and aggregate metadata limits,
 and allocation failure. Metadata-only cases use a rejecting allocator, so

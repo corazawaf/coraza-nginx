@@ -105,7 +105,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 
     /* At most 32 u16-sized pairs fit far below INT_MAX. A rejection is a
      * regression; metadata boundaries and allocation failure are exercised
-     * separately by ci/packer-contract.sh without oversized copies. */
+     * separately by fuzz/packer_contract.sh without oversized copies. */
     assert(rc == NGX_OK);
 
     if (count == 0 || expected_total == 0) {

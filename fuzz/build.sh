@@ -37,7 +37,7 @@ fi
 OUTDIR="${1:-$FUZZ_DIR}"
 
 bash "$FUZZ_DIR/extract_parser.sh"
-bash "$FUZZ_DIR/../ci/packer-contract.sh"
+bash "$FUZZ_DIR/packer_contract.sh"
 
 # shellcheck disable=SC2086
 "$CC" $CFLAGS $ENGINE -I"$FUZZ_DIR" \

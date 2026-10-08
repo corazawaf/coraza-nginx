@@ -16,7 +16,7 @@ FLAGS=(-std=c11 -g -O1 -Wall -Wextra -Werror "-fsanitize=address,undefined"
 	-fno-sanitize-recover=undefined)
 bash "$ROOT/fuzz/extract_pack_headers.sh"
 cp "$ROOT/fuzz/generated_pack_headers.inc" "$ROOT/fuzz/fuzz_pack_headers.c" "$WORK/"
-cp "$ROOT/ci/packer-contract.c" "$WORK/"
+cp "$ROOT/fuzz/packer_contract.c" "$WORK/"
 cp "$WORK/generated_pack_headers.inc" "$WORK/production.inc"
 
 build() {
@@ -40,16 +40,16 @@ expect_red() {
 	echo "PASS: $name detected (exit $status)"
 }
 
-build contract "$WORK/packer-contract.c"
+build contract "$WORK/packer_contract.c"
 "$WORK/contract"
-build adapter "$WORK/fuzz_pack_headers.c" "$ROOT/ci/packer-fuzz-inputs.c"
+build adapter "$WORK/fuzz_pack_headers.c" "$ROOT/fuzz/packer_fuzz_inputs.c"
 "$WORK/adapter"
 
 # Disable the entire validation loop in a private copy. total stays zero,
 # so this control cannot reach allocation or copy, even for huge metadata.
 sed '0,/for (i = 0; i < count; i++)/s//for (i = count; i < count; i++)/' \
 	"$WORK/production.inc" >"$WORK/generated_pack_headers.inc"
-build no-validation "$WORK/packer-contract.c"
+build no-validation "$WORK/packer_contract.c"
 expect_red no-validation '== NGX_ERROR'
 
 # Harmless replacement: valid inputs must not silently accept NGX_ERROR.
@@ -63,12 +63,12 @@ ngx_http_coraza_pack_headers(ngx_http_request_t *r,
     return NGX_ERROR;
 }
 DOUBLE
-build always-error "$WORK/fuzz_pack_headers.c" "$ROOT/ci/packer-fuzz-inputs.c"
+build always-error "$WORK/fuzz_pack_headers.c" "$ROOT/fuzz/packer_fuzz_inputs.c"
 expect_red always-error 'rc == NGX_OK'
 
 cp "$WORK/production.inc" "$WORK/generated_pack_headers.inc"
-build restored-contract "$WORK/packer-contract.c"
+build restored-contract "$WORK/packer_contract.c"
 "$WORK/restored-contract"
-build restored-adapter "$WORK/fuzz_pack_headers.c" "$ROOT/ci/packer-fuzz-inputs.c"
+build restored-adapter "$WORK/fuzz_pack_headers.c" "$ROOT/fuzz/packer_fuzz_inputs.c"
 "$WORK/restored-adapter"
 echo 'PASS: packer contracts and both negative controls'
