@@ -149,7 +149,9 @@ sub status {
 sub body {
 	my ($r) = @_;
 	my $i = index($r, "\x0d\x0a\x0d\x0a");
-	return $i < 0 ? '' : substr($r, $i + 4);
+	# undef, not '', so a response without a header terminator cannot pass
+	# an "empty body" check
+	return $i < 0 ? undef : substr($r, $i + 4);
 }
 
 ###############################################################################
