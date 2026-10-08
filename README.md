@@ -233,6 +233,70 @@ phase-4 intervention can no longer replace a response whose headers have
 already gone out. Operators whose ruleset has no phase-4 response rules can
 turn this off to restore normal header streaming.
 
+## Disruptive actions and the audit log
+
+`deny` serves a response: the status comes from `status:`, or 403 when the
+rule does not set one (see the phase-dependent notes below for statuses nginx
+cannot serve from a request phase). A redirect action (`redirect:`, statuses
+301, 302, 303, 307) serves a body-less response carrying the `Location`
+header.
+
+`drop` does not serve anything. The connection is torn down and the client
+receives no response at all -- no status line, no headers, no body -- which is
+what SecLang `drop` asks for. Because nothing is written to the wire, there is
+no response status for the audit record to agree with, so the audit log
+records `RESPONSE_STATUS` 444: nginx's own convention for "connection closed
+without response", and the same value the error log line reports. It is not 0,
+because 0 is what an unevaluated transaction looks like and would make a drop
+indistinguishable from a request the engine never reached.
+
+That means a bare `drop` and an explicit `deny,status:444` both appear in the
+audit log with `RESPONSE_STATUS` 444, and the status alone does not tell them
+apart. To disambiguate, read the rule id and the action recorded in the same
+audit record rather than the status.
+
+On the wire the two are not always distinguishable either, because it depends
+on which phase the rule fired in:
+
+* In a **request phase** (`phase:1`, `phase:2`) `deny,status:444` behaves
+  exactly like `drop`: the connector returns 444 to nginx's
+  `ngx_http_finalize_request()`, which special-cases that value
+  (`NGX_HTTP_CLOSE`) and tears the connection down with nothing written. This
+  is deliberate -- 444 is nginx's own convention for "close the connection
+  without a response", so a rule asking for it in a request phase gets it.
+* In a **response phase** (`phase:3`, `phase:4`) the interception happens in a
+  filter, which finalizes through `ngx_http_special_response_handler()`. That
+  function has no `NGX_HTTP_CLOSE` case, so 444 is treated as an ordinary
+  status: nginx serves a well-formed zero-body `444` response and the
+  connection may be kept alive. `drop` still closes the connection at these
+  sites, because the connector routes it through its own teardown rather than
+  through the returned status.
+
+Use `drop` when the intent is to close the connection regardless of phase.
+
+Note also that a `deny` whose `status:` is below 300 -- `deny,status:200`, for
+instance -- cannot be served as-is from a request phase: nginx only produces a
+response for statuses at or above 300 plus 201 and 204, and anything else would
+finalize with no bytes written on a connection left open for reuse. The
+connector therefore serves such a `deny` as **403** in the request phases, so
+the block always reaches the client as a real response. 201 and 204 are passed
+through unchanged, and response-phase filters serve any status verbatim.
+
+The audit log follows the wire, not the rule: a request-phase `deny,status:200`
+is recorded with `RESPONSE_STATUS` **403** -- the status the client was
+actually served -- and the connector's error-log line reads
+`Access denied with code 403`. The rule's own `status:200` is not what was put
+on the wire, so it is not what is recorded; the rule id and message in the
+audit record still identify which rule blocked. At the **response-phase filter**
+sites the same `deny,status:200` really is served as a zero-body `200`, and
+there it is recorded as `200`.
+
+The recorded status matches what the client received whenever the block lands
+before response headers are sent. If a phase-4 rule fires after the headers are
+already on the wire (`coraza_delay_response_headers off`, SSE, or a body larger
+than the delayed-body cap), the client has the origin's status line and the
+connection is cut mid-body; the audit record still shows the blocking status.
+
 ## Configuration merging
 
 Rules defined at a higher-level context (`http`, `server`) are automatically

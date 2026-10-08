@@ -73,7 +73,7 @@ ngx_http_coraza_process_request_body_phase(ngx_http_coraza_ctx_t *ctx,
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
-    ret = ngx_http_coraza_poll_after_process(ctx, r, 0, pret);
+    ret = ngx_http_coraza_poll_after_process(ctx, r, 0, pret, 1);
     if (r->error_page) {
         return NGX_DECLINED;
     }
@@ -84,7 +84,8 @@ ngx_http_coraza_process_request_body_phase(ngx_http_coraza_ctx_t *ctx,
     }
     if (ret > 0) {
         ctx->intervention_triggered = 1;
-        return ret;
+        /* Route `drop` on the flag, not on the numeric 444. */
+        return ngx_http_coraza_phase_status(ctx, ret);
     }
 
     return NGX_DECLINED;
@@ -176,7 +177,7 @@ ngx_http_coraza_append_request_body_file(ngx_http_coraza_ctx_t *ctx,
         offset += n;
 
         if (offset < body_size) {
-            ret = ngx_http_coraza_process_intervention(ctx, r, 0);
+            ret = ngx_http_coraza_process_intervention(ctx, r, 0, 1);
             /*
              * On an error_page re-entry pass a prior intervention has
              * already been finalized, so yield instead of finalizing
@@ -196,7 +197,8 @@ ngx_http_coraza_append_request_body_file(ngx_http_coraza_ctx_t *ctx,
             }
             if (ret > 0) {
                 ctx->intervention_triggered = 1;
-                rc = ret;
+                /* Route `drop` on the flag, not on the numeric 444. */
+                rc = ngx_http_coraza_phase_status(ctx, ret);
                 goto done;
             }
         }
@@ -416,7 +418,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
             chain = chain->next;
 
             /* Check for intervention after each chunk for prompt detection */
-            ret = ngx_http_coraza_process_intervention(ctx, r, 0);
+            ret = ngx_http_coraza_process_intervention(ctx, r, 0, 1);
             /*
              * If nginx has already started streaming the error page body
              * after a prior intervention, do not attempt another finalize.
@@ -431,7 +433,8 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
             }
             if (ret > 0) {
                 ctx->intervention_triggered = 1;
-                return ret;
+                /* Route `drop` on the flag, not on the numeric 444. */
+                return ngx_http_coraza_phase_status(ctx, ret);
             }
         }
 
@@ -443,7 +446,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
          */
 
         /* Check for body limit intervention before processing rules. */
-        ret = ngx_http_coraza_process_intervention(ctx, r, 0);
+        ret = ngx_http_coraza_process_intervention(ctx, r, 0, 1);
         if (r->error_page) {
             return NGX_DECLINED;
         }
@@ -454,7 +457,8 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
         }
         if (ret > 0) {
             ctx->intervention_triggered = 1;
-            return ret;
+            /* Route `drop` on the flag, not on the numeric 444. */
+            return ngx_http_coraza_phase_status(ctx, ret);
         }
 
         return ngx_http_coraza_process_request_body_phase(ctx, r);
