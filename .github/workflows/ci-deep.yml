@@ -277,8 +277,7 @@ jobs:
           bash tools/soak.sh "$SERVER_BIN" 300 8
       - name: Upload failed soak evidence
         if: failure()
-        # actions/upload-artifact v7.0.1
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: soak-memcheck-${{ matrix.server }}-${{ matrix.arch }}
           path: ${{ runner.temp }}/soak-evidence/
@@ -421,8 +420,7 @@ jobs:
           bash tools/soak.sh "$SERVER_BIN" 300 8
       - name: Upload failed soak evidence
         if: failure()
-        # actions/upload-artifact v7.0.1
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: soak-helgrind-${{ matrix.server }}-${{ matrix.arch }}
           path: ${{ runner.temp }}/soak-evidence/
@@ -703,8 +701,7 @@ jobs:
             "$GITHUB_WORKSPACE/nginx-${NGINX_VERSION}/objs/nginx" 300 4
       - name: Upload failed soak evidence
         if: failure()
-        # actions/upload-artifact v7.0.1
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: soak-sanitizer
           path: ${{ runner.temp }}/soak-evidence/
