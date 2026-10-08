@@ -22,7 +22,7 @@ use FindBin;
 my $root = "$FindBin::Bin/..";
 my $src = slurp("$root/src/ngx_http_coraza_header_filter.c");
 
-my $start_anchor = '&& !ctx->response_body_processable)';
+my $start_anchor = '!ctx->response_body_processable';
 my $end_anchor = 'if (mcf->delay_response_headers';
 
 my $start = index($src, $start_anchor);
