@@ -32,7 +32,7 @@ You can download it from the [libcoraza git repository](https://github.com/coraz
 
 To build libcoraza from source (requires Go 1.21+):
 
-```
+```sh
 cd /path/to/libcoraza
 ./build.sh
 ./configure
@@ -43,13 +43,13 @@ sudo ldconfig
 
 With libcoraza installed, you can proceed with the installation of the coraza-nginx connector, which follows the nginx third-party module installation procedure. From the nginx source directory:
 
-```
+```sh
 ./configure --add-module=/path/to/coraza-nginx
 ```
 
 Or, to build a dynamic module:
 
-```
+```sh
 ./configure --add-dynamic-module=/path/to/coraza-nginx --with-compat
 ```
 
@@ -330,13 +330,15 @@ $ prove coraza*.t
 
 If you are facing problems getting your added functionality to pass all the nginx tests, feel free to contact us or the nginx mailing list at: http://nginx.org/en/support.html
 
-### Debugging 
+### Debugging
 
-We respect the nginx debugging schema. By using the configuration option
-"--with-debug" during the nginx configuration you will also be enabling the
-connector's debug messages. Core dumps and crashes are expected to be debugged
-in the same fashion that is used to debug nginx. For further information,
-please check the nginx debugging information: http://wiki.nginx.org/Debugging
+Nginx's `--with-debug` enables nginx debug logging. To also enable the
+connector's `dd` messages, compile the module with `CORAZA_DDEBUG=1`
+(for example, pass
+`--with-cc-opt="-DCORAZA_DDEBUG=1 -Wno-unused-function"` to nginx's configure
+script when building the module). Core dumps and crashes can be debugged
+in the same fashion as nginx. For further information,
+please check [nginx's debugging documentation](http://wiki.nginx.org/Debugging).
 
 
 ## Reporting Issues
@@ -366,4 +368,3 @@ feel free to open GitHub issues requesting for new features. Before opening a ne
 
 Having our packages in distros on time is something we highly desire. Let us know if
 there is anything we can do to facilitate your work as a packager.
-

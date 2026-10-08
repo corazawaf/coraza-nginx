@@ -104,7 +104,7 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
                                         client_port,
                                         server_addr,
                                         server_port);
-        if (ret != 1){
+        if (ret != 0) {
             dd("Was not able to extract connection information.");
         }
         /*

@@ -133,17 +133,6 @@ static dynlib_t dl_handle;
     } while (0)
 
 
-/* Resolve a best-effort symbol — leaves the pointer NULL (no failure) when
- * the running libcoraza does not export it, so the caller can fall back. */
-#define DL_SYM_OPT(ptr, name)                                           \
-    do {                                                                \
-        *(void **)(&ptr) = dynlib_sym(dl_handle, #name);               \
-        if (ptr == NULL) {                                             \
-            (void) dynlib_error();  /* consume: absence is not fatal */ \
-        }                                                              \
-    } while (0)
-
-
 /* ------------------------------------------------------------------ */
 /* Public: load libcoraza.so and resolve every symbol                  */
 /* ------------------------------------------------------------------ */
@@ -424,9 +413,7 @@ int coraza_update_status_code(coraza_transaction_t t, int code)
  * Requires libcoraza >= 1.4.0.  The symbol is resolved with the mandatory
  * DL_SYM in ngx_http_coraza_dl_open(), so dl_is_response_body_processable is
  * guaranteed non-NULL here: if the running library did not export it, dl_open
- * failed and the worker never started.  No NULL guard is needed (and none must
- * be relied upon) -- if this symbol is ever downgraded to DL_SYM_OPT, this
- * wrapper and its callers must add an availability check first.
+ * failed and the worker never started. No NULL guard is needed here.
  */
 int
 ngx_http_coraza_is_response_body_processable(coraza_transaction_t t)

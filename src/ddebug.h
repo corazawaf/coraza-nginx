@@ -8,7 +8,7 @@
  *
  */
 
-// From: https://raw.githubusercontent.com/openresty/lua-nginx-module/master/src/ddebug.h
+/* From: https://raw.githubusercontent.com/openresty/lua-nginx-module/master/src/ddebug.h */
 
 /*
  * Copyright (C) Yichun Zhang (agentzh)

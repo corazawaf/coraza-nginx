@@ -286,10 +286,9 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
             r->main->count);
         r->request_body_in_persistent_file = 1;
         if (!r->request_body_in_file_only) {
-            // If the above condition fails, then the flag below will have been
-            // set correctly elsewhere. We need to set the flag here for other
-            // conditions (client_body_in_file_only not used but
-            // client_body_buffer_size is)
+            /* Keep a file-backed body available through the request lifetime
+             * when nginx chooses to spill it outside request_body_in_file_only.
+             */
             r->request_body_in_clean_file = 1;
         }
 
@@ -352,16 +351,11 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
              * Request body was saved to a file, probably we don't have a
              * copy of it in memory.
              *
-             * Invariant: when spilled to a file there is no in-memory
-             * remainder to also walk. This handler always sets
-             * r->request_body_in_single_buf and
-             * r->request_body_in_clean_file (or leaves the file-only flag
-             * nginx already set) before calling
-             * ngx_http_read_client_request_body(), so nginx buffers the
-             * whole body as a single unit and only ever produces bufs *or*
-             * a temp_file for the memory-vs-file choice, never both with
-             * live data in each. Hence skipping the chain below when
-             * temp_file != NULL is safe and does not silently drop bytes.
+             * We request a persistent file and set clean_file unless nginx
+             * has already selected file_only. Before this callback, nginx's
+             * request-body filter writes remaining bufs to temp_file and
+             * clears them; when no temp_file exists, the bufs remain in
+             * memory. This callback reads the corresponding source.
              */
             dd("request body inspection: file");
 
