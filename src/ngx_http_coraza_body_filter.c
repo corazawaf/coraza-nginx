@@ -641,6 +641,7 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                     b->last_buf      = 0;
                     b->last_in_chain = chain->buf->last_in_chain;
                     b->flush         = chain->buf->flush;
+                    b->sync          = chain->buf->sync;
                 }
 
                 /* Mark original buffer consumed so nginx may reuse it. */
