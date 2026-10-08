@@ -50,6 +50,26 @@ my $fail_at = index($block, 'ngx_http_coraza_process_body_failed(pret)');
 ok($first_fwd > $fail_at && $fail_at >= 0,
 	'processing error is checked before any header is forwarded');
 
+# once the error_page and redirect branches are cut out, nothing ahead of the
+# intervention poll error may forward headers
+my $poll_fail_at = index($block, 'if (ret < 0)');
+ok($poll_fail_at >= 0, 'intervention poll error check located');
+my $pre_poll = substr($block, 0, $poll_fail_at < 0 ? 0 : $poll_fail_at);
+my $allowed = 0;
+$allowed += $pre_poll =~ s{
+	if\s*\(r->error_page\)\s*\{
+		\s*return\s+ngx_http_next_header_filter\(r\);\s*
+	\}
+}{}sx;
+$allowed += $pre_poll =~ s{
+	if\s*\(ngx_http_coraza_is_redirect_status\(ret\)\s*&&\s*r->headers_out\.location\)\s*\{
+		[^{}]*?return\s+ngx_http_next_header_filter\(r\);\s*
+	\}
+}{}sx;
+is($allowed, 2, 'error_page and redirect forwarding branches located');
+unlike($pre_poll, qr/ngx_http_next_header_filter\(r\)/,
+	'no unapproved header forwarding precedes the intervention poll error');
+
 done_testing();
 
 ###############################################################################
