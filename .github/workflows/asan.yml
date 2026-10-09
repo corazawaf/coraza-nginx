@@ -154,6 +154,7 @@ jobs:
 
       - name: Sanitizer soak (60s @ 4 conc)
         env:
+          TMPDIR: ${{ runner.temp }}/soak-evidence
           # No valgrind: soak.sh runs the ASan/UBSan-built nginx directly and
           # fails on any asan* log. The dlopen'd Go libcoraza is uninstrumented;
           # verify_asan_link_order=0 allows ASan to init from the main binary
@@ -161,5 +162,13 @@ jobs:
           ASAN_OPTIONS: "verify_asan_link_order=0"
           CORAZA_MODULE_SO: ${{ github.workspace }}/nginx-${{ env.NGINX_VERSION }}/objs/ngx_http_coraza_module.so
         run: |
+          mkdir -p "$TMPDIR"
           bash tools/soak.sh \
             "$GITHUB_WORKSPACE/nginx-${NGINX_VERSION}/objs/nginx" 60 4
+      - name: Upload failed soak evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: soak-sanitizer
+          path: ${{ runner.temp }}/soak-evidence/
+          if-no-files-found: ignore

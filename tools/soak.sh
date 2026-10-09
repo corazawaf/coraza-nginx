@@ -45,7 +45,17 @@ MODULE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d)"
 # Kill the (possibly valgrind-wrapped) server too: under `set -e` an early
 # failure would otherwise orphan it, holding the port for later runs.
-trap 'kill -9 "${NGINX_PID:-}" 2>/dev/null || true; rm -rf "$WORK"' EXIT
+cleanup() {
+    local status=$?
+    kill -9 "${NGINX_PID:-}" 2>/dev/null || true
+    if [ "$status" -eq 0 ]; then
+        rm -rf "${WORK:?}"
+    else
+        echo "soak: failure evidence retained at $WORK" >&2
+    fi
+    return "$status"
+}
+trap cleanup EXIT
 mkdir -p "$WORK/conf" "$WORK/logs" "$WORK/html"
 
 echo "hello coraza" > "$WORK/html/index.html"
@@ -254,7 +264,10 @@ for pid in "${pids[@]}"; do wait "$pid" || fail=1; done
 
 # Clean shutdown so all pool cleanups (incl. the Coraza transaction) run.
 kill -QUIT "$NGINX_PID" 2>/dev/null || true
-wait "$NGINX_PID" 2>/dev/null; rc=$?
+rc=0
+wait "$NGINX_PID" 2>/dev/null || rc=$?
+# The master has been reaped; cleanup must not signal a reused PID.
+unset NGINX_PID
 
 problems=0
 if ls "$WORK"/logs/asan* >/dev/null 2>&1; then
@@ -326,7 +339,7 @@ if [ "$fail" -ne 0 ]; then
     echo "FAIL: a worker reported a WAF verdict regression"; problems=1
 fi
 # QUIT is a clean exit; valgrind uses 99, ASAN 42 on error.
-if [ "$rc" -ne 0 ] && [ "$rc" -ne 130 ]; then
+if [ "$rc" -ne 0 ]; then
     echo "FAIL: nginx exited $rc"; tail -40 "$WORK/logs/error.log" || true
     problems=1
 fi
