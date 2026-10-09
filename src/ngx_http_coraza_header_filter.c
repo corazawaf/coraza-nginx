@@ -699,8 +699,8 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * can never stall), error pages (already an error response), and
      * subrequests (handled independently).
      * A body that will not be inspected (SecResponseBodyAccess Off or
-     * Content-Type outside SecResponseBodyMimeType) never reaches this point:
-     * the branch above finalised phase 4 and forwarded the headers.
+     * Content-Type outside SecResponseBodyMimeType) takes the first branch
+     * below: finalise phase 4 before forwarding its headers, then stream.
      *
      * We also skip 101 Switching Protocols: an upgraded connection (e.g.
      * WebSocket) becomes a raw bidirectional tunnel with no HTTP response
