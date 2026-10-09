@@ -283,7 +283,8 @@ ngx_int_t ngx_http_coraza_log_handler(ngx_http_request_t *r);
 ngx_int_t ngx_http_coraza_pre_access_handler(ngx_http_request_t *r);
 
 /* ngx_http_coraza_rewrite.c */
-ngx_int_t ngx_http_coraza_rewrite_handler(ngx_http_request_t *r);
+ngx_int_t ngx_http_coraza_request_headers(ngx_http_request_t *r,
+    ngx_flag_t audit_only);
 
 /* ngx_http_coraza_utils.c */
 ngx_int_t ngx_str_to_char(ngx_str_t a, char **str, ngx_pool_t *p);

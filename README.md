@@ -281,6 +281,12 @@ http {
 Locations that set `coraza off` will not process requests through the WAF,
 regardless of rules inherited from parent contexts.
 
+After a `rewrite ... last` moves a request to another location, the final
+location's policy applies: its `coraza` flag, its rules and its
+`coraza_transaction_id`. The rules of the location the request was rewritten
+away from are not evaluated, just as nginx's own access-phase directives
+(`allow`, `deny`, `auth_basic`) in that location are not.
+
 
 # Contributing
 

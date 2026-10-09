@@ -694,7 +694,6 @@ ngx_module_t ngx_http_coraza_module = {
 static ngx_int_t
 ngx_http_coraza_init(ngx_conf_t *cf)
 {
-	ngx_http_handler_pt *h_rewrite;
 	ngx_http_handler_pt *h_preaccess;
 	ngx_http_handler_pt *h_log;
 	ngx_http_core_main_conf_t *cmcf;
@@ -710,18 +709,8 @@ ngx_http_coraza_init(ngx_conf_t *cf)
 		dd("We are not sure how this returns, NGINX doesn't seem to think it will ever be null");
 		return NGX_ERROR;
 	}
-	/* Rewrite phase: process connection info and request headers.
-	 * This is the earliest phase that supports content handlers
-	 * (FIND_CONFIG_PHASE is not hookable). */
-	h_rewrite = ngx_array_push(&cmcf->phases[NGX_HTTP_REWRITE_PHASE].handlers);
-	if (h_rewrite == NULL)
-	{
-		dd("Not able to create a new NGX_HTTP_REWRITE_PHASE handle");
-		return NGX_ERROR;
-	}
-	*h_rewrite = ngx_http_coraza_rewrite_handler;
-
-	/* Preaccess phase: process request body */
+	/* Bind the transaction after location-rematching rewrites have finished,
+	 * then process request headers and body with that location's policy. */
 	h_preaccess = ngx_array_push(&cmcf->phases[NGX_HTTP_PREACCESS_PHASE].handlers);
 	if (h_preaccess == NULL)
 	{

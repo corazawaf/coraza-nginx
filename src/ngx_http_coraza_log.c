@@ -17,6 +17,7 @@ ngx_http_coraza_log_handler(ngx_http_request_t *r)
 {
     ngx_http_coraza_ctx_t   *ctx;
     ngx_http_coraza_conf_t  *mcf;
+    ngx_flag_t              audit_only = 0;
 
     mcf = ngx_http_get_module_loc_conf(r, ngx_http_coraza_module);
     if (mcf == NULL || mcf->enable != 1)
@@ -27,12 +28,28 @@ ngx_http_coraza_log_handler(ngx_http_request_t *r)
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
     if (ctx == NULL) {
+        /* A headerless exit (e.g. return 444) skips PREACCESS and all header
+         * filters. Collect the settled location's audit facts without applying
+         * interventions or reopening/finalizing the completed response. */
+        (void) ngx_http_coraza_request_headers(r, 1);
+        ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
+        audit_only = 1;
+    }
+
+    if (ctx == NULL || ctx->coraza_transaction == 0) {
         /* LOG-phase handlers must return NGX_OK */
         return NGX_OK;
     }
 
     if (ctx->logged) {
         return NGX_OK;
+    }
+
+    if (audit_only) {
+        /* nginx sets the completed status before invoking LOG handlers.
+         * Update only Coraza's audit field, never nginx's response state. */
+        (void) coraza_update_status_code(ctx->coraza_transaction,
+            (int) r->headers_out.status);
     }
 
     coraza_process_logging(ctx->coraza_transaction);

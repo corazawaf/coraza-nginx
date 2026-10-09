@@ -437,16 +437,51 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * and audit logging; body inspection is naturally skipped (no body). */
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
-
-
-    if (ctx == NULL)
-    {
-        return ngx_http_next_header_filter(r);
-    }
-
     mcf = ngx_http_get_module_loc_conf(r, ngx_http_coraza_module);
     if (mcf == NULL) {
         return ngx_http_next_header_filter(r);
+    }
+
+    if (ctx == NULL) {
+        if (mcf->enable != 1) {
+            return ngx_http_next_header_filter(r);
+        }
+
+        /* A subrequest that reaches this filter without a context never starts
+         * a transaction of its own; only the main request binds here. */
+        if (r != r->main) {
+            return ngx_http_next_header_filter(r);
+        }
+
+        /* Rewrite return/error responses can skip PREACCESS entirely. Bind
+         * their settled policy before forwarding any response headers. */
+        rc = ngx_http_coraza_request_headers(r, 0);
+        ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
+        if (rc != NGX_DECLINED) {
+            /* Without a usable ctx there is no reentry guard. End the
+             * request rather than recursively trying initialization again. */
+            if (ctx == NULL || ctx->coraza_transaction == 0) {
+                return NGX_ERROR;
+            }
+            ctx->intervention_triggered = 1;
+            if (ngx_http_coraza_is_redirect_status(rc)
+                && r->headers_out.location)
+            {
+                ngx_http_coraza_prepare_redirect(r, rc);
+                return ngx_http_next_header_filter(r);
+            }
+            /* The special-response sender only stops on NGX_ERROR, not a
+             * positive status. Preserve filter finalization for that caller. */
+            if (r->err_status) {
+                return ngx_http_filter_finalize_request(r,
+                    &ngx_http_coraza_module, rc);
+            }
+            /* No headers have reached the next filter. Return the status to
+             * the caller's normal request finalization, which can retain
+             * keepalive. Filter finalization instead sets filter_finalize and
+             * returns NGX_ERROR even after generating a successful response. */
+            return rc;
+        }
     }
 
     if (ctx->intervention_triggered) {
@@ -456,14 +491,14 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     /*
      * ctx->processed is deliberately sticky for the lifetime of this ctx: it
      * guards against this filter running twice for the same ctx, not against
-     * running once per "logical" response. An internal redirect
-     * (error_page, X-Accel-Redirect) reuses the same r/ctx across the hop,
-     * but nginx invokes the header filter chain only once, for the final
-     * response actually sent to the client -- redirected phases never reach
-     * this filter, so there is nothing here for the flag to wrongly
-     * suppress. A subrequest gets its own r and, unless it creates one, a
-     * NULL ctx (see ngx_http_coraza_create_ctx() callers), so it is
-     * unaffected by the parent's flag. Do not reset this flag.
+     * running once per "logical" response. Ordinary rewrite rematching keeps
+     * r->ctx, but transaction creation waits until after that loop. True
+     * internal redirects (including error_page and X-Accel-Redirect) and named
+     * locations clear r->ctx; the destination may create its own transaction.
+     * ngx_http_filter_finalize_request(r, &ngx_http_coraza_module, ...) instead
+     * preserves this module's ctx while clearing the others. A subrequest has
+     * its own r/ctx. Retained contexts must keep this one-shot flag; do not
+     * reset it to accommodate redirects.
      */
     if (ctx && ctx->processed)
     {
