@@ -287,6 +287,13 @@ location's policy applies: its `coraza` flag, its rules and its
 away from are not evaluated, just as nginx's own access-phase directives
 (`allow`, `deny`, `auth_basic`) in that location are not.
 
+A subrequest that is answered in the rewrite phase, for example an
+`auth_request` location that uses `return`, finishes before the phase in
+which a transaction is bound and is not inspected: `coraza on` and the rules
+in that location have no effect on it, and only the main request's
+transaction is evaluated and audited. Put the rules on the location that
+issues the `auth_request` instead.
+
 
 # Contributing
 
