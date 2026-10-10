@@ -28,6 +28,10 @@ ngx_http_coraza_log_handler(ngx_http_request_t *r)
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
     if (ctx == NULL) {
+        if (r != r->main) {
+            return NGX_OK;
+        }
+
         /* A headerless exit (e.g. return 444) skips PREACCESS and all header
          * filters. Collect the settled location's audit facts without applying
          * interventions or reopening/finalizing the completed response. */

@@ -270,6 +270,8 @@ http {
         }
         location = /c5-sub {
             internal;
+            # Exercise LOG even though this subrequest skips PREACCESS.
+            log_subrequest on;
             coraza_transaction_id "c5-S-$request_id";
             coraza_rules '
                 SecRuleEngine On
