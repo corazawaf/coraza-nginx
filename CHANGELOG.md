@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.22.1](https://github.com/corazawaf/coraza-nginx/compare/v0.22.0...v0.22.1) (2026-10-10)
+
+
+### Bug Fixes
+
+* block every disruptive intervention, including bare drop and deny,status:200 ([#145](https://github.com/corazawaf/coraza-nginx/issues/145)) ([95d9fe1](https://github.com/corazawaf/coraza-nginx/commit/95d9fe121906307f60dfc980763804dc2c68e8c6))
+* correct the debug connection-lookup check and remove stale debug artifacts ([#159](https://github.com/corazawaf/coraza-nginx/issues/159)) ([9d26764](https://github.com/corazawaf/coraza-nginx/commit/9d26764bcd96be140ffd144e5cc2c75780a0ce6e))
+* preserve the sync flag on delayed buffer copies ([#154](https://github.com/corazawaf/coraza-nginx/issues/154)) ([8432b50](https://github.com/corazawaf/coraza-nginx/commit/8432b5049c5d73bd8b3abb1e0118825962e6d139))
+* publish the request context only after construction succeeds ([#146](https://github.com/corazawaf/coraza-nginx/issues/146)) ([29c8a94](https://github.com/corazawaf/coraza-nginx/commit/29c8a94a850e92ddffe3b6a8be1817c82bf3a76f))
+
 ## [0.22.0](https://github.com/corazawaf/coraza-nginx/compare/v0.21.0...v0.22.0) (2026-10-07)
 
 
