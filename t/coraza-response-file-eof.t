@@ -240,6 +240,20 @@ ngx_http_coraza_process_intervention(ngx_http_coraza_ctx_t *ctx,
     return NGX_OK;
 }
 
+/*
+ * The body filter routes a SecLang `drop` through this helper, which lives in
+ * ngx_http_coraza_header_filter.c -- a translation unit this harness does not
+ * link.  The harness never drives an intervention (process_intervention above
+ * always returns NGX_OK), so the stub is unreachable here; it exists only to
+ * satisfy the linker.
+ */
+ngx_int_t
+ngx_http_coraza_drop_connection(ngx_http_request_t *r)
+{
+    (void) r;
+    return NGX_ERROR;
+}
+
 ssize_t
 ngx_read_file(ngx_file_t *file, u_char *buf, size_t size, off_t offset)
 {
