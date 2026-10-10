@@ -474,7 +474,7 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                 }
             }
 
-            ret = ngx_http_coraza_process_intervention(ctx, r, 0, 0);
+            ret = ngx_http_coraza_process_intervention(ctx, r, 0);
             /*
              * Mirror the r->error_page guard the other three poll sites
              * (rewrite, pre_access, header_filter) apply right after their
@@ -529,7 +529,7 @@ ngx_http_coraza_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
                     NGX_HTTP_INTERNAL_SERVER_ERROR);
             }
 
-            ret = ngx_http_coraza_poll_after_process(ctx, r, 0, pret, 0);
+            ret = ngx_http_coraza_poll_after_process(ctx, r, 0, pret);
             /*
              * Same r->error_page guard as above and as the other three poll
              * sites: a phase-4 intervention while nginx is already streaming

@@ -232,12 +232,11 @@ coraza_process_response_body(coraza_transaction_t transaction)
 
 ngx_int_t
 ngx_http_coraza_process_intervention(ngx_http_coraza_ctx_t *ctx,
-    ngx_http_request_t *r, ngx_int_t early_log, ngx_int_t phase_site)
+    ngx_http_request_t *r, ngx_int_t early_log)
 {
     (void) ctx;
     (void) r;
     (void) early_log;
-    (void) phase_site;
     return NGX_OK;
 }
 

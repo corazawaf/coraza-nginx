@@ -185,15 +185,7 @@ ngx_http_coraza_process_body_failed(int ret)
 extern ngx_module_t ngx_http_coraza_module;
 
 /* ngx_http_coraza_module.c */
-/*
- * phase_site: 1 when the caller is a rule-PHASE site whose return value goes
- * to ngx_http_finalize_request(), 0 at the response FILTER sites, which
- * finalize through ngx_http_special_response_handler().  It selects whether an
- * unservable sub-300 deny status is remapped BEFORE the status is recorded for
- * the audit log, so the recorded status equals the served one at every site.
- * See ngx_http_coraza_servable_status().
- */
-ngx_int_t ngx_http_coraza_process_intervention (ngx_http_coraza_ctx_t *ctx, ngx_http_request_t *r, ngx_int_t early_log, ngx_int_t phase_site);
+ngx_int_t ngx_http_coraza_process_intervention (ngx_http_coraza_ctx_t *ctx, ngx_http_request_t *r, ngx_int_t early_log);
 ngx_http_coraza_ctx_t *ngx_http_coraza_create_ctx(ngx_http_request_t *r);
 
 /*
@@ -214,7 +206,7 @@ ngx_http_coraza_ctx_t *ngx_http_coraza_create_ctx(ngx_http_request_t *r);
 
 /*
  * ngx_http_coraza_poll_after_process — CGO-thrifty intervention poll for the
- * rule-phase entry points that poll. Post phase, coraza_intervention() is almost
+ * four rule-phase entry points. Post phase, coraza_intervention() is almost
  * always NULL; the process fn already told us whether a rule interrupted via
  * its return value (pret), so we only cross into Go to fetch the
  * intervention when pret == CORAZA_INTERRUPTION. This relies on the
@@ -227,7 +219,7 @@ ngx_http_coraza_ctx_t *ngx_http_coraza_create_ctx(ngx_http_request_t *r);
  */
 static ngx_inline ngx_int_t
 ngx_http_coraza_poll_after_process(ngx_http_coraza_ctx_t *ctx,
-    ngx_http_request_t *r, ngx_int_t early_log, int pret, ngx_int_t phase_site)
+    ngx_http_request_t *r, ngx_int_t early_log, int pret)
 {
     if (pret < 0) {
         /*
@@ -254,7 +246,7 @@ ngx_http_coraza_poll_after_process(ngx_http_coraza_ctx_t *ctx,
         return NGX_OK;
     }
 
-    return ngx_http_coraza_process_intervention(ctx, r, early_log, phase_site);
+    return ngx_http_coraza_process_intervention(ctx, r, early_log);
 }
 
 /* ngx_http_coraza_dl.c */
@@ -285,9 +277,6 @@ ngx_int_t ngx_http_coraza_forward_header(ngx_http_request_t *r);
 ngx_int_t ngx_http_coraza_is_redirect_status(ngx_int_t status);
 ngx_int_t ngx_http_coraza_drop_connection(ngx_http_request_t *r);
 
-/* ngx_http_coraza_module.c */
-ngx_int_t ngx_http_coraza_servable_status(ngx_int_t status);
-ngx_int_t ngx_http_coraza_phase_status(ngx_http_coraza_ctx_t *ctx, ngx_int_t ret);
 void ngx_http_coraza_prepare_redirect(ngx_http_request_t *r, ngx_int_t status);
 
 /* ngx_http_coraza_log.c */

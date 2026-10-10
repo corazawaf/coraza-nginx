@@ -61,7 +61,7 @@ use coraza_crash_check;
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http proxy/)->plan(39);
+my $t = Test::Nginx->new()->has(qw/http proxy/)->plan(59);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -258,14 +258,100 @@ http {
         # returned to keep-alive state.  The client gets a hung/empty reply on
         # a reusable connection rather than a clean block.
         #
-        # The connector now maps such a status to 403 at the phase sites, so
-        # the assertion is that a real 403 response comes back.
+        # The connector serves such a `deny` as 403 -- in every phase, so a
+        # rule means the same thing wherever it fires -- and the assertion is
+        # that a real 403 response comes back.
         location /deny200-p1 {
             coraza on;
             coraza_transaction_id "deny200p1-$request_id";
             coraza_rules '
                 SecRuleEngine On
                 SecRule ARGS:x "@streq bad" "id:8115,phase:1,deny,status:200,log,msg:\'deny200-p1-probe\',t:none"
+            ';
+            proxy_pass http://127.0.0.1:%%PORT_8081%%;
+        }
+
+        # --- phase:2 (REQUEST_BODY) bare `drop` -----------------------------
+        #
+        # The request-body handler is the third kind of site: ngx_http_coraza_
+        # pre_access.c polls after coraza_process_request_body() and, while
+        # feeding the body, after every chunk.  /drop-p2 keeps the body in
+        # memory; /drop-p2-file forces it into a temp file so the drop is
+        # taken after the file reader has fed the body.  Both are phase sites
+        # and must tear the connection down with nothing written, like /drop.
+        location /drop-p2 {
+            coraza on;
+            coraza_transaction_id "dropp2-$request_id";
+            coraza_rules '
+                SecRuleEngine On
+                SecRequestBodyAccess On
+                SecAction "id:1,phase:1,pass,nolog,t:none,ctl:requestBodyProcessor=URLENCODED"
+                SecRule REQUEST_BODY "@rx DROPME" "id:8118,phase:2,drop,log,msg:\'drop-p2-probe\',t:none"
+            ';
+            proxy_pass http://127.0.0.1:%%PORT_8081%%;
+        }
+
+        location /drop-p2-file {
+            coraza on;
+            client_body_in_file_only clean;
+            coraza_transaction_id "dropp2file-$request_id";
+            coraza_rules '
+                SecRuleEngine On
+                SecRequestBodyAccess On
+                SecAction "id:1,phase:1,pass,nolog,t:none,ctl:requestBodyProcessor=URLENCODED"
+                SecRule REQUEST_BODY "@rx DROPME" "id:8119,phase:2,drop,log,msg:\'drop-p2-file-probe\',t:none"
+            ';
+            proxy_pass http://127.0.0.1:%%PORT_8081%%;
+        }
+
+        # phase:2 negative controls: same rules, benign body.  Separate
+        # locations so the origin-log oracle for the two above stays exact.
+        location /drop-p2-control {
+            coraza on;
+            coraza_rules '
+                SecRuleEngine On
+                SecRequestBodyAccess On
+                SecAction "id:1,phase:1,pass,nolog,t:none,ctl:requestBodyProcessor=URLENCODED"
+                SecRule REQUEST_BODY "@rx DROPME" "id:8120,phase:2,drop,log,msg:\'drop-p2-control-probe\',t:none"
+            ';
+            proxy_pass http://127.0.0.1:%%PORT_8081%%;
+        }
+
+        location /drop-p2-file-control {
+            coraza on;
+            client_body_in_file_only clean;
+            coraza_rules '
+                SecRuleEngine On
+                SecRequestBodyAccess On
+                SecAction "id:1,phase:1,pass,nolog,t:none,ctl:requestBodyProcessor=URLENCODED"
+                SecRule REQUEST_BODY "@rx DROPME" "id:8121,phase:2,drop,log,msg:\'drop-p2-file-control-probe\',t:none"
+            ';
+            proxy_pass http://127.0.0.1:%%PORT_8081%%;
+        }
+
+        # --- deny,status:200 in phase:2 and at a FILTER site ----------------
+        #
+        # The sub-300 remap is not a phase:1 special case: the same rule in
+        # the request-body phase and in the response-header filter must be
+        # served and recorded as 403 too.
+        location /deny200-p2 {
+            coraza on;
+            coraza_transaction_id "deny200p2-$request_id";
+            coraza_rules '
+                SecRuleEngine On
+                SecRequestBodyAccess On
+                SecAction "id:1,phase:1,pass,nolog,t:none,ctl:requestBodyProcessor=URLENCODED"
+                SecRule REQUEST_BODY "@rx DROPME" "id:8122,phase:2,deny,status:200,log,msg:\'deny200-p2-probe\',t:none"
+            ';
+            proxy_pass http://127.0.0.1:%%PORT_8081%%;
+        }
+
+        location /deny200-p3 {
+            coraza on;
+            coraza_transaction_id "deny200p3-$request_id";
+            coraza_rules '
+                SecRuleEngine On
+                SecRule RESPONSE_HEADERS:X-Probe "@streq bad" "id:8123,phase:3,deny,status:200,log,msg:\'deny200-p3-probe\',t:none"
             ';
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
         }
@@ -314,6 +400,10 @@ http {
             return 200 "ORIGIN-REACHED";
         }
         location /deny444-p3 {
+            add_header X-Probe $arg_p always;
+            return 200 "ORIGIN-REACHED";
+        }
+        location /deny200-p3 {
             add_header X-Probe $arg_p always;
             return 200 "ORIGIN-REACHED";
         }
@@ -414,6 +504,59 @@ sub raw_get_keepalive_pair {
 	close $s;
 
 	# Split on the second status line, if there is one.
+	my @parts = split /(?=HTTP\/1\.[01] )/, $resp;
+	my $first  = defined $parts[0] ? $parts[0] : '';
+	my $second = defined $parts[1] ? join('', @parts[1 .. $#parts]) : '';
+
+	return ($first, $second);
+}
+
+# Raw-socket POST with a body, `Connection: close`.  Same observable as
+# raw_get(): the empty string means the connection was closed without a
+# response.
+sub raw_post {
+	my ($uri, $body) = @_;
+
+	my $s = IO::Socket::INET->new(
+		Proto => 'tcp',
+		PeerAddr => '127.0.0.1:' . port(8080),
+	) or die "Can't connect to nginx: $!\n";
+	$s->autoflush(1);
+
+	print $s "POST $uri HTTP/1.1\r\n"
+		. "Host: localhost\r\n"
+		. "Content-Length: " . length($body) . "\r\n"
+		. "Connection: close\r\n\r\n"
+		. $body;
+
+	my $resp = read_response($s);
+	close $s;
+
+	return $resp;
+}
+
+# POST variant of raw_get_keepalive_pair(): the body-carrying request first,
+# the benign reuse probe pipelined behind it on the same socket.
+sub raw_post_keepalive_pair {
+	my ($uri, $body) = @_;
+
+	my $s = IO::Socket::INET->new(
+		Proto => 'tcp',
+		PeerAddr => '127.0.0.1:' . port(8080),
+	) or die "Can't connect to nginx: $!\n";
+	$s->autoflush(1);
+
+	print $s "POST $uri HTTP/1.1\r\n"
+		. "Host: localhost\r\n"
+		. "Content-Length: " . length($body) . "\r\n\r\n"
+		. $body
+		. "GET /control?x=fine HTTP/1.1\r\n"
+		. "Host: localhost\r\n"
+		. "Connection: close\r\n\r\n";
+
+	my $resp = read_response($s);
+	close $s;
+
 	my @parts = split /(?=HTTP\/1\.[01] )/, $resp;
 	my $first  = defined $parts[0] ? $parts[0] : '';
 	my $second = defined $parts[1] ? join('', @parts[1 .. $#parts]) : '';
@@ -615,6 +758,61 @@ unlike($deny200_p1_first, qr!ORIGIN-REACHED!,
 like($deny200_p1_second, qr!^HTTP/!,
 	'the pipelined reuse probe is live after a phase-site deny,status:200');
 
+# --- phase:2 bare `drop`, in-memory and file-backed body ---------------------
+#
+# The request-body handler returns NGX_HTTP_CLOSE into
+# ngx_http_finalize_request() like the phase:1 site, so the observable is the
+# same: nothing on the wire, even with a second request already queued.
+
+my $drop_p2 = raw_post('/drop-p2', 'DROPME-PAYLOAD');
+is($drop_p2, '',
+	'phase:2 drop closes the connection without sending a response');
+unlike($drop_p2, qr!ORIGIN-REACHED!,
+	'phase:2 drop does not return the origin response');
+
+my ($p2_first) = raw_post_keepalive_pair('/drop-p2', 'DROPME-PAYLOAD');
+is($p2_first, '',
+	'phase:2 drop writes nothing even with a second request already queued');
+
+my $drop_p2_file = raw_post('/drop-p2-file', 'DROPME-PAYLOAD');
+is($drop_p2_file, '',
+	'phase:2 drop on a file-backed body closes the connection without a response');
+unlike($drop_p2_file, qr!ORIGIN-REACHED!,
+	'phase:2 drop on a file-backed body does not return the origin response');
+
+my ($p2f_first) = raw_post_keepalive_pair('/drop-p2-file', 'DROPME-PAYLOAD');
+is($p2f_first, '',
+	'phase:2 drop on a file-backed body writes nothing with a second request queued');
+
+# phase:2 negative controls: same rules, benign body, origin reached.
+like(raw_post('/drop-p2-control', 'BENIGN-PAYLOAD'), qr!ORIGIN-REACHED!,
+	'negative control: non-matching phase:2 request body reaches the origin');
+like(raw_post('/drop-p2-file-control', 'BENIGN-PAYLOAD'), qr!ORIGIN-REACHED!,
+	'negative control: non-matching file-backed phase:2 request body reaches the origin');
+
+# --- deny,status:200 in phase:2 and at a FILTER site -------------------------
+#
+# Same oracle as the phase:1 case above: a real 403 on the wire, the socket
+# still usable afterwards.
+my ($deny200_p2_first, $deny200_p2_second) =
+	raw_post_keepalive_pair('/deny200-p2', 'DROPME-PAYLOAD');
+
+like($deny200_p2_first, qr!^HTTP/\S+ 403!,
+	'deny,status:200 in phase:2 is served as a 403 block');
+unlike($deny200_p2_first, qr!ORIGIN-REACHED!,
+	'deny,status:200 in phase:2 does not return the origin response');
+like($deny200_p2_second, qr!^HTTP/!,
+	'the pipelined reuse probe is live after a phase:2 deny,status:200');
+
+# At the header-filter site nginx could have served a zero-body 200 through
+# ngx_http_special_response_handler(); the connector remaps there too so the
+# rule means the same thing in every phase.
+my $deny200_p3 = raw_get('/deny200-p3?p=bad');
+like($deny200_p3, qr!^HTTP/\S+ 403!,
+	'deny,status:200 at a filter site is served as a 403 block');
+unlike($deny200_p3, qr!ORIGIN-REACHED!,
+	'deny,status:200 at a filter site does not return the origin response body');
+
 # --- deny,status:444 at a rule PHASE -----------------------------------------
 #
 # Deliberately NOT the same as the filter-site /deny444-p3 case above.  At a
@@ -623,7 +821,8 @@ like($deny200_p1_second, qr!^HTTP/!,
 # is accepted: 444 is nginx's own "close without response" convention, so an
 # operator writing `deny,status:444` in a request phase is asking for exactly
 # that.  This pins the behaviour rather than leaving it unverified, and the
-# README and the ngx_http_coraza_phase_status() comment are written to match.
+# README and the ngx_http_coraza_process_intervention() comment are written to
+# match.
 #
 # Note 444 >= NGX_HTTP_SPECIAL_RESPONSE, so it is untouched by the sub-300
 # remap that the deny,status:200 case above exercises.
@@ -651,6 +850,12 @@ unlike($origin_log, qr!^/drop$!m,
 	'no dropped request ever reached the origin');
 unlike($origin_log, qr!^/deny200$!m,
 	'no deny,status:200 request ever reached the origin');
+unlike($origin_log, qr!^/drop-p2$!m,
+	'no phase:2 dropped request ever reached the origin');
+unlike($origin_log, qr!^/drop-p2-file$!m,
+	'no file-backed phase:2 dropped request ever reached the origin');
+unlike($origin_log, qr!^/deny200-p2$!m,
+	'no phase:2 deny,status:200 request ever reached the origin');
 
 # The audit trail must not claim a block with a status the client never got.
 # Before the fix a bare `drop` produced exactly this line and then served the
@@ -668,34 +873,37 @@ unlike($errlog, qr/Access denied with code 0\b/,
 # locations also log "code 444"; without it this would pass on their lines.
 like($errlog, qr/Access denied with code 444, unique_id "drop-/,
 	'a dropped request is logged as denied with the status it was blocked with');
+like($errlog, qr/Access denied with code 444, unique_id "dropp2-/,
+	'a phase:2 dropped request is logged as denied with 444');
+like($errlog, qr/Access denied with code 444, unique_id "dropp2file-/,
+	'a file-backed phase:2 dropped request is logged as denied with 444');
 
 # --- the audit record must agree with the wire -------------------------------
 #
 # The point of this whole file is that what the operator reads in the log is
-# what the client actually got.  A phase-site `deny,status:200` is served as a
-# 403 (ngx_http_finalize_request() cannot put a sub-300 status on the wire from
-# a phase handler -- see the /deny200-p1 case above, which asserts the wire
-# side).  The connector must therefore RECORD 403 too.
+# what the client actually got.  A `deny,status:200` is served as a 403 (see
+# the /deny200-p1, /deny200-p2 and /deny200-p3 cases above, which assert the
+# wire side), so the connector must RECORD 403 too.
 #
-# Regression pinned: the remap used to happen in
-# ngx_http_coraza_phase_status(), i.e. AFTER
+# Regression pinned: the remap once happened in the caller, AFTER
 # ngx_http_coraza_process_intervention() had already called
 # coraza_update_status_code() and emitted this line with the rule's raw status.
 # The client got 403 while the audit log and the error log both said 200 --
 # the same "logged a block that does not match what was served" defect as the
 # original "Access denied with code 0", just with a different number.
 #
-# Both `status:200` rules in this file (ids 8101 and 8115) are phase:1, and no
-# filter-site rule here carries a sub-300 status, so a "code 200" line can only
-# be this mismatch.  Filter-site behaviour is deliberately unchanged: a
-# `deny,status:200` there really is served as a zero-body 200 by
-# ngx_http_special_response_handler(), and would legitimately log 200.
+# Every `status:200` rule in this file is remapped, so a "code 200" line can
+# only be this mismatch.
 unlike($errlog, qr/Access denied with code 200\b/,
-	'no phase-site deny is logged with a status the client was not served');
+	'no deny is logged with a status the client was not served');
 
-# Matched on /deny200-p1's own prefix: /deny403 also logs "code 403".
+# Matched on each location's own prefix: /deny403 also logs "code 403".
 like($errlog, qr/Access denied with code 403, unique_id "deny200p1-/,
-	'a phase-site deny,status:200 is logged with the 403 it was served as');
+	'a phase:1 deny,status:200 is logged with the 403 it was served as');
+like($errlog, qr/Access denied with code 403, unique_id "deny200p2-/,
+	'a phase:2 deny,status:200 is logged with the 403 it was served as');
+like($errlog, qr/Access denied with code 403, unique_id "deny200p3-/,
+	'a filter-site deny,status:200 is logged with the 403 it was served as');
 
 # Drop one known-benign nginx-core UBSan diagnostic before the crash gate.
 #
