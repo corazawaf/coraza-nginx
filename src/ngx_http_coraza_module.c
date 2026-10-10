@@ -32,6 +32,7 @@ ngx_inline ngx_int_t
 ngx_http_coraza_process_intervention(ngx_http_coraza_ctx_t *ctx, ngx_http_request_t *r, ngx_int_t early_log)
 {
 	coraza_intervention_t *intervention;
+	ngx_int_t              status;
 
 	dd("processing intervention");
 
@@ -52,89 +53,226 @@ ngx_http_coraza_process_intervention(ngx_http_coraza_ctx_t *ctx, ngx_http_reques
 		dd("intervention action: %s", intervention->action);
 	}
 
-	if (intervention->status != 200)
+	/*
+	 * A non-NULL intervention IS the block decision.
+	 *
+	 * libcoraza only allocates an intervention when a disruptive action
+	 * fired: `allow`, `pass` and every rule under `SecRuleEngine
+	 * DetectionOnly` yield NULL (coraza_intervention() returns NULL iff
+	 * tx.Interruption() == nil, and coraza/v3 only populates an
+	 * interruption from tx.Interrupt(), which no non-disruptive action
+	 * calls).  So blocked-ness is derived from the intervention's
+	 * existence, never from ->status, which only selects HOW to block and
+	 * is 0 for a bare `drop`.  ->disruptive is not usable either: libcoraza
+	 * leaves it 0 even for a plain `deny,status:403`.
+	 *
+	 * Coraza's reference HTTP middleware is the contract followed here
+	 * (coraza/v3 http/middleware.go, obtainStatusCodeFromInterruptionOrDefault):
+	 * honour ->status for "deny", substituting 403 when the rule left it 0,
+	 * and block on `it != nil` regardless of the action.
+	 *
+	 * `drop` is keyed on the action name, not on "status happens to be 0":
+	 * an unrecognised action must never be answered by silently resetting
+	 * the client's connection, so it gets the 403 default instead.
+	 * (redirect's Evaluate() in coraza/v3 hardcodes a 302 default, so a
+	 * `redirect:` with no explicit status cannot arrive here with 0.)
+	 */
+	if (intervention->action != NULL
+		&& ngx_strcmp(intervention->action, "deny") == 0)
 	{
-		/* Update status code for audit logging. Note: on error_page redirects
-		 * the audit log will have the status code but may lack response headers. */
-		coraza_update_status_code(ctx->coraza_transaction, intervention->status);
+		status = intervention->status;
 
-		if (ctx->transaction_id.len > 0) {
-			ngx_log_error(NGX_LOG_ERR, (ngx_log_t *)r->connection->log, 0,
-				"Coraza: Access denied with code %d, unique_id \"%V\"",
-				intervention->status, &ctx->transaction_id);
-		}
-
-		if (early_log)
+		if (status == 0)
 		{
-			dd("intervention -- calling log handler manually with code: %d", intervention->status);
-			ngx_http_coraza_log_handler(r);
-			ctx->logged = 1;
+			/* Rule left the status unset; upstream's deny default. */
+			status = NGX_HTTP_FORBIDDEN;
 		}
+	}
+	else if (intervention->action != NULL
+		&& ngx_strcmp(intervention->action, "drop") == 0)
+	{
+		/*
+		 * SecLang `drop`: tear the connection down, send nothing.
+		 *
+		 * Signalled by ctx->drop_connection, with NGX_HTTP_CLOSE as the
+		 * accompanying status.  The rule-phase handlers return that 444
+		 * into ngx_http_finalize_request(), which special-cases it and
+		 * terminates the request without writing anything.  The response
+		 * FILTER sites cannot do that -- they finalize through
+		 * ngx_http_special_response_handler(), which would serve a tidy
+		 * zero-body 444 -- so they read the flag and go through
+		 * ngx_http_coraza_drop_connection() instead.  The flag, not the
+		 * number, is what distinguishes a `drop` from an operator's own
+		 * `deny,status:444`, which at a filter site must still produce a
+		 * normal response.
+		 */
+		ctx->drop_connection = 1;
+		status = NGX_HTTP_CLOSE;
+	}
+	else if (intervention->status != 0)
+	{
+		/*
+		 * A non-deny action carrying an explicit status:
+		 * `redirect:...,status:302` lands here.  Honour it -- the
+		 * redirect handling below keys off it.
+		 */
+		status = intervention->status;
+	}
+	else
+	{
+		/*
+		 * Some other disruptive action that left the status unset.  No
+		 * such action exists in coraza/v3 v3.7.0, but a future one must
+		 * fail closed as a plain refusal rather than as a connection
+		 * reset, so it gets the same 403 default `deny` does.
+		 */
+		status = NGX_HTTP_FORBIDDEN;
+	}
 
-		if (r->header_sent)
-		{
-			dd("Headers are already sent. Cannot perform the redirection at this point.");
+	/*
+	 * A `deny` whose status is below 300 -- `deny,status:200` is the
+	 * reachable case -- cannot be served as-is from a rule-phase handler:
+	 * ngx_http_finalize_request() only produces a response for
+	 * rc >= NGX_HTTP_SPECIAL_RESPONSE, NGX_HTTP_CREATED and NGX_HTTP_NO_CONTENT.
+	 * Anything else sets r->done and falls through to
+	 * ngx_http_finalize_connection() with zero bytes written and the socket
+	 * returned to keep-alive: not a bypass (the origin is never reached),
+	 * but not a block either.  Serve it as 403, the status `deny` means and
+	 * the one used when a rule sets none.  The filter sites could serve a
+	 * zero-body 200 through ngx_http_special_response_handler(), but a
+	 * refusal that looks like success is not a useful block there either,
+	 * so the same remap applies everywhere and a rule means the same thing
+	 * in every phase.  201 and 204 are left alone: nginx serves both as
+	 * well-formed body-less responses, so an explicit `deny,status:204` is
+	 * honoured.  Statuses >= 300 are served verbatim, which at a rule-phase
+	 * site makes `deny,status:444` indistinguishable from `drop` (444 is
+	 * NGX_HTTP_CLOSE) -- accepted, since that is nginx's own meaning of 444.
+	 *
+	 * This is settled BEFORE the status is recorded and logged, so the
+	 * audit record and the "Access denied" line agree with the wire.
+	 *
+	 * `drop` has no wire status at all; 444 is recorded for it rather than
+	 * 0 (which is what an unevaluated transaction looks like), matching
+	 * nginx's own "connection closed without response" convention and the
+	 * error log line below.
+	 */
+	if (!ctx->drop_connection
+		&& status < NGX_HTTP_SPECIAL_RESPONSE
+		&& status != NGX_HTTP_CREATED
+		&& status != NGX_HTTP_NO_CONTENT)
+	{
+		status = NGX_HTTP_FORBIDDEN;
+	}
+
+	/* Note: on error_page redirects the audit log will have the status
+	 * code but may lack response headers. */
+	coraza_update_status_code(ctx->coraza_transaction, (int) status);
+
+	if (ctx->transaction_id.len > 0) {
+		ngx_log_error(NGX_LOG_ERR, (ngx_log_t *)r->connection->log, 0,
+			"Coraza: Access denied with code %d, unique_id \"%V\"",
+			(int) status, &ctx->transaction_id);
+	}
+
+	if (early_log)
+	{
+		dd("intervention -- calling log handler manually with code: %d", (int) status);
+		ngx_http_coraza_log_handler(r);
+		ctx->logged = 1;
+	}
+
+	if (r->header_sent)
+	{
+		dd("Headers are already sent. Cannot perform the redirection at this point.");
+		coraza_free_intervention(intervention);
+		return NGX_ERROR;
+	}
+
+	/*
+	 * Use the shared predicate rather than a third copy of the status list:
+	 * ngx_http_coraza_is_redirect_status() exists so the header filter and
+	 * the body filter's delayed path cannot drift from the set of statuses
+	 * for which this function installs a Location, and this site -- the one
+	 * that installs it -- must not drift from them either.
+	 */
+	if (intervention->data != NULL
+		&& ngx_http_coraza_is_redirect_status(status))
+	{
+		ngx_table_elt_t *h;
+		h = ngx_list_push(&r->headers_out.headers);
+		if (h == NULL) {
 			coraza_free_intervention(intervention);
-			return NGX_ERROR;
+			return NGX_HTTP_INTERNAL_SERVER_ERROR;
 		}
-
-		if (intervention->data != NULL
-			&& (intervention->status == NGX_HTTP_MOVED_PERMANENTLY
-				|| intervention->status == NGX_HTTP_MOVED_TEMPORARILY
-				|| intervention->status == NGX_HTTP_SEE_OTHER
-				|| intervention->status == NGX_HTTP_TEMPORARY_REDIRECT
-				|| intervention->status == 308))
 		{
-			ngx_table_elt_t *h;
-			h = ngx_list_push(&r->headers_out.headers);
-			if (h != NULL)
+			size_t len = ngx_strlen(intervention->data);
+			ngx_memzero(h, sizeof(ngx_table_elt_t));
+			/*
+			 * Defend against response splitting / header injection.
+			 * If a rule builds the redirect target from
+			 * client-controlled data (macro expansion of a request
+			 * variable), intervention->data may contain CR/LF or other
+			 * control bytes.  nginx does not sanitize outgoing header
+			 * values, so a raw CR/LF here would let an attacker inject
+			 * extra response headers or a body.  Truncate the Location
+			 * at the first C0 control character or DEL (a legitimate
+			 * URL carries none unencoded).
+			 */
 			{
-				size_t len = ngx_strlen(intervention->data);
-				/*
-				 * Defend against response splitting / header injection.
-				 * If a rule builds the redirect target from
-				 * client-controlled data (macro expansion of a request
-				 * variable), intervention->data may contain CR/LF or other
-				 * control bytes.  nginx does not sanitize outgoing header
-				 * values, so a raw CR/LF here would let an attacker inject
-				 * extra response headers or a body.  Truncate the Location
-				 * at the first C0 control character or DEL (a legitimate
-				 * URL carries none unencoded).
-				 */
-				{
-					u_char *loc = (u_char *) intervention->data;
-					size_t safe = 0;
-					while (safe < len && loc[safe] >= 0x20 && loc[safe] != 0x7f) {
-						safe++;
-					}
-					if (safe != len) {
-						ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-							"coraza: control character in redirect target; "
-							"truncating Location to %uz byte(s)", safe);
-						len = safe;
-					}
+				u_char *loc = (u_char *) intervention->data;
+				size_t safe = 0;
+				while (safe < len && loc[safe] >= 0x20 && loc[safe] != 0x7f) {
+					safe++;
 				}
-				h->hash = 0;
-				ngx_str_set(&h->key, "Location");
-				h->value.len = 0;
-				h->value.data = ngx_pnalloc(r->pool, len);
-				if (h->value.data != NULL)
-				{
-					ngx_memcpy(h->value.data, intervention->data, len);
-					h->value.len = len;
-					h->hash = 1;
-					r->headers_out.location = h;
+				if (safe != len) {
+					ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+						"coraza: control character in redirect target; "
+						"truncating Location to %uz byte(s)", safe);
+					len = safe;
 				}
 			}
-		}
+			h->hash = 0;
+			ngx_str_set(&h->key, "Location");
+			h->value.len = 0;
+			h->value.data = ngx_pnalloc(r->pool, len);
+			if (h->value.data == NULL) {
+				coraza_free_intervention(intervention);
+				return NGX_HTTP_INTERNAL_SERVER_ERROR;
+			}
+			ngx_memcpy(h->value.data, intervention->data, len);
+			h->value.len = len;
 
-		dd("intervention -- returning code: %d", intervention->status);
-		ngx_int_t status = intervention->status;
-		coraza_free_intervention(intervention);
-		return status;
+			/* Publish only after allocation succeeds.  Retire every old
+			 * Location, including duplicates outside the dedicated pointer. */
+			{
+				ngx_list_part_t *part;
+				ngx_table_elt_t *header;
+				ngx_uint_t i;
+
+				for (part = &r->headers_out.headers.part;
+				     part != NULL; part = part->next)
+				{
+					header = part->elts;
+					for (i = 0; i < part->nelts; i++) {
+						if (header[i].hash
+						    && header[i].key.len == sizeof("Location") - 1
+						    && ngx_strncasecmp(header[i].key.data,
+						                       (u_char *) "Location",
+						                       sizeof("Location") - 1) == 0)
+						{
+							header[i].hash = 0;
+						}
+					}
+				}
+			}
+			h->hash = 1;
+			r->headers_out.location = h;
+		}
 	}
+
+	dd("intervention -- returning code: %d", (int) status);
 	coraza_free_intervention(intervention);
-	return NGX_OK;
+	return status;
 }
 
 void ngx_http_coraza_cleanup(void *data)

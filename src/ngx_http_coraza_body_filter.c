@@ -304,6 +304,19 @@ ngx_http_coraza_body_filter_finalize(ngx_http_request_t *r,
     }
 
     /*
+     * `drop` first, ahead of both exits below: neither can express it, and
+     * both paths reach this point -- delayed and streaming alike -- so the
+     * test sits above the was_delayed split rather than being duplicated
+     * into each branch.  The buffered chain needs no consume(): the request
+     * is terminated outright and its pool, which owns pending_chain, goes
+     * with it.  See ngx_http_coraza_drop_connection() for why a filter
+     * cannot finalize a drop the way a phase handler does.
+     */
+    if (ctx->drop_connection) {
+        return ngx_http_coraza_drop_connection(r);
+    }
+
+    /*
      * Only the delayed path may forward the redirect itself: its headers have
      * not been sent, so the prepared status and Location still reach the wire.
      * Once headers are streaming, ngx_http_filter_finalize_request() is the
