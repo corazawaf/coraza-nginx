@@ -13,13 +13,13 @@
 #   * URI-arg, request-body, and request-HEADER attacks (phase 1/2 deny)
 #   * benign GET, POST, and large response body (pass)
 #   * large CHUNKED request body -> file-backed body_filter buffer chain
-#   * 40 large request headers -> ngx_str_to_char loop across ngx_list parts
+#   * 40 large request headers -> bulk header packing across ngx_list parts
 #   * RESPONSE_BODY inspection, both pass and phase-4 deny (body_filter clone)
 # so allocation/free of the Coraza transaction, header forwarding
-# (ngx_str_to_char), and request/response body inspection all run every
+# (length-taking APIs), and request/response body inspection all run every
 # iteration. Deep coverage of THIS connector lives here (memcheck/helgrind),
-# not in the fuzzer — the fuzzable pure-C leaf is just ngx_str_to_char; the
-# rest of the connector needs a live nginx request, which is what this drives.
+# alongside fuzz targets for ngx_str_to_char and header packing. The remaining
+# connector paths need a live nginx request, which is what this drives.
 #
 # Requires libcoraza installed (dlopen'd at runtime; see README). The nginx
 # binary passed in must have been built --add-dynamic-module against this

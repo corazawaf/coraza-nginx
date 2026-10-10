@@ -33,7 +33,8 @@
  * made outside `data` — the packing itself is what we are exercising.
  *
  * Invariants asserted every iteration:
- *   - on NGX_OK, out_len equals the sum of 6 + nlen + vlen over all pairs;
+ *   - these bounded pairs must return NGX_OK (including zero pairs);
+ *   - out_len equals the sum of 6 + nlen + vlen over all pairs;
  *   - the packed buffer round-trips: decoding it reproduces every pair's
  *     lengths and bytes exactly (no truncation, no misalignment);
  *   - no read/write outside the out_len allocation (enforced by ASan).
@@ -102,10 +103,10 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
      * single call never exhausts the shim pool. */
     rc = ngx_http_coraza_pack_headers(&r, pairs, count, &out, &out_len);
 
-    if (rc != NGX_OK) {
-        ngx_fuzz_pool_reset(&pool);
-        return 0;
-    }
+    /* At most 32 u16-sized pairs fit far below INT_MAX. A rejection is a
+     * regression; metadata boundaries and allocation failure are exercised
+     * separately by fuzz/packer_contract.sh without oversized copies. */
+    assert(rc == NGX_OK);
 
     if (count == 0 || expected_total == 0) {
         assert(out == NULL);

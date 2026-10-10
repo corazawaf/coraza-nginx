@@ -5,11 +5,10 @@ that can be exercised without a live `ngx_http_request_t`/libcoraza runtime.
 Every other connector function needs the full nginx event loop and the Go
 engine, so the real parsing there is fuzzed upstream in Coraza itself.
 
-1. **`ngx_str_to_char()`** — the single choke point that converts
-   non-NUL-terminated nginx `ngx_str_t` buffers into the NUL-terminated C
-   strings libcoraza requires. Every attacker-controlled header name/value,
-   body chunk and URI forwarded to Coraza passes through it, so a
-   length/terminator slip is a heap overflow reachable from the request.
+1. **`ngx_str_to_char()`** — converts nginx strings used for URI, method,
+   address and other C-string arguments. Empty input allocates a one-byte
+   NUL-terminated string on success. Header and body submission use
+   length-taking APIs and do not generally pass through this helper.
 2. **`ngx_http_coraza_pack_headers()`** — serialises an array of
    (name,value) pairs into the single length-prefixed buffer handed to
    libcoraza's bulk header-submission entry points
@@ -37,8 +36,24 @@ engine, so the real parsing there is fuzzed upstream in Coraza itself.
   OSS-Fuzz `$CC`/`$CFLAGS`/`$LIB_FUZZING_ENGINE`.
 - `corpus/` — `ngx_str_to_char` seeds (empty, header/URI shaped, embedded NUL,
   4 KiB). `corpus_pack_headers/` — pack_headers seeds (zero/one/two pairs,
-  oversized declared lengths).
+  oversized declared lengths, clamped to available input bytes).
 - `fuzz.dict` — header/body tokens + NUL/CR/LF boundary bytes.
+
+## Boundary contracts
+
+`bash fuzz/packer_contract.sh` runs standalone ASan/UBSan contracts and is also
+required by the two-target `fuzz/build.sh` route used in `fuzzing.yml`.
+It checks zero/ordinary/max-name success, field and aggregate metadata limits,
+and allocation failure. Metadata-only cases use a rejecting allocator, so
+no oversized allocation or copy executes. Exact `INT_MAX` totals reach that
+allocator; over-limit totals must fail before it. Harmless controls disable
+validation or return only `NGX_ERROR` and must fail the matching assertions.
+
+The fuzz adapter accepts at most 32 pairs with u16 field lengths, clamped to
+the input. Every decoded pair list must succeed and round-trip; this input
+space cannot exercise the production packer's larger rejection boundaries.
+The standalone tests cover those boundaries separately. Set
+`PACKER_EVIDENCE_DIR` to retain binaries and negative-control logs.
 
 ## Run
 
@@ -50,11 +65,12 @@ cd fuzz
 ```
 
 `fuzz/run.sh` wraps a target with the shared breadth flags; point it at the
-second target with env vars. Invoke from the repository root — `run.sh` `cd`s into
-`fuzz/` before running, so `FUZZ_BIN`/`CORPUS_DIR` are resolved relative to `fuzz/`:
+second target with env vars. Invoke from the repository root — `run.sh` changes
+into `fuzz/` before running, so `FUZZ_BIN`/`CORPUS_DIR` are relative to `fuzz/`:
 
 ```sh
-FUZZ_BIN=./fuzz_pack_headers CORPUS_DIR=./corpus_pack_headers bash fuzz/run.sh 60 1
+FUZZ_BIN=./fuzz_pack_headers CORPUS_DIR=./corpus_pack_headers \
+  bash fuzz/run.sh 60 1
 ```
 
 CI runs both targets per PR (`fuzzing.yml`, 60 s each) and monthly in
