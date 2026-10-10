@@ -800,6 +800,28 @@ ngx_module_t ngx_http_coraza_module = {
 	NULL,					  /* exit master */
 	NGX_MODULE_V1_PADDING};
 
+/* Header registration is separate so gzip has selected the representation
+ * before phase 3, while body inspection retains its uncompressed position. */
+static ngx_int_t
+ngx_http_coraza_headers_init(ngx_conf_t *cf)
+{
+    return ngx_http_coraza_header_filter_init();
+}
+
+static ngx_http_module_t ngx_http_coraza_headers_ctx = {
+    NULL, ngx_http_coraza_headers_init,
+    NULL, NULL, NULL, NULL, NULL, NULL
+};
+
+ngx_module_t ngx_http_coraza_headers_module = {
+    NGX_MODULE_V1,
+    &ngx_http_coraza_headers_ctx,
+    NULL,
+    NGX_HTTP_MODULE,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+    NGX_MODULE_V1_PADDING
+};
+
 static ngx_int_t
 ngx_http_coraza_init(ngx_conf_t *cf)
 {
@@ -847,12 +869,6 @@ ngx_http_coraza_init(ngx_conf_t *cf)
 		return NGX_ERROR;
 	}
 	*h_log = ngx_http_coraza_log_handler;
-
-	rc = ngx_http_coraza_header_filter_init();
-	if (rc != NGX_OK)
-	{
-		return rc;
-	}
 
 	rc = ngx_http_coraza_body_filter_init();
 	if (rc != NGX_OK)
