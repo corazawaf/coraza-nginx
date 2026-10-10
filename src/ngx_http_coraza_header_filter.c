@@ -721,20 +721,69 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * minutes or hours on a real event stream, i.e. the client gets nothing
      * (issue #81).  See ngx_http_coraza_is_sse_response() above for the
      * security trade-off this accepts.
+     *
+     * Finally, we skip the statuses that carry no content at all.  Returning
+     * NGX_OK here skips every header filter below this module at
+     * ngx_http_send_header() time; they run later, from
+     * ngx_http_coraza_forward_header().  For 304 Not Modified / 204 No
+     * Content that deferral corrupts the response framing: content handlers
+     * read r->header_only only AFTER ngx_http_send_header() returns, and it
+     * is nginx's own final header filter -- skipped here -- that sets it.
+     * The static handler therefore streams the file for a response that
+     * must transfer no content at all (RFC 9110 section 15.4.5), and the
+     * delayed flush emits those headers followed by a body.  The HEAD form
+     * of this is already excluded above; these two statuses are the
+     * status-code form.  See t/coraza-delayed-not-modified.t.
+     *
+     * Only the 304 half has end-to-end coverage, and that is a property of
+     * nginx rather than a gap in the tests: 304 is produced by
+     * ngx_http_not_modified_filter, a header filter ABOVE this one, so it
+     * rewrites headers_out.status after the static handler has already
+     * committed to streaming a body -- which is exactly the race being
+     * guarded.  Nothing in stock nginx sets headers_out.status to 204 from
+     * a filter: ngx_http_static_handler hard-codes 200, `return 204` and a
+     * 204 from ngx_http_dav_module are handler return codes that go through
+     * ngx_http_send_special_response with no body at all, proxied 204s have
+     * u->length forced to 0 above this module, and an `error_page =204`
+     * redirect is already rejected by the !r->error_page conjunct above.
+     * So NGX_HTTP_NO_CONTENT is defensive depth for a third-party or future
+     * single-call handler, not a branch reachable from this test suite.
+     * Every route was tried against an unpatched build and none leaked a
+     * body; do not re-attempt a 204 wire test without a fixture module.
+     *
+     * Note this deliberately does NOT restrict the delay to 200 OK.  Phase-4
+     * rules must still be able to intercept a redirect or an origin 401/403
+     * before its headers reach the client, which is exactly what
+     * t/coraza-proxy.t and t/coraza-response-body-delayed-block.t cover; a
+     * status == NGX_HTTP_OK test breaks those with "header already sent".
      */
     if (mcf->delay_response_headers
         && r->method != NGX_HTTP_HEAD && !r->header_only && !r->error_page
         && r == r->main
         && r->headers_out.status != NGX_HTTP_SWITCHING_PROTOCOLS
-        && !ctx->response_body_processable)
+        && (!ctx->response_body_processable
+            || r->headers_out.status == NGX_HTTP_NO_CONTENT
+            || r->headers_out.status == NGX_HTTP_NOT_MODIFIED))
     {
         /*
          * Body not inspected (SecResponseBodyAccess Off, or a Content-Type
-         * outside SecResponseBodyMimeType): nothing the body filter could
+         * outside SecResponseBodyMimeType), or a status that carries no body
+         * at all (204, 304): nothing the body filter could
          * feed the engine can change the phase-4 outcome, and every non-body
          * variable phase 4 can read (RESPONSE_STATUS, RESPONSE_HEADERS, ARGS,
          * TX -- CRS 959100 blocks on the outbound score a 5xx raised in phase
-         * 3) is known now.  So finalise phase 4 here, before any header goes
+         * 3) is known now.
+         *
+         * 204 and 304 belong here even when the Content-Type IS listed: a
+         * proxied origin may send "304 Not Modified" with a Content-Type (an
+         * nginx-generated 304 cannot, ngx_http_not_modified_filter clears it),
+         * and for such a response nginx's final header filter sets
+         * r->header_only once the headers go out, so the only body-filter call
+         * is the upstream's last_buf after the headers are on the wire.  Phase
+         * 4 would then run too late: a deny meets "header already sent" and
+         * the client gets an aborted response instead of a clean error page.
+         * Finalising here keeps the deny clean and lets the bodyless response
+         * stream.  See t/coraza-delayed-bodyless-phase4.t.  So finalise phase 4 here, before any header goes
          * out: a deny still gets a clean error page, and a clean result means
          * there is no reason to hold the headers back -- the response streams.
          * Holding them anyway stalled every non-SSE stream (chunked JSON,
@@ -787,6 +836,8 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
         && r->method != NGX_HTTP_HEAD && !r->header_only && !r->error_page
         && r == r->main
         && r->headers_out.status != NGX_HTTP_SWITCHING_PROTOCOLS
+        && r->headers_out.status != NGX_HTTP_NO_CONTENT   /* both already */
+        && r->headers_out.status != NGX_HTTP_NOT_MODIFIED  /* finalised above */
         && !ngx_http_coraza_is_sse_response(r))
     {
         /*
@@ -795,6 +846,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
          * the body into memory for the inspection.
          */
         r->filter_need_in_memory = 1;
+
         ctx->headers_delayed = 1;
         ctx->pending_chain = NULL;
         ctx->pending_chain_last = &ctx->pending_chain;
