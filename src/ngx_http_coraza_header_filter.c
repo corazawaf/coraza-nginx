@@ -670,7 +670,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
         ngx_http_coraza_is_response_body_accessible(ctx->coraza_transaction)
         && ngx_http_coraza_is_response_body_processable(ctx->coraza_transaction);
 
-    ret = ngx_http_coraza_poll_after_process(ctx, r, 0, pret, 0);
+    ret = ngx_http_coraza_poll_after_process(ctx, r, 0, pret);
     if (r->error_page) {
         return ngx_http_next_header_filter(r);
     }
@@ -758,7 +758,7 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
                                                     NGX_HTTP_INTERNAL_SERVER_ERROR);
         }
 
-        ret = ngx_http_coraza_poll_after_process(ctx, r, 0, pret, 0);
+        ret = ngx_http_coraza_poll_after_process(ctx, r, 0, pret);
         if (r->error_page) {
             return ngx_http_next_header_filter(r);
         }
@@ -836,8 +836,8 @@ ngx_http_coraza_is_redirect_status(ngx_int_t status)
 /*
  * Tear the connection down for a SecLang `drop` from inside a filter.
  *
- * The three filter call sites cannot express `drop` the way the four
- * rule-phase handlers can.  A phase handler returns NGX_HTTP_CLOSE into
+ * The three filter call sites cannot express `drop` the way the rule-phase
+ * handlers can.  A phase handler returns NGX_HTTP_CLOSE into
  * ngx_http_finalize_request(), which special-cases it
  * (`if (rc == NGX_HTTP_CLOSE) { c->timedout = 1;
  * ngx_http_terminate_request(...); }`) and closes with nothing written.
