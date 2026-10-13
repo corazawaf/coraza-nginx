@@ -112,7 +112,7 @@ http {
             coraza_rules '
                 SecRuleEngine On
                 SecResponseBodyAccess Off
-                SecRule ARGS "@streq block" "id:153,phase:4,deny,log,status:403"
+                SecRule ARGS "@streq block" "id:153,t:none,phase:4,deny,log,status:403"
             ';
             proxy_buffering off;
             proxy_pass http://127.0.0.1:%%PORT_8081%%;
