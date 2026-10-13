@@ -2,7 +2,7 @@
 
 # If $NGX_IGNORE_RPATH is set to "YES", we will ignore explicit
 # library path specification on resulting binary, allowing libcoraza.so
-# to be relocated across configured library pathes (adjust /etc/ld.so.conf
+# to be relocated across configured library paths (adjust /etc/ld.so.conf
 # or set $LD_LIBRARY_PATH environment variable to manage them)
 #
 # $YAJL_LIB variable may need to be populated in case of non-standard

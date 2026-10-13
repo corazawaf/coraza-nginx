@@ -25,6 +25,10 @@ This pulls in libcoraza automatically. Built for Ubuntu 24.04 (noble), 26.04 (re
 
 # Compilation
 
+The former repository-root `build.sh` for Vagrant and nginx 1.18.0 has been
+retired. Use the nginx source build below; the `./build.sh` command in the
+libcoraza example runs from the libcoraza checkout.
+
 If you have any doubts, please read the [GitHub build Action](https://github.com/corazawaf/coraza-nginx/blob/main/.github/workflows/build-test.yml) for additional information.
 
 Before compiling this software make sure that you have libcoraza >= 1.8.0 installed.
@@ -32,7 +36,7 @@ You can download it from the [libcoraza git repository](https://github.com/coraz
 
 To build libcoraza from source (requires Go 1.21+):
 
-```
+```sh
 cd /path/to/libcoraza
 ./build.sh
 ./configure
@@ -43,13 +47,13 @@ sudo ldconfig
 
 With libcoraza installed, you can proceed with the installation of the coraza-nginx connector, which follows the nginx third-party module installation procedure. From the nginx source directory:
 
-```
+```sh
 ./configure --add-module=/path/to/coraza-nginx
 ```
 
 Or, to build a dynamic module:
 
-```
+```sh
 ./configure --add-dynamic-module=/path/to/coraza-nginx --with-compat
 ```
 
@@ -63,6 +67,7 @@ shims are unused in any given translation unit, and nginx builds with `-Werror`:
 ```sh
 ./configure --add-dynamic-module=/path/to/coraza-nginx --with-compat \
     --with-cc-opt="-Wno-unused-function"
+make modules
 ```
 
 The Debian package build sets its own CFLAGS and does not need this flag.
@@ -242,12 +247,53 @@ final `Content-Encoding` and `Vary` set by gzip, and for a Range request the
 `206` status, `Content-Range` and the `Content-Length` of the slice. Values
 nginx only adds when it writes the response, such as the `Server` header
 selected by `server_tokens` and the `; charset=` suffix on `Content-Type`,
-are computed by the connector the same way and passed to Coraza as well. Earlier versions inspected the headers
-before those filters, so a rule matching on `Content-Encoding` or
-`Content-Length` may now see different values.
+are computed by the connector the same way and passed to Coraza as well.
+Earlier versions inspected the headers before those filters, so a rule
+matching on `Content-Encoding` or `Content-Length` may now see different
+values.
 
 `RESPONSE_BODY` is unchanged: body inspection still runs before gzip, so
 phase-4 rules continue to see the uncompressed response body.
+
+## Disruptive actions and the audit log
+
+`deny` serves a response. The status comes from `status:`, or is 403 when the
+rule sets none. A `deny` whose status is below 300 (`deny,status:200`, for
+instance) is also served as **403**, in every phase: nginx cannot put such a
+status on the wire from a request phase (the request would finalize with
+nothing written, on a connection left open for reuse), and a refusal that looks
+like a success is not a useful block in a response phase either, so the
+connector treats the rule the same way wherever it fires. 201 and 204 are
+honoured, since nginx serves both as well-formed body-less responses. A redirect
+action (`redirect:`, statuses 301, 302, 303, 307) serves a body-less response
+carrying the `Location` header.
+
+`drop` serves nothing: the connection is torn down and the client receives no
+status line, headers or body. On HTTP/2 the teardown is per stream -- the
+stream is reset with `RST_STREAM` while the HTTP/2 connection itself survives.
+
+The audit log follows the wire, not the rule. A `deny,status:200` is recorded
+with `RESPONSE_STATUS` 403 and the error log line reads
+`Access denied with code 403`; the rule id and message in the same record still
+identify which rule blocked. A `drop` has no wire status, so it is recorded as
+444 -- nginx's own convention for "connection closed without response", and the
+value the error log line reports -- rather than 0, which is what an unevaluated
+transaction looks like.
+
+`deny,status:444` therefore shares that audit status with `drop`; tell them
+apart by the rule id. On the wire the two differ by phase: in a request phase
+(`phase:1`, `phase:2`) nginx's `ngx_http_finalize_request()` special-cases 444
+(`NGX_HTTP_CLOSE`) and closes the connection exactly like `drop`; in a response
+phase (`phase:3`, `phase:4`) the filter finalizes through
+`ngx_http_special_response_handler()`, which has no such case, so nginx serves
+a well-formed zero-body 444 and may keep the connection alive. Use `drop` when
+the intent is to close the connection regardless of phase.
+
+The recorded status matches what the client received whenever the block lands
+before response headers are sent. If a phase-4 rule fires after the headers are
+already on the wire (`coraza_delay_response_headers off`, SSE, or a body larger
+than the delayed-body cap), the client has the origin's status line and the
+connection is cut mid-body; the audit record still shows the blocking status.
 
 ## Configuration merging
 
@@ -291,6 +337,19 @@ http {
 
 Locations that set `coraza off` will not process requests through the WAF,
 regardless of rules inherited from parent contexts.
+
+After a `rewrite ... last` moves a request to another location, the final
+location's policy applies: its `coraza` flag, its rules and its
+`coraza_transaction_id`. The rules of the location the request was rewritten
+away from are not evaluated, just as nginx's own access-phase directives
+(`allow`, `deny`, `auth_basic`) in that location are not.
+
+A subrequest that is answered in the rewrite phase, for example an
+`auth_request` location that uses `return`, finishes before the phase in
+which a transaction is bound and is not inspected: `coraza on` and the rules
+in that location have no effect on it, and only the main request's
+transaction is evaluated and audited. Put the rules on the location that
+issues the `auth_request` instead.
 
 
 # Contributing
@@ -346,13 +405,15 @@ $ prove coraza*.t
 
 If you are facing problems getting your added functionality to pass all the nginx tests, feel free to contact us or the nginx mailing list at: http://nginx.org/en/support.html
 
-### Debugging 
+### Debugging
 
-We respect the nginx debugging schema. By using the configuration option
-"--with-debug" during the nginx configuration you will also be enabling the
-connector's debug messages. Core dumps and crashes are expected to be debugged
-in the same fashion that is used to debug nginx. For further information,
-please check the nginx debugging information: http://wiki.nginx.org/Debugging
+Nginx's `--with-debug` enables nginx debug logging. To also enable the
+connector's `dd` messages, compile the module with `CORAZA_DDEBUG=1`
+(for example, pass
+`--with-cc-opt="-DCORAZA_DDEBUG=1 -Wno-unused-function"` to nginx's configure
+script when building the module). Core dumps and crashes can be debugged
+in the same fashion as nginx. For further information,
+please check [nginx's debugging documentation](http://wiki.nginx.org/Debugging).
 
 
 ## Reporting Issues
@@ -382,4 +443,3 @@ feel free to open GitHub issues requesting for new features. Before opening a ne
 
 Having our packages in distros on time is something we highly desire. Let us know if
 there is anything we can do to facilitate your work as a packager.
-

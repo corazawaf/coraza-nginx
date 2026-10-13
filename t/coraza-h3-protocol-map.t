@@ -2,12 +2,12 @@
 
 # Regression for the r->http_version -> WAF protocol string mapping.
 #
-# The rewrite handler translates r->http_version into the protocol string
+# The request-header path translates r->http_version into the protocol string
 # handed to coraza_process_uri(). A missing case falls through to the
 # "1.0" default, so HTTP/3 requests were reported to the WAF as HTTP/1.0
 # and rules keyed on REQUEST_PROTOCOL silently did not match.
 #
-# The mapping lives inside ngx_http_coraza_rewrite_handler(), which needs a
+# The mapping lives inside ngx_http_coraza_request_headers(), which needs a
 # live request and transaction, so it cannot be called directly. Instead
 # extract the switch body from the source and compile it standalone against
 # nginx's real NGX_HTTP_VERSION_* constants, then assert what it produces.
