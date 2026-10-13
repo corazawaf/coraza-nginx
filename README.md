@@ -238,6 +238,23 @@ phase-4 intervention can no longer replace a response whose headers have
 already gone out. Operators whose ruleset has no phase-4 response rules can
 turn this off to restore normal header streaming.
 
+## Response headers seen by phase 3
+
+The connector hands response headers to Coraza after nginx's gzip, charset
+and range filters have run, so phase-3 rules (and phase-4 rules that look at
+`RESPONSE_HEADERS`) see the headers the client will actually receive: the
+final `Content-Encoding` and `Vary` set by gzip, and for a Range request the
+`206` status, `Content-Range` and the `Content-Length` of the slice. Values
+nginx only adds when it writes the response, such as the `Server` header
+selected by `server_tokens` and the `; charset=` suffix on `Content-Type`,
+are computed by the connector the same way and passed to Coraza as well.
+Earlier versions inspected the headers before those filters, so a rule
+matching on `Content-Encoding` or `Content-Length` may now see different
+values.
+
+`RESPONSE_BODY` is unchanged: body inspection still runs before gzip, so
+phase-4 rules continue to see the uncompressed response body.
+
 ## Disruptive actions and the audit log
 
 `deny` serves a response. The status comes from `status:`, or is 403 when the

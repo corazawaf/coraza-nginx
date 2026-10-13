@@ -29,7 +29,7 @@ use coraza_crash_check;
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http/)->plan(10);
+my $t = Test::Nginx->new()->has(qw/http/)->plan(8);
 
 my $root = "$FindBin::Bin/..";
 my $src  = slurp("$root/src/ngx_http_coraza_header_filter.c");
@@ -147,18 +147,8 @@ like($src,
     qr/delay_response_headers.*?&&\s*!ngx_http_coraza_is_sse_response\(r\)/s,
     'header delay is skipped for SSE responses (delay guard excludes is_sse)');
 
-# The Transfer-Encoding and Vary resolvers cannot be driven at runtime: both
-# r->chunked and r->gzip_vary are set by filters that run AFTER the Coraza
-# header filter (Coraza registers last, so it runs first), so those flags are
-# always 0 when the resolvers execute. Pin the synthesis code by source grep
-# instead -- the same contract idiom used for the delayed file-buffer clone.
-like($src,
-    qr/r->chunked.*?ngx_string\("chunked"\).*?ngx_http_coraza_add_response_header/s,
-    'Transfer-Encoding: chunked is synthesized to the WAF when r->chunked');
-
-like($src,
-    qr/r->gzip_vary\s*&&\s*clcf->gzip_vary.*?ngx_string\("Accept-Encoding"\).*?ngx_http_coraza_add_response_header/s,
-    'Vary: Accept-Encoding is synthesized AND delivered to the WAF when gzip_vary applies');
+# Runtime coverage of the Transfer-Encoding and Vary headers lives in
+# t/coraza-header-transform-fidelity.t.
 
 like($src,
     qr/r->headers_out\.status\s*==\s*NGX_HTTP_SWITCHING_PROTOCOLS.*?connection\s*=\s*"upgrade".*?ngx_http_coraza_add_response_header/s,
