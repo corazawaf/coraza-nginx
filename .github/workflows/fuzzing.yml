@@ -55,6 +55,12 @@ jobs:
           sudo apt-get install -y clang ccache eatmydata
           echo /usr/lib/ccache >> "$GITHUB_PATH"
 
+      - name: Header packer boundary contracts
+        # Standalone ASan/UBSan contract tests. Kept out of fuzz/build.sh so
+        # OSS-Fuzz / ClusterFuzzLite builds stay build-only under their own
+        # $CC/$CFLAGS (e.g. MSan).
+        run: bash fuzz/packer_contract.sh
+
       - name: Build fuzz targets
         # No-arg build.sh builds every target next to the script
         # (fuzz_str_to_char + fuzz_pack_headers).
