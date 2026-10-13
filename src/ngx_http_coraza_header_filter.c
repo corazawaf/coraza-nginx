@@ -882,28 +882,29 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
         /*
          * Body not inspected (SecResponseBodyAccess Off, or a Content-Type
          * outside SecResponseBodyMimeType), or a status that carries no body
-         * at all (204, 304): nothing the body filter could
-         * feed the engine can change the phase-4 outcome, and every non-body
-         * variable phase 4 can read (RESPONSE_STATUS, RESPONSE_HEADERS, ARGS,
-         * TX -- CRS 959100 blocks on the outbound score a 5xx raised in phase
-         * 3) is known now.
-         *
-         * 204 and 304 belong here even when the Content-Type IS listed: a
-         * proxied origin may send "304 Not Modified" with a Content-Type (an
-         * nginx-generated 304 cannot, ngx_http_not_modified_filter clears it),
-         * and for such a response nginx's final header filter sets
-         * r->header_only once the headers go out, so the only body-filter call
-         * is the upstream's last_buf after the headers are on the wire.  Phase
-         * 4 would then run too late: a deny meets "header already sent" and
-         * the client gets an aborted response instead of a clean error page.
-         * Finalising here keeps the deny clean and lets the bodyless response
-         * stream.  See t/coraza-delayed-bodyless-phase4.t.  So finalise phase 4 here, before any header goes
+         * at all (204, 304): nothing the body filter could feed the engine
+         * can change the phase-4 outcome, and every non-body variable phase 4
+         * can read (RESPONSE_STATUS, RESPONSE_HEADERS, ARGS, TX -- CRS 959100
+         * blocks on the outbound score a 5xx raised in phase 3) is known now.
+         * So finalise phase 4 here, before any header goes
          * out: a deny still gets a clean error page, and a clean result means
          * there is no reason to hold the headers back -- the response streams.
          * Holding them anyway stalled every non-SSE stream (chunked JSON,
          * NDJSON) until last_buf or the delayed-body cap (issue #140).  The
          * body filter sees response_phase4_done and does not run phase 4
          * again on last_buf.
+         *
+         * 204 and 304 belong here even when the Content-Type IS listed: a
+         * proxied origin may send "304 Not Modified" with a Content-Type (an
+         * nginx-generated 304 has one only through add_header, since
+         * ngx_http_not_modified_filter clears headers_out.content_type), and
+         * for such a response nginx's final header filter sets
+         * r->header_only once the headers go out, so the only body-filter call
+         * is the upstream's last_buf after the headers are on the wire.  Phase
+         * 4 would then run too late: a deny meets "header already sent" and
+         * the client gets an aborted response instead of a clean error page.
+         * Finalising here keeps the deny clean and lets the bodyless response
+         * stream.  See t/coraza-delayed-bodyless-phase4.t.
          *
          * This runs before the SSE test on purpose: text/event-stream is
          * normally outside SecResponseBodyMimeType, so an SSE response takes
@@ -960,7 +961,6 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
          * the body into memory for the inspection.
          */
         r->filter_need_in_memory = 1;
-
         ctx->headers_delayed = 1;
         ctx->pending_chain = NULL;
         ctx->pending_chain_last = &ctx->pending_chain;

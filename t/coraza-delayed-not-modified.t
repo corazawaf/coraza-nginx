@@ -15,6 +15,14 @@
 # in the header filter; 304 and 204 were not.  t/coraza-head-no-body.t covers
 # the HEAD half; this file covers the status-code half.
 #
+# The 304 must carry a Content-Type for the delay to apply at all.  nginx's
+# not-modified filter clears headers_out.content_type, and a response with no
+# Content-Type is not body-processable, so the header filter finalises phase
+# 4 and forwards the headers at once.  A Content-Type that reaches the 304
+# another way -- here add_header, which nginx applies to 304 -- makes the
+# response processable again, and the delay leaks the file body.  Without the
+# add_header both locations pass on an unpatched tree.
+#
 # The assertion is on the raw wire response: everything after the header
 # terminator must be zero bytes.
 
@@ -63,6 +71,7 @@ http {
         # Delay is ON here (the shipped default): this is the path under test.
         location /delayed {
             default_type text/plain;
+            add_header Content-Type text/plain;
             coraza on;
             coraza_rules '
                 SecRuleEngine On
@@ -74,6 +83,7 @@ http {
         # Negative control: identical location with the delay switched OFF.
         location /nodelay {
             default_type text/plain;
+            add_header Content-Type text/plain;
             coraza on;
             coraza_delay_response_headers off;
             coraza_rules '
