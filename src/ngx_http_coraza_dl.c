@@ -29,7 +29,7 @@ typedef int                  (*fn_coraza_free_waf)(coraza_waf_t);
  * coraza_new_waf()). MUST be used instead of libc free(): libcoraza's own doc
  * comment for coraza_free_string requires it "to avoid allocator mismatches on
  * Windows", and freeing a cgo-allocated string with libc free() is undefined
- * behavior. Exported since libcoraza 1.7.0 (coraza.go:586), this module's hard
+ * behavior. Exported since libcoraza 1.7.0, below the module's 1.8.0
  * version floor, so it is bound required like every other core symbol. */
 typedef void                 (*fn_coraza_free_string)(char *);
 typedef int                  (*fn_coraza_rules_count)(coraza_waf_t);
@@ -57,12 +57,13 @@ typedef int                  (*fn_coraza_update_status_code)(coraza_transaction_
  * SecResponseBodyMimeType).  Must be called after
  * coraza_process_response_headers(). */
 typedef int                  (*fn_coraza_is_response_body_processable)(coraza_transaction_t);
+typedef int                  (*fn_coraza_is_response_body_accessible)(coraza_transaction_t);
 
 /* Bulk header submission, present in libcoraza 1.6+.  Adds every request /
  * response header in a single cgo crossing from a packed buffer
  * ([u16 name_len][name][u32 value_len][value] repeated `count` times),
  * replacing one coraza_add_*_header cgo call per header.  Required symbols:
- * libcoraza >= 1.7 is a hard requirement, so these always resolve; the
+ * libcoraza >= 1.8 is a hard requirement, so these always resolve; the
  * per-header path they sit beside now serves only as the pack-failure
  * (INT_MAX overflow) safety net, not as an old-library fallback. */
 typedef int                  (*fn_coraza_add_request_headers)(coraza_transaction_t, char *, int, int);
@@ -104,8 +105,9 @@ static fn_coraza_process_logging         dl_process_logging;
 static fn_coraza_update_status_code      dl_update_status_code;
 
 static fn_coraza_is_response_body_processable dl_is_response_body_processable;
+static fn_coraza_is_response_body_accessible  dl_is_response_body_accessible;
 
-/* Bulk-header entry points (libcoraza 1.6+) — required (>= 1.7 is enforced). */
+/* Bulk-header entry points (libcoraza 1.6+) — required (>= 1.8 is enforced). */
 static fn_coraza_add_request_headers     dl_add_request_headers;
 static fn_coraza_add_response_headers    dl_add_response_headers;
 
@@ -127,17 +129,6 @@ static dynlib_t dl_handle;
             dynlib_close(dl_handle);                                   \
             dl_handle = NULL;                                          \
             return NGX_ERROR;                                          \
-        }                                                              \
-    } while (0)
-
-
-/* Resolve a best-effort symbol — leaves the pointer NULL (no failure) when
- * the running libcoraza does not export it, so the caller can fall back. */
-#define DL_SYM_OPT(ptr, name)                                           \
-    do {                                                                \
-        *(void **)(&ptr) = dynlib_sym(dl_handle, #name);               \
-        if (ptr == NULL) {                                             \
-            (void) dynlib_error();  /* consume: absence is not fatal */ \
         }                                                              \
     } while (0)
 
@@ -201,20 +192,30 @@ ngx_http_coraza_dl_open(ngx_log_t *log)
     /* Version gate. coraza_version_num() first appears in 1.7.0 and reports the
      * version of the library actually dlopen'd -- the authoritative check for a
      * module that resolves everything at runtime.  A library that does not
-     * export it, or reports < 1.7.0, is unsupported: fail so the worker refuses
-     * to start (fail closed) rather than run against an old ABI. */
+     * export it, or reports < 1.8.0, is unsupported: fail so the worker refuses
+     * to start (fail closed) rather than run against an old ABI.  1.8 added
+     * coraza_is_response_body_accessible(), which the header filter needs to
+     * tell whether the response body will be inspected (issue #140). */
     DL_SYM(dl_version_num, coraza_version_num);
     {
         int version = dl_version_num();
-        if (version < 10700) {
+        if (version < 10800) {
             ngx_log_error(NGX_LOG_EMERG, log, 0,
-                          "coraza: libcoraza >= 1.7.0 required, but the loaded "
+                          "coraza: libcoraza >= 1.8.0 required, but the loaded "
                           "library reports %d.%d.%d",
                           version / 10000, version / 100 % 100, version % 100);
             dynlib_close(dl_handle);
             dl_handle = NULL;
             return NGX_ERROR;
         }
+    }
+
+    /* 1.8 export; resolved after the version gate so an older library gets the
+     * ">= 1.8.0 required" message rather than a bare missing-symbol error. */
+    DL_SYM(dl_is_response_body_accessible, coraza_is_response_body_accessible);
+
+    {
+        int version = dl_version_num();
         ngx_log_error(NGX_LOG_NOTICE, log, 0,
                       "coraza: %s loaded via dynlib_open (libcoraza %d.%d.%d)",
                       CORAZA_DYNLIB_BASENAME DYNLIB_EXT,
@@ -358,8 +359,8 @@ int coraza_process_request_body(coraza_transaction_t t)
  * false result skips only buffering and submission; coraza_process_request_body
  * must still run because it evaluates phase-2 rules on non-body variables.
  *
- * libcoraza 1.7.0 introduced the symbol and is the connector's minimum
- * supported version, so ngx_http_coraza_dl_open() resolves it as mandatory.
+ * libcoraza 1.7.0 introduced the symbol; the connector requires >= 1.8.0,
+ * so ngx_http_coraza_dl_open() resolves it as mandatory.
  */
 int
 ngx_http_coraza_is_request_body_accessible(coraza_transaction_t t)
@@ -412,9 +413,7 @@ int coraza_update_status_code(coraza_transaction_t t, int code)
  * Requires libcoraza >= 1.4.0.  The symbol is resolved with the mandatory
  * DL_SYM in ngx_http_coraza_dl_open(), so dl_is_response_body_processable is
  * guaranteed non-NULL here: if the running library did not export it, dl_open
- * failed and the worker never started.  No NULL guard is needed (and none must
- * be relied upon) -- if this symbol is ever downgraded to DL_SYM_OPT, this
- * wrapper and its callers must add an availability check first.
+ * failed and the worker never started. No NULL guard is needed here.
  */
 int
 ngx_http_coraza_is_response_body_processable(coraza_transaction_t t)
@@ -423,11 +422,25 @@ ngx_http_coraza_is_response_body_processable(coraza_transaction_t t)
 }
 
 /*
+ * ngx_http_coraza_is_response_body_accessible — wrapper around the
+ * coraza_is_response_body_accessible symbol (libcoraza >= 1.8, required).
+ *
+ * Returns 1 when SecResponseBodyAccess is on for the transaction.  coraza's
+ * IsResponseBodyProcessable() only checks the Content-Type against
+ * SecResponseBodyMimeType, so "will the body be inspected" needs both.
+ */
+int
+ngx_http_coraza_is_response_body_accessible(coraza_transaction_t t)
+{
+    return dl_is_response_body_accessible(t);
+}
+
+/*
  * Bulk header wrappers.  These forward directly to the resolved symbols:
  * both are loaded with the mandatory DL_SYM (see ngx_http_coraza_dl_open()
  * above), so dl_add_request_headers / dl_add_response_headers are guaranteed
  * non-NULL here -- a library that does not export them, or that is older
- * than the enforced 1.7.0 floor, fails dl_open and the worker never starts.
+ * than the enforced 1.8.0 floor, fails dl_open and the worker never starts.
  * A negative return here is therefore always a genuine runtime pack/submit
  * failure reported by libcoraza, not a missing symbol; callers already treat
  * it as the signal to replay per-header.

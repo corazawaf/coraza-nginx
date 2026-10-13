@@ -2,7 +2,7 @@
 
 # If $NGX_IGNORE_RPATH is set to "YES", we will ignore explicit
 # library path specification on resulting binary, allowing libcoraza.so
-# to be relocated across configured library pathes (adjust /etc/ld.so.conf
+# to be relocated across configured library paths (adjust /etc/ld.so.conf
 # or set $LD_LIBRARY_PATH environment variable to manage them)
 #
 # $YAJL_LIB variable may need to be populated in case of non-standard
@@ -10,16 +10,18 @@
 
 ngx_addon_name="ngx_http_coraza_module"
 
-# Require libcoraza >= 1.7.0 at build time.
+# Require libcoraza >= 1.8.0 at build time.
 #
 # From 1.5 the coraza_process_* calls use the tri-state coraza_result_t
 # contract (CORAZA_ERROR = -1, CORAZA_OK = 0, CORAZA_INTERRUPTION = 1), so
-# "failed" means `ret < 0`; the bulk-header submit entry points arrive in 1.6.
-# coraza_version_num() first appears in 1.7.0 and reports the library version.
+# "failed" means `ret < 0`; the bulk-header submit entry points arrive in 1.6;
+# coraza_version_num() in 1.7; coraza_is_response_body_accessible(), which the
+# header filter needs to tell whether a response body will be inspected
+# (issue #140), in 1.8.
 #
-# Compile-only probe (nginx's auto/feature): coraza_version_num() is declared in
-# coraza.h from 1.7.0, so `sizeof(coraza_version_num())` compiles iff the header
-# is >= 1.7 -- configure then fails cleanly against older headers rather than
+# Compile-only probe (nginx's auto/feature): coraza_is_response_body_accessible()
+# is declared in coraza.h from 1.8.0, so `sizeof(...)` of a call to it compiles
+# iff the header is >= 1.8 -- configure then fails cleanly against older headers rather than
 # silently building against an old ABI. sizeof leaves its operand unevaluated, so
 # this needs no reference to the symbol at link and nothing is run: no -lcoraza,
 # no libcoraza.so on any path, and cross-compilation works. It uses the same
@@ -27,21 +29,21 @@ ngx_addon_name="ngx_http_coraza_module"
 # --with-cc-opt=-I<dir> is picked up. The exact version number is re-checked at
 # runtime when the module dlopen's libcoraza (ngx_http_coraza_dl_open) -- this is
 # the build-time half.
-ngx_feature="libcoraza >= 1.7.0 (coraza_version_num)"
+ngx_feature="libcoraza >= 1.8.0 (coraza_is_response_body_accessible)"
 ngx_feature_name=
 ngx_feature_run=no
 ngx_feature_incs="#include <coraza/coraza.h>"
 ngx_feature_path=
 ngx_feature_libs=
-ngx_feature_test="(void) sizeof(coraza_version_num());"
+ngx_feature_test="(void) sizeof(coraza_is_response_body_accessible((coraza_transaction_t) 0));"
 . auto/feature
 
 if test $ngx_found != yes; then
     cat << END
 
-$0: error: the coraza-nginx module requires libcoraza >= 1.7.0, but the
-libcoraza available at build time is older or does not report its version
-(coraza_version_num). Install libcoraza >= 1.7.0 and retry.
+$0: error: the coraza-nginx module requires libcoraza >= 1.8.0, but the
+libcoraza available at build time is older (coraza.h does not declare
+coraza_is_response_body_accessible). Install libcoraza >= 1.8.0 and retry.
 
 END
     exit 1
@@ -62,7 +64,7 @@ coraza_dependency="ngx_http_postpone_filter_module \
 
 if test -n "$ngx_module_link"; then
 	ngx_module_type=HTTP_FILTER
-	ngx_module_name="$ngx_addon_name"
+	ngx_module_name="$ngx_addon_name ngx_http_coraza_headers_module"
 	ngx_module_srcs="$ngx_addon_dir/src/ngx_http_coraza_module.c \
                      $ngx_addon_dir/src/ngx_http_coraza_pre_access.c \
                      $ngx_addon_dir/src/ngx_http_coraza_header_filter.c \
@@ -78,9 +80,11 @@ if test -n "$ngx_module_link"; then
 
     ngx_module_order="ngx_http_chunked_filter_module \
                       ngx_http_v2_filter_module \
+                      ngx_http_v3_filter_module \
+                      ngx_http_coraza_headers_module \
                       ngx_http_range_header_filter_module \
                       ngx_http_gzip_filter_module \
-                      $ngx_module_name \
+                      $ngx_addon_name \
                       $coraza_dependency";
 
 	. auto/module
@@ -111,4 +115,28 @@ else
 	NGX_ADDON_DEPS="$NGX_ADDON_DEPS \
                     $ngx_addon_dir/src/ddebug.h \
                     $ngx_addon_dir/src/ngx_http_coraza_common.h";
+fi
+
+# Static builds ignore ngx_module_order. Insert the header-only companion
+# before the range header filter in registration order, hence after it and
+# gzip in execution order. Keep the body filter at its existing position.
+# If the anchor is ever missing, append the companion instead so phase 3/4
+# are never silently left unregistered.
+if test "$ngx_module_link" != DYNAMIC; then
+    coraza_filters=
+    coraza_headers_placed=no
+    for coraza_filter in $HTTP_FILTER_MODULES; do
+        test "$coraza_filter" = ngx_http_coraza_headers_module && continue
+        if test "$coraza_filter" = ngx_http_range_header_filter_module; then
+            coraza_filters="$coraza_filters ngx_http_coraza_headers_module"
+            coraza_headers_placed=yes
+        fi
+        coraza_filters="$coraza_filters $coraza_filter"
+    done
+    if test $coraza_headers_placed = no; then
+        echo " warning: ngx_http_range_header_filter_module not found;" \
+             "registering ngx_http_coraza_headers_module last"
+        coraza_filters="$coraza_filters ngx_http_coraza_headers_module"
+    fi
+    HTTP_FILTER_MODULES="$coraza_filters"
 fi

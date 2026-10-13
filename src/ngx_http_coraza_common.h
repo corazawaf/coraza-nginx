@@ -92,8 +92,10 @@ typedef struct {
     unsigned processed:1;
     unsigned logged:1;
     unsigned intervention_triggered:1;
+    unsigned drop_connection:1;      /* SecLang `drop`: kill the connection */
     unsigned headers_delayed:1;
     unsigned response_body_processable:1; /* body inspection needed for this tx */
+    unsigned response_phase4_done:1;      /* phase 4 finalised in the header filter */
 } ngx_http_coraza_ctx_t;
 
 
@@ -252,6 +254,7 @@ ngx_int_t ngx_http_coraza_dl_open(ngx_log_t *log);
 void ngx_http_coraza_dl_close(ngx_log_t *log);
 int ngx_http_coraza_is_request_body_accessible(coraza_transaction_t t);
 int ngx_http_coraza_is_response_body_processable(coraza_transaction_t t);
+int ngx_http_coraza_is_response_body_accessible(coraza_transaction_t t);
 /* Bulk header entry points. Both are loaded with the mandatory DL_SYM in
  * ngx_http_coraza_dl_open() and require the enforced >= 1.7.0 floor, so they
  * are always available -- no runtime capability check needed. */
@@ -272,6 +275,8 @@ ngx_int_t ngx_http_coraza_header_filter_init(void);
 ngx_int_t ngx_http_coraza_header_filter(ngx_http_request_t *r);
 ngx_int_t ngx_http_coraza_forward_header(ngx_http_request_t *r);
 ngx_int_t ngx_http_coraza_is_redirect_status(ngx_int_t status);
+ngx_int_t ngx_http_coraza_drop_connection(ngx_http_request_t *r);
+
 void ngx_http_coraza_prepare_redirect(ngx_http_request_t *r, ngx_int_t status);
 
 /* ngx_http_coraza_log.c */
@@ -281,7 +286,8 @@ ngx_int_t ngx_http_coraza_log_handler(ngx_http_request_t *r);
 ngx_int_t ngx_http_coraza_pre_access_handler(ngx_http_request_t *r);
 
 /* ngx_http_coraza_rewrite.c */
-ngx_int_t ngx_http_coraza_rewrite_handler(ngx_http_request_t *r);
+ngx_int_t ngx_http_coraza_request_headers(ngx_http_request_t *r,
+    ngx_flag_t audit_only);
 
 /* ngx_http_coraza_utils.c */
 ngx_int_t ngx_str_to_char(ngx_str_t a, char **str, ngx_pool_t *p);

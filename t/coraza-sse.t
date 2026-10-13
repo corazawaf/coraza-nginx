@@ -39,7 +39,7 @@ use coraza_crash_check;
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http proxy/)->plan(11);
+my $t = Test::Nginx->new()->has(qw/http proxy/)->plan(12);
 
 $t->write_file_expand('nginx.conf', <<'EOF');
 
@@ -59,9 +59,15 @@ http {
 
         location / {
             coraza on;
+            # The near-miss types must be INSPECTED for their delay to mean
+            # anything: an uninspected type streams by design (issue #140).
+            # "text/event-streamx" is listed; "text/event-stream junk" cannot
+            # be (the list is space-separated), so it is forced instead.
             coraza_rules '
                 SecRuleEngine DetectionOnly
                 SecResponseBodyAccess On
+                SecResponseBodyMimeType text/plain text/html text/event-streamx
+                SecRule REQUEST_URI "@beginsWith /notsse" "id:190,t:none,phase:1,pass,nolog,ctl:forceResponseBodyVariable=on"
             ';
             proxy_pass http://127.0.0.1:8081;
             proxy_read_timeout 5s;
@@ -77,6 +83,22 @@ http {
                 SecRuleEngine On
                 SecResponseBodyAccess On
                 SecRule ARGS "@streq attack" "id:181,phase:1,status:403,deny,log"
+            ';
+            proxy_pass http://127.0.0.1:8081/events;
+            proxy_read_timeout 5s;
+            proxy_buffering off;
+        }
+
+        # text/event-stream is outside SecResponseBodyMimeType, so the body is
+        # not inspected and phase 4 is finalised before the headers go out: a
+        # phase-4 rule on ARGS must still deny the stream cleanly, instead of
+        # waiting for a last_buf an SSE stream never sends (issue #140).
+        location /guarded4 {
+            coraza on;
+            coraza_rules '
+                SecRuleEngine On
+                SecResponseBodyAccess On
+                SecRule ARGS "@streq attack4" "id:182,t:none,phase:4,status:403,deny,log"
             ';
             proxy_pass http://127.0.0.1:8081/events;
             proxy_read_timeout 5s;
@@ -133,6 +155,9 @@ like($status, qr!HTTP/1\.1 403!, 'phase-1 rule still blocks an SSE request');
 # ...and a clean SSE request through the same guarded location still streams.
 ($status, $body) = sse_read('/guarded?q=fine');
 like($body, qr/data: event-1/, 'guarded SSE location still streams when allowed');
+
+($status, $body) = sse_read('/guarded4?q=attack4', 2);
+like($status, qr!HTTP/1\.1 403!, 'phase-4 ARGS rule still denies an uninspected SSE stream');
 
 ###############################################################################
 
