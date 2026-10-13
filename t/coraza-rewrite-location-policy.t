@@ -31,6 +31,7 @@
 #   A phase-1 deny, rewrites to permissive B (c1a)  | 403 from A     | 200 from B
 #   return 403, return 444, redirect, if+set        | one audit      | one audit
 #     (c4a, c4b, c4d, c4c)                          | entry each     | entry each
+#   return 200 / 403 with a phase-1 drop (c4i, c4j) | n/a            | closed, 444
 #
 # Every request produces exactly one audit entry on both trees; the counts
 # pin that nothing is logged twice or lost. A subrequest issued by an enabled
@@ -256,6 +257,31 @@ http {
             return 200 "c4h\n";
         }
 
+        # rewrite-phase `return 200` with a bare phase-1 `drop`: binds in the
+        # header filter and must close the connection with nothing sent
+        location /c4i {
+            coraza_transaction_id "c4i-A-$request_id";
+            coraza_rules '
+                SecRuleEngine On
+                SecRule ARGS:x "@streq bad" "id:409,phase:1,drop,log"
+                %%AUDIT(c4i-A)%%
+            ';
+            return 200 "c4i\n";
+        }
+
+        # bare `return 403` with a phase-1 `drop`: the special response sets
+        # r->err_status, so a drop finalized through the filter would send a
+        # "444" status line; it must close the connection with nothing sent
+        location /c4j {
+            coraza_transaction_id "c4j-A-$request_id";
+            coraza_rules '
+                SecRuleEngine On
+                SecRule ARGS:x "@streq bad" "id:410,phase:1,drop,log"
+                %%AUDIT(c4j-A)%%
+            ';
+            return 403;
+        }
+
         # auth_request subrequest into an enabled location that returns in the
         # rewrite phase: the subrequest reaches the header filter without a
         # context and must not bind a transaction of its own
@@ -300,7 +326,7 @@ for my $f (qw/c0 c1a-b c1b-b c2-b c4c c4e-c c4f-b c4g-b c5/) {
     $t->write_file($f, "$f\n");
 }
 
-$t->run()->plan(70);
+$t->run()->plan(80);
 
 ###############################################################################
 
@@ -419,6 +445,26 @@ is($a->{status}, 200, 'return 200: audit entry records status 200');
 $a = audited('c4h', '/c4h?x=ok');
 like($a->{response}, qr/^HTTP\S+ 200/, 'return 200: benign request served');
 is_deeply($a->{counts}, { 'c4h-A' => 1 }, 'return 200: benign request audited');
+
+# rewrite-phase return 200 with a phase-1 drop: connection closed, no body
+$a = audited('c4i', '/c4i?x=bad');
+is($a->{response} // '', '', 'return 200 + drop: connection closed, nothing sent');
+is_deeply($a->{counts}, { 'c4i-A' => 1 }, 'return 200 + drop: one audit entry');
+is($a->{rule}, '409', 'return 200 + drop: phase-1 drop rule matched');
+is($a->{status}, 444, 'return 200 + drop: audit entry records status 444');
+
+$a = audited('c4i', '/c4i?x=ok');
+like($a->{response}, qr/^HTTP\S+ 200.*c4i$/s, 'return 200 + drop: benign request served');
+
+# rewrite-phase return 403 with a phase-1 drop: err_status set, still closed
+$a = audited('c4j', '/c4j?x=bad');
+is($a->{response} // '', '', 'return 403 + drop: connection closed, nothing sent');
+is_deeply($a->{counts}, { 'c4j-A' => 1 }, 'return 403 + drop: one audit entry');
+is($a->{rule}, '410', 'return 403 + drop: phase-1 drop rule matched');
+is($a->{status}, 444, 'return 403 + drop: audit entry records status 444');
+
+$a = audited('c4j', '/c4j?x=ok');
+like($a->{response}, qr/^HTTP\S+ 403/, 'return 403 + drop: benign request gets the 403');
 
 # auth_request subrequest into an enabled location: only the main request binds
 $a = audited('c5', '/c5?x=ok');

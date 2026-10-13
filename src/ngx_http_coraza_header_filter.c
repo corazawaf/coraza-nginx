@@ -464,6 +464,10 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
                 return NGX_ERROR;
             }
             ctx->intervention_triggered = 1;
+            /* Phase 1 runs here, so `drop` can land at this site too. */
+            if (ctx->drop_connection) {
+                return ngx_http_coraza_drop_connection(r);
+            }
             if (ngx_http_coraza_is_redirect_status(rc)
                 && r->headers_out.location)
             {
