@@ -122,7 +122,7 @@ coraza_crash_check::assert_no_crash($t, 'no worker crash');
 sub request {
     my ($path, $version, $encoding, $expected) = @_;
     if ($version eq '2' || $version eq '3') {
-        my $socket = $version eq '2' ? Test::Nginx::HTTP2->new(8082)
+        my $socket = $version eq '2' ? Test::Nginx::HTTP2->new(port(8082))
             : Test::Nginx::HTTP3->new();
         my $mode = $version eq '2' ? 2 : 4;
         my $scheme = $version eq '2' ? 'http' : 'https';

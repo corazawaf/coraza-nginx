@@ -106,7 +106,7 @@ sub request {
     my ($path, $version, $encoding) = @_;
     return http("GET $path HTTP/$version\r\nHost: localhost\r\nConnection: close\r\nAccept-Encoding: $encoding\r\n\r\n")
         if $version eq '1.0' || $version eq '1.1';
-    my $socket = $version eq '2' ? Test::Nginx::HTTP2->new(8082)
+    my $socket = $version eq '2' ? Test::Nginx::HTTP2->new(port(8082))
         : Test::Nginx::HTTP3->new();
     my $mode = $version eq '2' ? 2 : 4;
     my $stream = $socket->new_stream({ headers => [
