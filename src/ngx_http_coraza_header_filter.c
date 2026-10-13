@@ -855,11 +855,12 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * rewrites headers_out.status after the static handler has already
      * committed to streaming a body -- which is exactly the race being
      * guarded.  Nothing in stock nginx sets headers_out.status to 204 from
-     * a filter: ngx_http_static_handler hard-codes 200, `return 204` and a
-     * 204 from ngx_http_dav_module are handler return codes that go through
-     * ngx_http_send_special_response with no body at all, proxied 204s have
-     * u->length forced to 0 above this module, and an `error_page =204`
-     * redirect is already rejected by the !r->error_page conjunct above.
+     * a filter: ngx_http_static_handler hard-codes 200, `return 204` is a
+     * handler return code that goes through ngx_http_send_special_response
+     * with no body at all, proxied 204s have u->length forced to 0 above
+     * this module, and an `error_page =204` redirect is already rejected by
+     * the !r->error_page conjunct above.  (ngx_http_dav_module's PUT 204
+     * presets r->header_only and is handled below.)
      * So NGX_HTTP_NO_CONTENT is defensive depth for a third-party or future
      * single-call handler, not a branch reachable from this test suite.
      * Every route was tried against an unpatched build and none leaked a
@@ -872,10 +873,11 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * status == NGX_HTTP_OK test breaks those with "header already sent".
      */
     if (mcf->delay_response_headers
-        && r->method != NGX_HTTP_HEAD && !r->header_only && !r->error_page
+        && r->method != NGX_HTTP_HEAD && !r->error_page
         && r == r->main
         && r->headers_out.status != NGX_HTTP_SWITCHING_PROTOCOLS
-        && (!ctx->response_body_processable
+        && (r->header_only
+            || !ctx->response_body_processable
             || r->headers_out.status == NGX_HTTP_NO_CONTENT
             || r->headers_out.status == NGX_HTTP_NOT_MODIFIED))
     {
@@ -905,6 +907,13 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
          * the client gets an aborted response instead of a clean error page.
          * Finalising here keeps the deny clean and lets the bodyless response
          * stream.  See t/coraza-delayed-bodyless-phase4.t.
+         *
+         * A response the handler already marked header_only belongs here
+         * too.  ngx_http_dav_module's PUT sets 201/204 and r->header_only = 1
+         * before ngx_http_send_header() and then finalises: no body filter
+         * call follows, so phase 4 run from last_buf never runs at all and a
+         * phase-4 deny is silently skipped.  There is nothing to delay either.
+         * See t/coraza-delayed-header-only.t.
          *
          * This runs before the SSE test on purpose: text/event-stream is
          * normally outside SecResponseBodyMimeType, so an SSE response takes
