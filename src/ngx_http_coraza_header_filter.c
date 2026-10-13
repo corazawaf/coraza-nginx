@@ -11,6 +11,8 @@
  */
 
 
+/* NGX_BUILD must be defined before common.h first includes nginx.h. */
+#include <ngx_config.h>
 #include "ngx_http_coraza_common.h"
 
 static ngx_http_output_header_filter_pt ngx_http_next_header_filter;
@@ -132,6 +134,7 @@ static ngx_int_t
 ngx_http_coraza_resolv_header_server(ngx_http_request_t *r, ngx_str_t name, off_t offset)
 {
     static char ngx_http_server_full_string[] = NGINX_VER;
+    static char ngx_http_server_build_string[] = NGINX_VER_BUILD;
     static char ngx_http_server_string[] = "nginx";
 
     ngx_http_core_loc_conf_t *clcf = NULL;
@@ -142,9 +145,12 @@ ngx_http_coraza_resolv_header_server(ngx_http_request_t *r, ngx_str_t name, off_
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
     if (r->headers_out.server == NULL) {
-        if (clcf->server_tokens) {
+        if (clcf->server_tokens == NGX_HTTP_SERVER_TOKENS_ON) {
             value.data = (u_char *)ngx_http_server_full_string;
             value.len = sizeof(ngx_http_server_full_string) - 1;
+        } else if (clcf->server_tokens == NGX_HTTP_SERVER_TOKENS_BUILD) {
+            value.data = (u_char *)ngx_http_server_build_string;
+            value.len = sizeof(ngx_http_server_build_string) - 1;
         } else {
             value.data = (u_char *)ngx_http_server_string;
             value.len = sizeof(ngx_http_server_string) - 1;
@@ -181,6 +187,36 @@ ngx_http_coraza_resolv_header_date(ngx_http_request_t *r, ngx_str_t name, off_t 
 }
 
 
+static ngx_flag_t
+ngx_http_coraza_will_chunk(ngx_http_request_t *r)
+{
+    ngx_http_core_loc_conf_t *clcf;
+
+    /* The terminal HTTP/2 and HTTP/3 filters bypass chunked entirely.
+     * For HTTP/1, mirror the public-state selection in nginx's chunked
+     * header filter, which runs after this collector. Gzip and range have
+     * already finalized content_length_n and the representation here. */
+    if (r->http_version != NGX_HTTP_VERSION_11
+        || r->headers_out.status < NGX_HTTP_OK
+        || r->headers_out.status == NGX_HTTP_NO_CONTENT
+        || r->headers_out.status == NGX_HTTP_NOT_MODIFIED
+        || r != r->main
+        || r->method == NGX_HTTP_HEAD
+        || (r->method == NGX_HTTP_CONNECT
+            && r->headers_out.status < NGX_HTTP_SPECIAL_RESPONSE))
+    {
+        return 0;
+    }
+
+    clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
+    if (clcf->chunked_transfer_encoding
+        && (r->headers_out.content_length_n == -1 || r->expect_trailers))
+    {
+        return 1;
+    }
+    return 0;
+}
+
 static ngx_int_t
 ngx_http_coraza_resolv_header_content_length(ngx_http_request_t *r, ngx_str_t name, off_t offset)
 {
@@ -190,6 +226,11 @@ ngx_http_coraza_resolv_header_content_length(ngx_http_request_t *r, ngx_str_t na
     u_char *p;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
+
+    /* Chunked clears a known length when HTTP/1.1 trailers are expected. */
+    if (r->expect_trailers && ngx_http_coraza_will_chunk(r)) {
+        return NGX_OK;
+    }
 
     if (r->headers_out.content_length_n >= 0)
     {
@@ -210,14 +251,45 @@ static ngx_int_t
 ngx_http_coraza_resolv_header_content_type(ngx_http_request_t *r, ngx_str_t name, off_t offset)
 {
     ngx_http_coraza_ctx_t *ctx = NULL;
+    ngx_str_t value;
+    u_char *p;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
     if (r->headers_out.content_type.len > 0)
     {
+        value = r->headers_out.content_type;
+
+        /* Match core's final Content-Type without changing headers_out: core
+         * still needs to append the charset when it writes the response. */
+        if (r->headers_out.content_type_len == value.len
+            && r->headers_out.charset.len)
+        {
+            if (r->headers_out.charset.len
+                > NGX_MAX_SIZE_T_VALUE - (sizeof("; charset=") - 1)
+                || value.len > NGX_MAX_SIZE_T_VALUE
+                               - (sizeof("; charset=") - 1)
+                               - r->headers_out.charset.len)
+            {
+                return NGX_ERROR;
+            }
+
+            value.len += sizeof("; charset=") - 1
+                         + r->headers_out.charset.len;
+            value.data = ngx_pnalloc(r->pool, value.len);
+            if (value.data == NULL) {
+                return NGX_ERROR;
+            }
+
+            p = ngx_cpymem(value.data, r->headers_out.content_type.data,
+                          r->headers_out.content_type.len);
+            p = ngx_cpymem(p, "; charset=", sizeof("; charset=") - 1);
+            ngx_memcpy(p, r->headers_out.charset.data,
+                       r->headers_out.charset.len);
+        }
 
         return ngx_http_coraza_add_response_header(r, ctx, &name,
-            &r->headers_out.content_type);
+            &value);
     }
 
     return NGX_OK;
@@ -375,16 +447,13 @@ ngx_http_coraza_resolv_header_connection(ngx_http_request_t *r, ngx_str_t name, 
 static ngx_int_t
 ngx_http_coraza_resolv_header_transfer_encoding(ngx_http_request_t *r, ngx_str_t name, off_t offset)
 {
-    ngx_http_coraza_ctx_t *ctx = NULL;
-
-    if (r->chunked) {
+    if (ngx_http_coraza_will_chunk(r)) {
+        ngx_http_coraza_ctx_t *ctx;
         ngx_str_t value = ngx_string("chunked");
 
         ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
-
         return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
     }
-
     return NGX_OK;
 }
 
@@ -399,6 +468,12 @@ ngx_http_coraza_resolv_header_vary(ngx_http_request_t *r, ngx_str_t name, off_t 
     if (r->gzip_vary && clcf->gzip_vary) {
         ngx_str_t value = ngx_string("Accept-Encoding");
 
+#if (NGX_HTTP_V3)
+        /* QPACK's static Vary entry uses a lower-case field-name token. */
+        if (r->http_version == NGX_HTTP_VERSION_30) {
+            ngx_str_set(&value, "accept-encoding");
+        }
+#endif
         ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
         return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
@@ -437,16 +512,55 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * and audit logging; body inspection is naturally skipped (no body). */
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
-
-
-    if (ctx == NULL)
-    {
-        return ngx_http_next_header_filter(r);
-    }
-
     mcf = ngx_http_get_module_loc_conf(r, ngx_http_coraza_module);
     if (mcf == NULL) {
         return ngx_http_next_header_filter(r);
+    }
+
+    if (ctx == NULL) {
+        if (mcf->enable != 1) {
+            return ngx_http_next_header_filter(r);
+        }
+
+        /* A subrequest that reaches this filter without a context never starts
+         * a transaction of its own; only the main request binds here. */
+        if (r != r->main) {
+            return ngx_http_next_header_filter(r);
+        }
+
+        /* Rewrite return/error responses can skip PREACCESS entirely. Bind
+         * their settled policy before forwarding any response headers. */
+        rc = ngx_http_coraza_request_headers(r, 0);
+        ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
+        if (rc != NGX_DECLINED) {
+            /* Without a usable ctx there is no reentry guard. End the
+             * request rather than recursively trying initialization again. */
+            if (ctx == NULL || ctx->coraza_transaction == 0) {
+                return NGX_ERROR;
+            }
+            ctx->intervention_triggered = 1;
+            /* Phase 1 runs here, so `drop` can land at this site too. */
+            if (ctx->drop_connection) {
+                return ngx_http_coraza_drop_connection(r);
+            }
+            if (ngx_http_coraza_is_redirect_status(rc)
+                && r->headers_out.location)
+            {
+                ngx_http_coraza_prepare_redirect(r, rc);
+                return ngx_http_next_header_filter(r);
+            }
+            /* The special-response sender only stops on NGX_ERROR, not a
+             * positive status. Preserve filter finalization for that caller. */
+            if (r->err_status) {
+                return ngx_http_filter_finalize_request(r,
+                    &ngx_http_coraza_module, rc);
+            }
+            /* No headers have reached the next filter. Return the status to
+             * the caller's normal request finalization, which can retain
+             * keepalive. Filter finalization instead sets filter_finalize and
+             * returns NGX_ERROR even after generating a successful response. */
+            return rc;
+        }
     }
 
     if (ctx->intervention_triggered) {
@@ -456,16 +570,16 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     /*
      * ctx->processed is deliberately sticky for the lifetime of this ctx: it
      * guards against this filter running twice for the same ctx, not against
-     * running once per "logical" response. An internal redirect
-     * (error_page, X-Accel-Redirect) reuses the same r/ctx across the hop,
-     * but nginx invokes the header filter chain only once, for the final
-     * response actually sent to the client -- redirected phases never reach
-     * this filter, so there is nothing here for the flag to wrongly
-     * suppress. A subrequest gets its own r and, unless it creates one, a
-     * NULL ctx (see ngx_http_coraza_create_ctx() callers), so it is
-     * unaffected by the parent's flag. Do not reset this flag.
+     * running once per "logical" response. Ordinary rewrite rematching keeps
+     * r->ctx, but transaction creation waits until after that loop. True
+     * internal redirects (including error_page and X-Accel-Redirect) and named
+     * locations clear r->ctx; the destination may create its own transaction.
+     * ngx_http_filter_finalize_request(r, &ngx_http_coraza_module, ...) instead
+     * preserves this module's ctx while clearing the others. A subrequest has
+     * its own r/ctx. Retained contexts must keep this one-shot flag; do not
+     * reset it to accommodate redirects.
      */
-    if (ctx && ctx->processed)
+    if (ctx->processed)
     {
         return ngx_http_next_header_filter(r);
     }
@@ -676,6 +790,13 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
     }
     if (ret > 0) {
         ctx->intervention_triggered = 1;
+        /*
+         * `drop` must not go through ngx_http_filter_finalize_request().
+         * See ngx_http_coraza_drop_connection().
+         */
+        if (ctx->drop_connection) {
+            return ngx_http_coraza_drop_connection(r);
+        }
         if (ngx_http_coraza_is_redirect_status(ret) && r->headers_out.location) {
             ngx_http_coraza_prepare_redirect(r, ret);
             return ngx_http_next_header_filter(r);
@@ -699,8 +820,8 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
      * can never stall), error pages (already an error response), and
      * subrequests (handled independently).
      * A body that will not be inspected (SecResponseBodyAccess Off or
-     * Content-Type outside SecResponseBodyMimeType) never reaches this point:
-     * the branch above finalised phase 4 and forwarded the headers.
+     * Content-Type outside SecResponseBodyMimeType) takes the first branch
+     * below: finalise phase 4 before forwarding its headers, then stream.
      *
      * We also skip 101 Switching Protocols: an upgraded connection (e.g.
      * WebSocket) becomes a raw bidirectional tunnel with no HTTP response
@@ -806,6 +927,10 @@ ngx_http_coraza_header_filter(ngx_http_request_t *r)
         }
         if (ret > 0) {
             ctx->intervention_triggered = 1;
+            /* As above: `drop` must not be finalized as a 444 page. */
+            if (ctx->drop_connection) {
+                return ngx_http_coraza_drop_connection(r);
+            }
             if (ngx_http_coraza_is_redirect_status(ret) && r->headers_out.location) {
                 ngx_http_coraza_prepare_redirect(r, ret);
                 return ngx_http_next_header_filter(r);
@@ -871,6 +996,65 @@ ngx_http_coraza_is_redirect_status(ngx_int_t status)
            || status == NGX_HTTP_SEE_OTHER
            || status == NGX_HTTP_TEMPORARY_REDIRECT
            || status == NGX_HTTP_PERMANENT_REDIRECT;
+}
+
+
+/*
+ * Tear the connection down for a SecLang `drop` from inside a filter.
+ *
+ * The three filter call sites cannot express `drop` the way the rule-phase
+ * handlers can.  A phase handler returns NGX_HTTP_CLOSE into
+ * ngx_http_finalize_request(), which special-cases it
+ * (`if (rc == NGX_HTTP_CLOSE) { c->timedout = 1;
+ * ngx_http_terminate_request(...); }`) and closes with nothing written.
+ * A filter instead finalizes through ngx_http_filter_finalize_request(),
+ * which hands the status straight to ngx_http_special_response_handler() --
+ * where NGX_HTTP_CLOSE does not appear at all.  444 would be treated as an
+ * ordinary error status, match none of the error-page ranges (the special
+ * range starts at NGX_HTTP_NGINX_CODES, 494) and fall through to `err = 0`,
+ * producing a well-formed zero-body `HTTP/1.1 444 ` response on a KEPT-ALIVE
+ * connection -- the exact opposite of `drop`, and a distinctive fingerprint.
+ *
+ * Calling ngx_http_finalize_request(r, NGX_HTTP_CLOSE) from here is NOT the
+ * answer, even though that is the entry point the phase handlers use.  A
+ * filter runs inside ngx_http_send_header() / ngx_http_output_filter(), a
+ * frame that holds no r->count reference of its own, so the terminate path it
+ * triggers destroys r->pool underneath the caller.  It destroys it underneath
+ * ngx_http_terminate_request() itself: that function walks r->cleanup, one of
+ * the handlers reaches ngx_http_free_request(), and the `cln = cln->next`
+ * step then reads a freed pool allocation.  Observed, not theorised -- it is
+ * a heap-use-after-free at ngx_http_request.c:2897 under ASan, reached from
+ * this function via ngx_http_finalize_request() at :2734.
+ *
+ * Instead flag the connection as errored and return NGX_ERROR.  That is the
+ * documented way for a filter to abort a response: the NGX_ERROR propagates
+ * out through the filter chain to whoever owns the request reference
+ * (ngx_http_upstream_send_response, the content handler, the writer), and
+ * that owner performs exactly one finalize at a point where doing so is
+ * safe.  No response is written, because the header filter chain is abandoned
+ * before the headers are serialized.
+ *
+ * c->error is what makes this a drop rather than a truncated reply:
+ * ngx_http_finalize_connection() sees it and closes without lingering, and
+ * ngx_http_close_request() -> ngx_http_free_request() emits no further bytes.
+ * The client observes the connection going away with nothing on it, which is
+ * what SecLang `drop` asks for.
+ *
+ * ProcessLogging still runs: ngx_http_coraza_cleanup() is registered on
+ * r->pool and fires from ngx_http_free_request() during that single
+ * finalize, so the audit record is written before the request goes away.
+ * Note that r->pool's cleanup chain is a DIFFERENT list from the r->cleanup
+ * chain walked above -- this module registers on the former
+ * (ngx_pool_cleanup_add(r->pool, 0), ngx_http_coraza_module.c), never on the
+ * latter, which is precisely why it is not implicated in that use-after-free:
+ * it fires from ngx_pool_destroy(r->pool) at the very end of
+ * ngx_http_free_request(), after ngx_http_log_request().
+ */
+ngx_int_t
+ngx_http_coraza_drop_connection(ngx_http_request_t *r)
+{
+    r->connection->error = 1;
+    return NGX_ERROR;
 }
 
 
