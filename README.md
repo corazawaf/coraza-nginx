@@ -238,6 +238,46 @@ phase-4 intervention can no longer replace a response whose headers have
 already gone out. Operators whose ruleset has no phase-4 response rules can
 turn this off to restore normal header streaming.
 
+## Disruptive actions and the audit log
+
+`deny` serves a response. The status comes from `status:`, or is 403 when the
+rule sets none. A `deny` whose status is below 300 (`deny,status:200`, for
+instance) is also served as **403**, in every phase: nginx cannot put such a
+status on the wire from a request phase (the request would finalize with
+nothing written, on a connection left open for reuse), and a refusal that looks
+like a success is not a useful block in a response phase either, so the
+connector treats the rule the same way wherever it fires. 201 and 204 are
+honoured, since nginx serves both as well-formed body-less responses. A redirect
+action (`redirect:`, statuses 301, 302, 303, 307) serves a body-less response
+carrying the `Location` header.
+
+`drop` serves nothing: the connection is torn down and the client receives no
+status line, headers or body. On HTTP/2 the teardown is per stream -- the
+stream is reset with `RST_STREAM` while the HTTP/2 connection itself survives.
+
+The audit log follows the wire, not the rule. A `deny,status:200` is recorded
+with `RESPONSE_STATUS` 403 and the error log line reads
+`Access denied with code 403`; the rule id and message in the same record still
+identify which rule blocked. A `drop` has no wire status, so it is recorded as
+444 -- nginx's own convention for "connection closed without response", and the
+value the error log line reports -- rather than 0, which is what an unevaluated
+transaction looks like.
+
+`deny,status:444` therefore shares that audit status with `drop`; tell them
+apart by the rule id. On the wire the two differ by phase: in a request phase
+(`phase:1`, `phase:2`) nginx's `ngx_http_finalize_request()` special-cases 444
+(`NGX_HTTP_CLOSE`) and closes the connection exactly like `drop`; in a response
+phase (`phase:3`, `phase:4`) the filter finalizes through
+`ngx_http_special_response_handler()`, which has no such case, so nginx serves
+a well-formed zero-body 444 and may keep the connection alive. Use `drop` when
+the intent is to close the connection regardless of phase.
+
+The recorded status matches what the client received whenever the block lands
+before response headers are sent. If a phase-4 rule fires after the headers are
+already on the wire (`coraza_delay_response_headers off`, SSE, or a body larger
+than the delayed-body cap), the client has the origin's status line and the
+connection is cut mid-body; the audit record still shows the blocking status.
+
 ## Configuration merging
 
 Rules defined at a higher-level context (`http`, `server`) are automatically
