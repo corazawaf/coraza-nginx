@@ -69,7 +69,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            flawfinder clang-tidy python3 python3-pip python3-yaml pipx curl \
+            flawfinder clang-tidy python3 python3-pip pipx curl \
             build-essential libpcre2-dev zlib1g-dev pkg-config wget \
             autoconf automake libtool
           # semgrep via pipx: PEP 668 blocks a bare `pip3 install` into the
@@ -161,7 +161,12 @@ jobs:
             xargs -0 -r sha256sum > scanner-tools/source-sha256.txt
       - name: semgrep (advisory)
         run: |
-          python3 .github/scripts/scanner-semgrep.py advisory src scanner-evidence
+          command -v semgrep >/dev/null || { echo "semgrep missing from PATH" >&2; exit 1; }
+          # Without --error semgrep exits 0 on findings, so a non-zero status
+          # is an operational error (rule download, bad rule, missing binary).
+          set -o pipefail
+          semgrep scan --config p/c --config p/security-audit \
+            "$GITHUB_WORKSPACE/src/" 2>&1 | tee semgrep.log
 
       - name: Upload reports
         if: always()
@@ -171,6 +176,6 @@ jobs:
           path: |
             ${{ github.workspace }}/flawfinder.log
             ${{ github.workspace }}/clang-tidy.log
-            ${{ github.workspace }}/scanner-evidence/
+            ${{ github.workspace }}/semgrep.log
             ${{ github.workspace }}/scanner-tools/
           retention-days: 14
