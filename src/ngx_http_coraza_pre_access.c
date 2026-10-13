@@ -227,6 +227,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
 {
     ngx_http_coraza_ctx_t   *ctx;
     ngx_http_coraza_conf_t  *mcf;
+    ngx_int_t               header_rc;
 
     dd("catching a new _preaccess_ phase handler");
 
@@ -236,6 +237,12 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
         dd("CORAZA not enabled... returning");
         return NGX_DECLINED;
     }
+
+    header_rc = ngx_http_coraza_request_headers(r, 0);
+    if (header_rc != NGX_DECLINED) {
+        return header_rc;
+    }
+
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
     dd("recovering ctx: %p", ctx);
@@ -259,7 +266,7 @@ ngx_http_coraza_pre_access_handler(ngx_http_request_t *r)
     }
 
     /*
-     * Request-header processing has already run in the rewrite handler, so
+     * Request-header processing has already run above, so
      * libcoraza can now answer whether request-body bytes are accessible for
      * this transaction.  When access is off, leave body_requested clear and
      * let the eventual content handler read/forward the body; Coraza discards

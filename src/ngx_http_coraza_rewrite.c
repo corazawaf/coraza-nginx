@@ -15,8 +15,22 @@
 
 #include "ngx_http_coraza_common.h"
 
+/*
+ * A request has no transaction while nginx rematches locations in rewrite.
+ * PREACCESS binds it to the settled location; an early response that skips
+ * PREACCESS binds it in the header filter instead, main request only. Only an
+ * enabled location creates a transaction, using its effective WAF and
+ * transaction-id expression.
+ * Subsequent calls retain the same ctx and never replay request headers.
+ * nginx serializes these calls within one request, including body-read resumes.
+ * True internal/named redirects clear r->ctx and can bind a new transaction;
+ * each old ctx remains owned by its pool cleanup for logging and freeing.
+ * A headerless exit can bind in LOG with audit_only set: collect request facts
+ * and evaluate headers, but never apply an intervention to the completed request.
+ * NGX_DECLINED continues processing; any other result terminates this attempt.
+ */
 ngx_int_t
-ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
+ngx_http_coraza_request_headers(ngx_http_request_t *r, ngx_flag_t audit_only)
 {
     ngx_http_coraza_ctx_t   *ctx;
     ngx_http_coraza_conf_t  *mcf;
@@ -33,7 +47,7 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
         return NGX_DECLINED;
     }
 
-    dd("catching a new _rewrite_ phase handler");
+    dd("initializing request headers for the settled location");
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
@@ -57,11 +71,6 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
         }
 
-        /*
-         * The rewrite phase is the earliest phase where nginx allows
-         * content handlers to be registered (FIND_CONFIG_PHASE is not
-         * an array and cannot be hooked).
-         */
         int client_port = 0;
         int server_port = 0;
 
@@ -313,6 +322,11 @@ ngx_http_coraza_rewrite_handler(ngx_http_request_t *r)
          */
 
         pret = coraza_process_request_headers(ctx->coraza_transaction);
+        if (audit_only) {
+            /* LOG cannot enforce an interruption or change the completed
+             * response, including when the engine reports a phase error. */
+            return NGX_DECLINED;
+        }
         dd("Processing intervention with the request headers information filled in");
         ret = ngx_http_coraza_poll_after_process(ctx, r, 1, pret);
         if (r->error_page) {
