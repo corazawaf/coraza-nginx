@@ -25,6 +25,10 @@ This pulls in libcoraza automatically. Built for Ubuntu 24.04 (noble), 26.04 (re
 
 # Compilation
 
+The former repository-root `build.sh` for Vagrant and nginx 1.18.0 has been
+retired. Use the nginx source build below; the `./build.sh` command in the
+libcoraza example runs from the libcoraza checkout.
+
 If you have any doubts, please read the [GitHub build Action](https://github.com/corazawaf/coraza-nginx/blob/main/.github/workflows/build-test.yml) for additional information.
 
 Before compiling this software make sure that you have libcoraza >= 1.8.0 installed.
@@ -32,7 +36,7 @@ You can download it from the [libcoraza git repository](https://github.com/coraz
 
 To build libcoraza from source (requires Go 1.21+):
 
-```
+```sh
 cd /path/to/libcoraza
 ./build.sh
 ./configure
@@ -43,13 +47,13 @@ sudo ldconfig
 
 With libcoraza installed, you can proceed with the installation of the coraza-nginx connector, which follows the nginx third-party module installation procedure. From the nginx source directory:
 
-```
+```sh
 ./configure --add-module=/path/to/coraza-nginx
 ```
 
 Or, to build a dynamic module:
 
-```
+```sh
 ./configure --add-dynamic-module=/path/to/coraza-nginx --with-compat
 ```
 
@@ -63,6 +67,7 @@ shims are unused in any given translation unit, and nginx builds with `-Werror`:
 ```sh
 ./configure --add-dynamic-module=/path/to/coraza-nginx --with-compat \
     --with-cc-opt="-Wno-unused-function"
+make modules
 ```
 
 The Debian package build sets its own CFLAGS and does not need this flag.
@@ -316,6 +321,19 @@ http {
 Locations that set `coraza off` will not process requests through the WAF,
 regardless of rules inherited from parent contexts.
 
+After a `rewrite ... last` moves a request to another location, the final
+location's policy applies: its `coraza` flag, its rules and its
+`coraza_transaction_id`. The rules of the location the request was rewritten
+away from are not evaluated, just as nginx's own access-phase directives
+(`allow`, `deny`, `auth_basic`) in that location are not.
+
+A subrequest that is answered in the rewrite phase, for example an
+`auth_request` location that uses `return`, finishes before the phase in
+which a transaction is bound and is not inspected: `coraza on` and the rules
+in that location have no effect on it, and only the main request's
+transaction is evaluated and audited. Put the rules on the location that
+issues the `auth_request` instead.
+
 
 # Contributing
 
@@ -370,13 +388,15 @@ $ prove coraza*.t
 
 If you are facing problems getting your added functionality to pass all the nginx tests, feel free to contact us or the nginx mailing list at: http://nginx.org/en/support.html
 
-### Debugging 
+### Debugging
 
-We respect the nginx debugging schema. By using the configuration option
-"--with-debug" during the nginx configuration you will also be enabling the
-connector's debug messages. Core dumps and crashes are expected to be debugged
-in the same fashion that is used to debug nginx. For further information,
-please check the nginx debugging information: http://wiki.nginx.org/Debugging
+Nginx's `--with-debug` enables nginx debug logging. To also enable the
+connector's `dd` messages, compile the module with `CORAZA_DDEBUG=1`
+(for example, pass
+`--with-cc-opt="-DCORAZA_DDEBUG=1 -Wno-unused-function"` to nginx's configure
+script when building the module). Core dumps and crashes can be debugged
+in the same fashion as nginx. For further information,
+please check [nginx's debugging documentation](http://wiki.nginx.org/Debugging).
 
 
 ## Reporting Issues
@@ -406,4 +426,3 @@ feel free to open GitHub issues requesting for new features. Before opening a ne
 
 Having our packages in distros on time is something we highly desire. Let us know if
 there is anything we can do to facilitate your work as a packager.
-

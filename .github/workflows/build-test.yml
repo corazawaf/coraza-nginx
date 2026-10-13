@@ -324,7 +324,7 @@ jobs:
           cp ../t/* .
           export TEST_NGINX_BINARY=/usr/sbin/nginx
           export TEST_NGINX_GLOBALS="load_module \"/usr/lib/nginx/modules/ngx_http_coraza_module.so\";"
-          # Pin the protocol-map test to the tree this cell built, rather than
+          # Pin compile fixtures to the tree this cell built, rather than
           # letting it glob for any nginx-* in the workspace.
           export TEST_NGINX_SOURCE="${{ github.workspace }}/$SRC_DIR"
           # --timer prints per-file wall time, so a file that starts to creep
