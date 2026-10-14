@@ -134,10 +134,31 @@
 
 # ---------------------------------------------------------------------------
 # 3. libcoraza / cgo Go runtime (memcheck) — suppress the runtime wholesale.
+#    Every access size is listed: the Go runtime uses 1/2/4-byte scalar and
+#    16/32-byte SIMD loads (indexbyte, memmove), and memcheck keys the
+#    suppression kind on the size (Addr16/Addr32 are not covered by Addr8).
 # ---------------------------------------------------------------------------
 {
    coraza-go-runtime-cond
    Memcheck:Cond
+   ...
+   obj:*/libcoraza.so*
+}
+{
+   coraza-go-runtime-value1
+   Memcheck:Value1
+   ...
+   obj:*/libcoraza.so*
+}
+{
+   coraza-go-runtime-value2
+   Memcheck:Value2
+   ...
+   obj:*/libcoraza.so*
+}
+{
+   coraza-go-runtime-value4
+   Memcheck:Value4
    ...
    obj:*/libcoraza.so*
 }
@@ -148,14 +169,56 @@
    obj:*/libcoraza.so*
 }
 {
+   coraza-go-runtime-value16
+   Memcheck:Value16
+   ...
+   obj:*/libcoraza.so*
+}
+{
+   coraza-go-runtime-value32
+   Memcheck:Value32
+   ...
+   obj:*/libcoraza.so*
+}
+{
    coraza-go-runtime-leak
    Memcheck:Leak
    ...
    obj:*/libcoraza.so*
 }
 {
-   coraza-go-runtime-addr
+   coraza-go-runtime-addr1
+   Memcheck:Addr1
+   ...
+   obj:*/libcoraza.so*
+}
+{
+   coraza-go-runtime-addr2
+   Memcheck:Addr2
+   ...
+   obj:*/libcoraza.so*
+}
+{
+   coraza-go-runtime-addr4
+   Memcheck:Addr4
+   ...
+   obj:*/libcoraza.so*
+}
+{
+   coraza-go-runtime-addr8
    Memcheck:Addr8
+   ...
+   obj:*/libcoraza.so*
+}
+{
+   coraza-go-runtime-addr16
+   Memcheck:Addr16
+   ...
+   obj:*/libcoraza.so*
+}
+{
+   coraza-go-runtime-addr32
+   Memcheck:Addr32
    ...
    obj:*/libcoraza.so*
 }
