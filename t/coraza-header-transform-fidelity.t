@@ -1,8 +1,10 @@
 #!/usr/bin/perl
 
 # Tests for Coraza-nginx connector (response header transform fidelity): the
-# Transfer-Encoding, Vary, Content-Encoding, Content-Length, Connection and Keep-Alive
-# response headers seen by rules match the wire after gzip, range and chunking.
+# Transfer-Encoding, Vary, Content-Encoding, Content-Length, Content-Type,
+# Last-Modified, Connection and Keep-Alive response headers seen by rules match
+# the wire after gzip, range, chunking and the 204 normalisation of the
+# terminal header filters.
 
 ###############################################################################
 
@@ -40,6 +42,7 @@ my @cases = (
     ['notfound', 'gzip on;', 'text/plain', 404, $body],
     ['created', 'gzip on;', 'text/plain', 201, $body],
     ['no-content', 'gzip on;', 'text/plain', 204, ''],
+    ['no-content-origin', 'gzip on;', 'text/plain', 204, '', 'nocontent'],
     ['not-modified', 'gzip on;', 'text/plain', 304, ''],
     ['trailers', 'gzip off; add_trailer X-F07 trailer;', 'text/plain', 200, $body],
     ['chunk-off', 'gzip on; chunked_transfer_encoding off;', 'text/plain', 200, $body],
@@ -47,8 +50,9 @@ my @cases = (
     ['unknown-off', 'gzip off; chunked_transfer_encoding off;', 'text/plain', 200, $body, 'unknown'],
     ['upstream', 'gzip on;', 'text/plain', 200, $body, 'encoded'],
 );
-my @fields = qw(Transfer-Encoding Vary Content-Encoding Content-Length Connection Keep-Alive);
-$t->plan(scalar(@cases) * 12 * (1 + 3 * scalar(@fields)) - 36 + 1);
+my @fields = qw(Transfer-Encoding Vary Content-Encoding Content-Length Content-Type
+    Last-Modified Connection Keep-Alive);
+$t->plan(scalar(@cases) * 12 * (1 + 3 * scalar(@fields)) + 1);
 my $locations = '';
 my $id = 7300;
 for my $case (@cases) {
@@ -101,9 +105,7 @@ for my $version ('1.0', '1.1', '2', '3') {
             my ($name, undef, undef, $status) = @$case;
             my $wire = request("/wire/$name", $version, $encoding, 'unused');
             like($wire, qr/^HTTP\S+ $status/, "$name $version $encoding wire status");
-            # 204 Content-Length normalization is an existing separate defect:
-            # the terminal nginx filter clears it after either collector order.
-            for my $field (grep { $status != 204 || $_ ne 'Content-Length' } @fields) {
+            for my $field (@fields) {
                 my ($value) = $wire =~ /^\Q$field\E: ([^\r\n]*)/mi;
                 $value //= 'ABSENT';
                 my $match = request("/inspect/$name/$field", $version, $encoding, $value);
@@ -154,6 +156,15 @@ sub origin {
         while (my $line = <$client>) {
             $request .= $line;
             last if $line eq "\r\n";
+        }
+        if ($request =~ m{GET /nocontent }) {
+            # A 204 that carries the headers nginx strips when it writes the
+            # response: rules must not see them either (issue #164).
+            print {$client} "HTTP/1.1 204 No Content\r\nContent-Type: text/plain\r\n"
+                . "Last-Modified: Wed, 01 Oct 2026 00:00:00 GMT\r\n"
+                . "Content-Length: 0\r\nConnection: close\r\n\r\n";
+            close $client;
+            next;
         }
         my $extra = $request =~ m{GET /encoded }
             ? "Content-Encoding: br\r\nVary: Origin\r\nContent-Length: " . length($body) . "\r\n" : '';

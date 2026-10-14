@@ -23,6 +23,8 @@ my $src = slurp("$root/src/ngx_http_coraza_header_filter.c");
 my $fn_will_chunk = func($src, 'will_chunk');
 my $fn_server = func($src, 'resolv_header_server');
 my $fn_ctype = func($src, 'resolv_header_content_type');
+my $fn_clen = func($src, 'resolv_header_content_length');
+my $fn_lmod = func($src, 'resolv_header_last_modified');
 my $fn_te = func($src, 'resolv_header_transfer_encoding');
 my $fn_vary = func($src, 'resolv_header_vary');
 
@@ -82,6 +84,34 @@ like($fn_ctype,
 
 unlike($fn_ctype, qr/headers_out\.content_type\s*=[^=]/,
 	'Content-Type resolver does not modify headers_out.content_type');
+
+# 204 normalisation (issue #164): the terminal header filters strip
+# Content-Type, Content-Length and Last-Modified from a 204 after the
+# collector has run (always on HTTP/2 and HTTP/3, on HTTP/1 only when nginx
+# builds the status line itself), write a listed Last-Modified as received,
+# and compute one only for 200, 206 and 304; the resolvers mirror that.
+
+my $fn_204 = func($src, '204_normalised');
+
+like($fn_204,
+	qr/status\s*!=\s*NGX_HTTP_NO_CONTENT.*?return 0;.*?http_version\s*>=\s*NGX_HTTP_VERSION_20.*?return 1;.*?return\s+r->headers_out\.status_line\.len\s*==\s*0;/s,
+	'204 normalisation applies on HTTP/2+ and on HTTP/1 without a passed-through status line');
+
+like($fn_clen,
+	qr/if\s*\(ngx_http_coraza_204_normalised\(r\)\)\s*\{\s*return NGX_OK;\s*\}.*?content_length_n/s,
+	'Content-Length resolver emits nothing for a normalised 204');
+
+like($fn_ctype,
+	qr/if\s*\(ngx_http_coraza_204_normalised\(r\)\)\s*\{\s*return NGX_OK;\s*\}.*?content_type\.len\s*>\s*0/s,
+	'Content-Type resolver emits nothing for a normalised 204');
+
+like($fn_lmod,
+	qr/last_modified\s*!=\s*NULL\)\s*\{\s*if\s*\(r->headers_out\.last_modified->hash\s*==\s*0\)\s*\{\s*return NGX_OK;\s*\}\s*value\s*=\s*r->headers_out\.last_modified->value;\s*return\s+ngx_http_coraza_add_response_header/s,
+	'Last-Modified resolver submits a listed entry verbatim');
+
+like($fn_lmod,
+	qr/status\s*!=\s*NGX_HTTP_OK\s*&&\s*r->headers_out\.status\s*!=\s*NGX_HTTP_PARTIAL_CONTENT\s*&&\s*r->headers_out\.status\s*!=\s*NGX_HTTP_NOT_MODIFIED\s*\)\s*\{\s*return NGX_OK;\s*\}.*?ngx_http_time/s,
+	'Last-Modified resolver computes a value only for 200, 206 and 304');
 
 done_testing();
 

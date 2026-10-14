@@ -217,6 +217,28 @@ ngx_http_coraza_will_chunk(ngx_http_request_t *r)
     return 0;
 }
 
+/*
+ * nginx strips Content-Type, Content-Length and Last-Modified from a 204 in
+ * its terminal header filters, which run after this collector: always for
+ * HTTP/2 and HTTP/3, and for HTTP/1 only when it builds the status line
+ * itself -- a status line passed through from an upstream keeps the headers
+ * as received.  Mirror that so rules see the wire (issue #164).
+ */
+static ngx_flag_t
+ngx_http_coraza_204_normalised(ngx_http_request_t *r)
+{
+    if (r->headers_out.status != NGX_HTTP_NO_CONTENT) {
+        return 0;
+    }
+
+    if (r->http_version >= NGX_HTTP_VERSION_20) {
+        return 1;
+    }
+
+    return r->headers_out.status_line.len == 0;
+}
+
+
 static ngx_int_t
 ngx_http_coraza_resolv_header_content_length(ngx_http_request_t *r, ngx_str_t name, off_t offset)
 {
@@ -226,6 +248,10 @@ ngx_http_coraza_resolv_header_content_length(ngx_http_request_t *r, ngx_str_t na
     u_char *p;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
+
+    if (ngx_http_coraza_204_normalised(r)) {
+        return NGX_OK;
+    }
 
     /* Chunked clears a known length when HTTP/1.1 trailers are expected. */
     if (r->expect_trailers && ngx_http_coraza_will_chunk(r)) {
@@ -255,6 +281,10 @@ ngx_http_coraza_resolv_header_content_type(ngx_http_request_t *r, ngx_str_t name
     u_char *p;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
+
+    if (ngx_http_coraza_204_normalised(r)) {
+        return NGX_OK;
+    }
 
     if (r->headers_out.content_type.len > 0)
     {
@@ -369,6 +399,31 @@ ngx_http_coraza_resolv_header_last_modified(ngx_http_request_t *r, ngx_str_t nam
     ctx = ngx_http_get_module_ctx(r, ngx_http_coraza_module);
 
     if (r->headers_out.last_modified_time == -1) {
+        return NGX_OK;
+    }
+
+    /* A listed Last-Modified (an upstream's, hoisted by the proxy module)
+     * goes out as received on every protocol and status: nginx's terminal
+     * filters only reset the dedicated pointer, and their header loop still
+     * writes the entry.  The list walk below skips that entry because the
+     * time is set, so it is submitted here, verbatim (issue #164). */
+    if (r->headers_out.last_modified != NULL) {
+        if (r->headers_out.last_modified->hash == 0) {
+            return NGX_OK;
+        }
+
+        value = r->headers_out.last_modified->value;
+
+        return ngx_http_coraza_add_response_header(r, ctx, &name, &value);
+    }
+
+    /* A computed Last-Modified is only written for 200, 206 and 304; the
+     * terminal filters drop it for every other status (a 204 explicitly) and
+     * they run after this collector, so mirror that choice (issue #164). */
+    if (r->headers_out.status != NGX_HTTP_OK
+        && r->headers_out.status != NGX_HTTP_PARTIAL_CONTENT
+        && r->headers_out.status != NGX_HTTP_NOT_MODIFIED)
+    {
         return NGX_OK;
     }
 
