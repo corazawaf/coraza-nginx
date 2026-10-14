@@ -518,12 +518,32 @@ jobs:
         run: |
           set -uo pipefail
           FAIL=0
+          ANALYSED=0
+          EXPECTED=0
+          # clang-tidy exits 0 when it skips a TU with no compile command.
+          NO_CMD_RE='Compile command not found|No compilation database found'
           for f in "$GITHUB_WORKSPACE"/src/*.c; do
-            clang-tidy -p "$GITHUB_WORKSPACE" "$f" \
+            [ -e "$f" ] || continue
+            EXPECTED=$((EXPECTED + 1))
+            rc=0
+            out="$(clang-tidy -p "$GITHUB_WORKSPACE" "$f" \
               --warnings-as-errors='cert-*,clang-analyzer-security.*' \
               --checks='-*,cert-*,clang-analyzer-security.*,-clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling' \
-              2>&1 | tee -a clang-tidy.log || FAIL=1
+              2>&1)" || rc=$?
+            printf '%s\n' "$out" | tee -a clang-tidy.log
+            if grep -qE "$NO_CMD_RE" <<<"$out"; then
+              echo "FATAL: clang-tidy skipped $f (no compile command)" >&2
+              FAIL=1
+              continue
+            fi
+            ANALYSED=$((ANALYSED + 1))
+            [ "$rc" -eq 0 ] || FAIL=1
           done
+          echo "clang-tidy analysed $ANALYSED/$EXPECTED translation unit(s)"
+          if [ "$EXPECTED" -eq 0 ] || [ "$ANALYSED" -ne "$EXPECTED" ]; then
+            echo "FATAL: clang-tidy analysed $ANALYSED of $EXPECTED TUs" >&2
+            FAIL=1
+          fi
           [ "$FAIL" -eq 0 ]
       - name: Scanner versions and effective checks
         if: ${{ !cancelled() }}
