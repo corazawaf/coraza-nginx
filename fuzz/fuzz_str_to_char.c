@@ -2,13 +2,9 @@
  * libFuzzer target for the coraza-nginx connector's ngx_str->C-string
  * conversion, ngx_str_to_char().
  *
- * ngx_str_t buffers inside nginx are NOT NUL-terminated, and Coraza's C API
- * requires NUL-terminated strings. ngx_str_to_char() is the single choke
- * point that bridges the two: every header name/value, body chunk, and URI
- * the connector forwards to libcoraza passes through it. A length/offset slip
- * here is a heap overflow reachable from fully attacker-controlled bytes
- * (request headers/body), so it is the connector's highest-value pure-C
- * fuzz surface even though the body is short.
+ * Converts nginx strings used for URI, method, address, and other C-string
+ * arguments. Header and body submission use length-taking APIs and do not
+ * generally pass through this helper.
  *
  * The real function body is sliced verbatim from
  * ../src/ngx_http_coraza_utils.c by extract_parser.sh — we fuzz production
@@ -17,7 +13,7 @@
  * real allocation + copy.
  *
  * Invariants asserted every iteration:
- *   - len==0 input yields a NULL C-string and NGX_OK (no alloc).
+ *   - len==0 input allocates an empty NUL-terminated C-string on NGX_OK.
  *   - non-empty input yields a C-string whose first `len` bytes equal the
  *     input and whose byte at [len] is '\0'.
  *   - no read/write outside the len+1 allocation (enforced by ASan).
