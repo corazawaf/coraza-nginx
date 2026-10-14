@@ -6,7 +6,8 @@ name: Security Scanners
 #                  ignore it.
 #   clang-tidy  -- blocks on cert-* and clang-analyzer-security.*. These are
 #                  path-sensitive and near-zero-FP on code this size.
-#   semgrep     -- ADVISORY (|| true). Highest-FP of the three; its value is the
+#   semgrep     -- ADVISORY for completed findings; operational errors fail.
+#                  Highest-FP of the three; its value is the
 #                  uploaded report a human reads, not a red X. Promote a rule to
 #                  blocking deliberately if it earns its keep — do not leave it
 #                  advisory forever by default.
@@ -144,11 +145,28 @@ jobs:
           done
           exit "$status"
 
+      - name: Scanner versions and effective checks
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p scanner-tools
+          dpkg-query -W flawfinder 'clang-tidy*' > scanner-tools/packages.txt
+          flawfinder --version > scanner-tools/flawfinder-version.txt
+          clang-tidy --version > scanner-tools/clang-tidy-version.txt
+          checks='-*,cert-*,clang-analyzer-security.*'
+          checks+=',-clang-analyzer-security.insecureAPI.'
+          checks+='DeprecatedOrUnsafeBufferHandling'
+          clang-tidy --list-checks --checks="$checks" \
+            > scanner-tools/clang-tidy-checks.txt
+          find src -type f -print0 | sort -z | \
+            xargs -0 -r sha256sum > scanner-tools/source-sha256.txt
       - name: semgrep (advisory)
         run: |
           command -v semgrep >/dev/null || { echo "semgrep missing from PATH" >&2; exit 1; }
+          # Without --error semgrep exits 0 on findings, so a non-zero status
+          # is an operational error (rule download, bad rule, missing binary).
+          set -o pipefail
           semgrep scan --config p/c --config p/security-audit \
-            "$GITHUB_WORKSPACE/src/" 2>&1 | tee semgrep.log || true
+            "$GITHUB_WORKSPACE/src/" 2>&1 | tee semgrep.log
 
       - name: Upload reports
         if: always()
@@ -159,4 +177,5 @@ jobs:
             ${{ github.workspace }}/flawfinder.log
             ${{ github.workspace }}/clang-tidy.log
             ${{ github.workspace }}/semgrep.log
+            ${{ github.workspace }}/scanner-tools/
           retention-days: 14
