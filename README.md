@@ -237,8 +237,10 @@ disabled, headers are sent as soon as they are ready, which means a late
 phase-4 intervention can no longer replace a response whose headers have
 already gone out. Operators whose ruleset has no phase-4 response rules can
 turn this off to restore normal header streaming. Responses that carry no
-content at all (`204`, `304`) are never delayed: phase 4 runs on their headers
-and they go out at once.
+content at all (`HEAD` requests, `204`, `304`, and responses a handler marks
+header-only such as a WebDAV `PUT`) are never delayed: phase 4 runs on their
+headers before they go out, in both modes of this directive, since no body
+ever follows them.
 
 ## Response headers seen by phase 3
 
