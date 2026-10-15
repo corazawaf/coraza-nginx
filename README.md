@@ -254,7 +254,12 @@ selected by `server_tokens` and the `; charset=` suffix on `Content-Type`,
 are computed by the connector the same way and passed to Coraza as well.
 Earlier versions inspected the headers before those filters, so a rule
 matching on `Content-Encoding` or `Content-Length` may now see different
-values.
+values. The headers nginx strips from a `204` when it writes the response
+(`Content-Type`, `Content-Length`, `Last-Modified`) are not shown to rules
+either -- on HTTP/2 and HTTP/3 always, on HTTP/1 only when nginx builds the
+status line itself, since a `204` proxied from an upstream keeps the headers
+it arrived with -- and a computed `Last-Modified` is only shown on `200`,
+`206` and `304`, as on the wire.
 
 `RESPONSE_BODY` is unchanged: body inspection still runs before gzip, so
 phase-4 rules continue to see the uncompressed response body.
