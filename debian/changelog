@@ -1,3 +1,38 @@
+libnginx-mod-http-coraza (0.23.0-1) unstable; urgency=medium
+
+  * New upstream release 0.23.0.
+  * Security: a bare `drop` action (no explicit status) and `deny,status:200`
+    were not enforced: the request was served and the audit log recorded
+    status 0. Every intervention now blocks; deny statuses below 300 are
+    served as 403, `drop` closes the connection and is audited as 444.
+  * After `rewrite ... last`, the rules of the location that finally handles
+    the request apply (previously the first matched location's); subrequests
+    answered in the rewrite phase are not inspected.
+  * Phase-3 rules see the response headers as the client receives them
+    (after gzip, charset and range): final Content-Encoding, Vary, charset,
+    Server, and the Content-Length of a 206 slice. Response bodies are still
+    inspected uncompressed.
+  * A policy redirect replaces an existing Location header instead of
+    adding a second one.
+  * 204/304 and header-only responses (DAV PUT) are finalised in phase 4
+    before their headers go out and are never delayed; a 304 carrying a
+    Content-Type no longer leaks the file body.
+  * SSI responses sent through the header delay no longer lose the sync
+    flag on copied buffers (truncated non-chunked pages).
+  * The request context is published only once fully constructed.
+  * Phase 4 now runs for responses that never reach the body filter (HEAD,
+    204, 304, and handler-marked header-only responses such as a WebDAV PUT)
+    in both coraza_delay_response_headers modes; a phase-4 deny on ARGS or TX
+    was silently skipped for them before.
+  * On a 204, phase-3 rules no longer see the Content-Type, Content-Length
+    and Last-Modified that nginx strips from the wire.
+  * Build and CI: the obsolete Vagrant build.sh is gone; both fuzz targets
+    run in the deep and memcheck jobs; soak failures keep their evidence;
+    scanner gates fail on incomplete runs; valgrind suppressions cover the
+    Go runtime's 1/2/4/16/32-byte accesses.
+
+ -- Pierre Pomes <pierre.pomes@gmail.com>  Wed, 14 Oct 2026 22:00:00 +0000
+
 libnginx-mod-http-coraza (0.22.0-1) unstable; urgency=low
 
   * New upstream release 0.22.0.
