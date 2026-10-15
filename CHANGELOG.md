@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.23.0](https://github.com/corazawaf/coraza-nginx/compare/v0.22.0...v0.23.0) (2026-10-15)
+
+
+### Bug Fixes
+
+* bind the transaction to the final location after rewrites ([#150](https://github.com/corazawaf/coraza-nginx/issues/150)) ([559c302](https://github.com/corazawaf/coraza-nginx/commit/559c30270dd2cbc2dd58322e77af7684707995cb))
+* block every disruptive intervention, including bare drop and deny,status:200 ([#145](https://github.com/corazawaf/coraza-nginx/issues/145)) ([95d9fe1](https://github.com/corazawaf/coraza-nginx/commit/95d9fe121906307f60dfc980763804dc2c68e8c6))
+* correct the debug connection-lookup check and remove stale debug artifacts ([#159](https://github.com/corazawaf/coraza-nginx/issues/159)) ([9d26764](https://github.com/corazawaf/coraza-nginx/commit/9d26764bcd96be140ffd144e5cc2c75780a0ce6e))
+* do not show rules the 204 headers nginx strips ([#169](https://github.com/corazawaf/coraza-nginx/issues/169)) ([b91389a](https://github.com/corazawaf/coraza-nginx/commit/b91389ad1f9e5473ab101a7facac69702bfa2fa8))
+* finalise phase 4 before the headers of bodyless 204/304 and header_only responses ([#144](https://github.com/corazawaf/coraza-nginx/issues/144)) ([a291162](https://github.com/corazawaf/coraza-nginx/commit/a2911624f107e73645075a751d6b75dec64d7f30))
+* finalise phase 4 for bodyless responses in both delay modes ([#168](https://github.com/corazawaf/coraza-nginx/issues/168)) ([dd55c07](https://github.com/corazawaf/coraza-nginx/commit/dd55c078a44d38f303ba836c17b4f332d1d8a4b8))
+* inspect response headers after gzip and range have run ([#155](https://github.com/corazawaf/coraza-nginx/issues/155)) ([a5afa73](https://github.com/corazawaf/coraza-nginx/commit/a5afa731f9fd7ff31dfb768f3716d49389fb431f))
+* preserve the sync flag on delayed buffer copies ([#154](https://github.com/corazawaf/coraza-nginx/issues/154)) ([8432b50](https://github.com/corazawaf/coraza-nginx/commit/8432b5049c5d73bd8b3abb1e0118825962e6d139))
+* publish the request context only after construction succeeds ([#146](https://github.com/corazawaf/coraza-nginx/issues/146)) ([29c8a94](https://github.com/corazawaf/coraza-nginx/commit/29c8a94a850e92ddffe3b6a8be1817c82bf3a76f))
+* replace existing Location headers on a policy redirect ([#153](https://github.com/corazawaf/coraza-nginx/issues/153)) ([9bcdc13](https://github.com/corazawaf/coraza-nginx/commit/9bcdc13bc2d54385115b9b8aabf2809bd7e24219))
+
+
+### Miscellaneous Chores
+
+* debian/changelog for 0.23.0 ([#170](https://github.com/corazawaf/coraza-nginx/issues/170)) ([5af0940](https://github.com/corazawaf/coraza-nginx/commit/5af0940161cea5432ac3b2d913b1c9c0d06391e9))
+
 ## [0.22.0](https://github.com/corazawaf/coraza-nginx/compare/v0.21.0...v0.22.0) (2026-10-07)
 
 
