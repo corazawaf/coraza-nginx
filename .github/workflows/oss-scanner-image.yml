@@ -1,0 +1,53 @@
+# Keep the OSS Scanner image buildable and its offline test run green.
+#
+# .oss-scanner/Dockerfile is what Anthropic's scanner builds (with network) and then
+# analyses (without). Pins drift, apt packages move, nginx-tests changes: if the image
+# stops building or the suite stops passing inside it, the scanner mails an error
+# instead of findings. This job rebuilds the image monthly (and on demand), then runs
+# the lint and integration suites inside it with networking disabled, the way the
+# scanner runs.
+name: OSS Scanner image
+
+on:
+  schedule:
+    # Day 2 of the month: after bump.yml (day 1) has re-pinned versions.env.
+    - cron: "30 5 2 * *"
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  image:
+    name: Build the scanner image and test it offline
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Build the image (network on, as the scanner does)
+        run: docker build --progress=plain -f .oss-scanner/Dockerfile -t coraza-nginx-scanner .
+
+      # /tmp on tmpfs: coraza-response-body.t uses directio, which overlayfs rejects (EIO).
+      - name: Run the suites inside the image with no network
+        run: |
+          set -o pipefail
+          docker run --rm --network none --tmpfs /tmp:exec coraza-nginx-scanner bash -c '
+            set -e
+            prove lint/*.t
+            cd /src/nginx-tests
+            timeout --kill-after=30s 15m prove --timer coraza*.t
+            /usr/sbin/nginx -t
+          ' 2>&1 | tee scanner-image-tests.log
+
+      - name: Upload the test log
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scanner-image-tests
+          path: scanner-image-tests.log
+          if-no-files-found: ignore
