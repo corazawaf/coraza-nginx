@@ -94,8 +94,16 @@ harnesses — the functions they extract are in scope, the harness code is not),
 - `prove /src/lint/*.t` runs the static source contracts (regexes that pin a structure
   of the C source: fail-closed paths, call-site ordering, the filter registration).
 - `/src/nginx-asan-<ver>/objs/nginx` is the ASan/UBSan build; run any `t/` file against
-  it by pointing `TEST_NGINX_BINARY` and `TEST_NGINX_GLOBALS` at `objs/nginx` and
-  `objs/ngx_http_coraza_module.so`. The image sets CI's
+  it from `/src/nginx-tests`:
+
+  ```sh
+  A=/src/nginx-asan-<ver>/objs
+  TEST_NGINX_BINARY=$A/nginx \
+  TEST_NGINX_GLOBALS="user root; load_module \"$A/ngx_http_coraza_module.so\";" \
+  prove coraza.t
+  ```
+
+  The image sets CI's
   `ASAN_OPTIONS=verify_asan_link_order=0:detect_odr_violation=0`: the Go runtime in
   libcoraza is uninstrumented, and nginx defines `ngx_module_names` in both the binary and
   every dynamic module, which ASan reports as an ODR violation.
@@ -107,7 +115,7 @@ harnesses — the functions they extract are in scope, the harness code is not),
 - `bash fuzz/run.sh 60` fuzzes `ngx_str_to_char`; `FUZZ_BIN=./fuzz_pack_headers
   CORPUS_DIR=./corpus_pack_headers bash fuzz/run.sh 60` fuzzes the header packer.
 - `.oss-scanner/serve.sh` (or `serve.sh asan`) starts nginx with the module and the full
-  OWASP CRS on 127.0.0.1:80, the configuration CI's go-ftw run uses; `go-ftw` is
+  OWASP CRS on port 80, the configuration CI's go-ftw run uses; `go-ftw` is
   installed to replay `tests/ftw/*.yaml` and the CRS regression suite (see the script's
   header for the commands). This is the end-to-end target for probing bypasses.
 - The declarative way to state "this configuration + this request should give this

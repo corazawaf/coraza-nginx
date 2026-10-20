@@ -1,6 +1,6 @@
 #!/bin/sh
 # Start the nginx built in this image with the coraza module and the OWASP CRS loaded,
-# listening on 127.0.0.1:80 (the configuration CI's go-ftw run uses, tests/ftw/nginx-test.conf).
+# listening on port 80 (the configuration CI's go-ftw run uses, tests/ftw/nginx-test.conf).
 #
 #   .oss-scanner/serve.sh          the regular build (/usr/sbin/nginx)
 #   .oss-scanner/serve.sh asan     the ASan/UBSan build (/src/nginx-asan-<ver>/objs/nginx)
@@ -28,8 +28,8 @@ case "${1:-}" in
     mkdir -p /tmp/nginx-asan/logs
     export ASAN_OPTIONS="${ASAN_OPTIONS:-verify_asan_link_order=0:detect_odr_violation=0}:detect_leaks=0"
     "${ASAN_DIR}/objs/nginx" -p /tmp/nginx-asan/ -c /tmp/nginx-asan.conf -e /dev/stderr
-    echo "ASan nginx started on 127.0.0.1:80 (pid $(cat /tmp/nginx.pid)); sanitizer reports go to stderr" ;;
+    echo "ASan nginx started on port 80 (pid $(cat /tmp/nginx.pid)); sanitizer reports go to stderr" ;;
   *)
     /usr/sbin/nginx -c "$CONF"
-    echo "nginx started on 127.0.0.1:80 (pid $(cat /tmp/nginx.pid))" ;;
+    echo "nginx started on port 80 (pid $(cat /tmp/nginx.pid))" ;;
 esac
