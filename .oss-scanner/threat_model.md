@@ -82,7 +82,7 @@ harnesses — the functions they extract are in scope, the harness code is not),
 ## How to exercise it
 
 - `cd /src/nginx-tests && prove --timer coraza*.t` runs the integration suite (about 90
-  files, ~1,200 checks, around a minute) against the nginx built in this image, with
+  files, ~6,400 checks, about three minutes) against the nginx built in this image, with
   `TEST_NGINX_BINARY`, `TEST_NGINX_GLOBALS` and `TEST_NGINX_SOURCE` already set. Each file
   is a self-contained Test::Nginx script: it writes an `nginx.conf` with inline
   `coraza_rules`, starts nginx, speaks HTTP over raw sockets and asserts on the wire
