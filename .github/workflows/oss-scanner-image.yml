@@ -3,10 +3,10 @@
 # .oss-scanner/Dockerfile is what Anthropic's scanner builds (with network) and then
 # analyses (without). Pins drift, apt packages move, nginx-tests changes: if the image
 # stops building or the suite stops passing inside it, the scanner mails an error
-# instead of findings. This job rebuilds the image on pull requests that touch it or
-# the pins (so the monthly bump.yml PR proves it still builds), monthly, and on demand,
-# then runs the lint and integration suites inside it with networking disabled, the way
-# the scanner runs.
+# instead of findings. This job rebuilds the image on pull requests that touch it, monthly,
+# and on demand, then runs the lint and integration suites inside it with networking
+# disabled, the way the scanner runs. The monthly run is what catches a bad version bump:
+# bump.yml opens its PRs with GITHUB_TOKEN, which does not trigger pull_request workflows.
 name: OSS Scanner image
 
 on:
@@ -16,7 +16,7 @@ on:
       - ".github/workflows/oss-scanner-image.yml"
       - ".github/versions.env"
   schedule:
-    # Monthly, to catch drift that no PR touches (apt packages, base image).
+    # Monthly, to catch drift that no PR run sees (apt packages, base image, bump.yml PRs).
     - cron: "30 5 2 * *"
   workflow_dispatch: {}
 
