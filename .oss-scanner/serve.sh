@@ -28,7 +28,18 @@ wait_pid() {
 
 case "${1:-}" in
   stop)
-    [ -f "$PID" ] && kill "$(cat "$PID")" && echo "stopped"
+    [ -f "$PID" ] || exit 0
+    p="$(cat "$PID")"
+    kill "$p" 2>/dev/null || true
+    # Return only once the master is gone, so a following start cannot pick up its pid file.
+    i=0
+    while kill -0 "$p" 2>/dev/null; do
+        i=$((i + 1))
+        [ "$i" -le 50 ] || { echo "nginx (pid $p) did not exit" >&2; exit 1; }
+        sleep 0.1
+    done
+    rm -f "$PID"
+    echo "stopped"
     exit 0 ;;
 esac
 

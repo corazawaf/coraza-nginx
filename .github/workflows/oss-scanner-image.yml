@@ -81,11 +81,9 @@ jobs:
             printf "testoverride:\n  input:\n    dest_addr: \"127.0.0.1\"\n    port: 80\n" > /tmp/.ftw.yaml
             go-ftw run --cloud --config /tmp/.ftw.yaml -d /src/tests/ftw/
             /src/.oss-scanner/serve.sh stop
-            sleep 1
             /src/.oss-scanner/serve.sh asan
             probe
             /src/.oss-scanner/serve.sh stop
-            sleep 1
             bash tools/soak.sh "/src/nginx-asan-${NGINX_VERSION}/objs/nginx" 20 2
             bash fuzz/run.sh 10
             FUZZ_BIN=./fuzz_pack_headers CORPUS_DIR=./corpus_pack_headers bash fuzz/run.sh 10
