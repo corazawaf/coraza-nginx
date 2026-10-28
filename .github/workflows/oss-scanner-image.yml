@@ -11,10 +11,20 @@ name: OSS Scanner image
 
 on:
   pull_request:
+    # Everything the image build or its in-image runs read.
     paths:
       - ".oss-scanner/**"
       - ".github/workflows/oss-scanner-image.yml"
       - ".github/versions.env"
+      - ".github/scripts/fetch-verify.sh"
+      - "config"
+      - "src/**"
+      - "t/**"
+      - "lint/**"
+      - "fuzz/**"
+      - "tests/ftw/**"
+      - "tests/ftw-crs.yml"
+      - "tools/soak.sh"
   schedule:
     # Monthly, to catch drift that no PR run sees (apt packages, base image, bump.yml PRs).
     - cron: "30 5 2 * *"
@@ -53,6 +63,33 @@ jobs:
             timeout --kill-after=30s 15m prove --timer coraza*.t
             /usr/sbin/nginx -t
           ' 2>&1 | tee scanner-image-tests.log
+
+      # The entry points threat_model.md sends the scanner to: serve.sh in both modes,
+      # go-ftw against the live server, the ASan soak, and the fuzzers.
+      - name: Smoke-test the scanner entry points with no network
+        run: |
+          set -o pipefail
+          docker run --rm --network none --tmpfs /tmp:exec coraza-nginx-scanner bash -c '
+            set -e
+            . /src/.github/versions.env
+            probe() {
+              test "$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1/)" = 200
+              test "$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1/?x=<script>alert(1)</script>")" = 403
+            }
+            /src/.oss-scanner/serve.sh
+            probe
+            printf "testoverride:\n  input:\n    dest_addr: \"127.0.0.1\"\n    port: 80\n" > /tmp/.ftw.yaml
+            go-ftw run --cloud --config /tmp/.ftw.yaml -d /src/tests/ftw/
+            /src/.oss-scanner/serve.sh stop
+            sleep 1
+            /src/.oss-scanner/serve.sh asan
+            probe
+            /src/.oss-scanner/serve.sh stop
+            sleep 1
+            bash tools/soak.sh "/src/nginx-asan-${NGINX_VERSION}/objs/nginx" 20 2
+            bash fuzz/run.sh 10
+            FUZZ_BIN=./fuzz_pack_headers CORPUS_DIR=./corpus_pack_headers bash fuzz/run.sh 10
+          ' 2>&1 | tee -a scanner-image-tests.log
 
       - name: Upload the test log
         if: failure()
