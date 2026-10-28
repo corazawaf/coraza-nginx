@@ -14,22 +14,47 @@
 set -eu
 . /src/.github/versions.env
 CONF=/etc/nginx/nginx.conf
+PID=/tmp/nginx.pid   # set by tests/ftw/nginx-test.conf
+
+# nginx writes the pid file from the master, after the process we started has returned.
+wait_pid() {
+    i=0
+    while [ ! -s "$PID" ]; do
+        i=$((i + 1))
+        [ "$i" -le 50 ] || { echo "nginx did not write $PID" >&2; exit 1; }
+        sleep 0.1
+    done
+}
+
 case "${1:-}" in
   stop)
-    [ -f /tmp/nginx.pid ] && kill "$(cat /tmp/nginx.pid)" && echo "stopped"
+    [ -f "$PID" ] && kill "$(cat "$PID")" && echo "stopped"
     exit 0 ;;
+esac
+
+# The configuration's docroot; /tmp may be a fresh tmpfs.
+mkdir -p /tmp/empty
+[ -f /tmp/empty/index.html ] || echo OK > /tmp/empty/index.html
+# A pid file left by a killed run would be read as ours.
+if [ -f "$PID" ] && ! kill -0 "$(cat "$PID")" 2>/dev/null; then rm -f "$PID"; fi
+
+case "${1:-}" in
   asan)
-    ASAN_DIR="/src/nginx-asan-${NGINX_MAINLINE}"
-    sed "s#/usr/lib/nginx/modules/ngx_http_coraza_module.so#${ASAN_DIR}/objs/ngx_http_coraza_module.so#" \
-        "$CONF" > /tmp/nginx-asan.conf
+    ASAN_DIR="/src/nginx-asan-${NGINX_VERSION}"
+    ASAN_SO="${ASAN_DIR}/objs/ngx_http_coraza_module.so"
+    sed "s#/usr/lib/nginx/modules/ngx_http_coraza_module.so#${ASAN_SO}#" "$CONF" > /tmp/nginx-asan.conf
+    grep -q "$ASAN_SO" /tmp/nginx-asan.conf \
+        || { echo "load_module line not found in $CONF" >&2; exit 1; }
     # This tree has the default prefix (/usr/local/nginx), absent here: give it one for its
     # temp paths. LeakSanitizer is off: it only reports the start-up pool of the parent
     # process that exits when nginx daemonises.
     mkdir -p /tmp/nginx-asan/logs
     export ASAN_OPTIONS="${ASAN_OPTIONS:-verify_asan_link_order=0:detect_odr_violation=0}:detect_leaks=0"
     "${ASAN_DIR}/objs/nginx" -p /tmp/nginx-asan/ -c /tmp/nginx-asan.conf -e /dev/stderr
-    echo "ASan nginx started on port 80 (pid $(cat /tmp/nginx.pid)); sanitizer reports go to stderr" ;;
+    wait_pid
+    echo "ASan nginx started on port 80 (pid $(cat "$PID")); sanitizer reports go to stderr" ;;
   *)
     /usr/sbin/nginx -c "$CONF"
-    echo "nginx started on port 80 (pid $(cat /tmp/nginx.pid))" ;;
+    wait_pid
+    echo "nginx started on port 80 (pid $(cat "$PID"))" ;;
 esac
