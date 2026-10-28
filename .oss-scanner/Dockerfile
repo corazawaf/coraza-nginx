@@ -9,7 +9,7 @@
 #   /src/nginx-<ver>             nginx mainline (symlinked as /src/nginx), configured and built with the module
 #                                (objs/nginx, objs/ngx_http_coraza_module.so); also installed as
 #                                /usr/sbin/nginx + /usr/lib/nginx/modules/ngx_http_coraza_module.so
-#   /src/nginx-asan-<ver>        the same tree built under ASan/UBSan with CI's flags
+#   /src/nginx-asan-<ver>        nginx NGINX_VERSION built under ASan/UBSan as asan.yml does
 #                                (objs/nginx, objs/ngx_http_coraza_module.so) -- use it to confirm
 #                                memory-safety findings (the image's ASAN_OPTIONS is what CI uses)
 #   /src/libcoraza-build         libcoraza (the cgo bridge to the Go engine), installed as
@@ -48,7 +48,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       autoconf automake libtool \
       libpcre2-dev zlib1g-dev libssl-dev openssl \
       perl libio-socket-ssl-perl libcryptx-perl \
-      gdb valgrind procps netcat-openbsd \
+      gdb valgrind procps netcat-openbsd mold \
     && rm -rf /var/lib/apt/lists/*
 
 # scanner contract: the checkout lives inside the image, at /src
@@ -99,20 +99,26 @@ RUN set -eu; . /src/.github/versions.env; \
       --with-debug --with-threads \
       --with-http_ssl_module --with-http_realip_module --with-http_auth_request_module \
       --with-http_v2_module --with-http_v3_module --with-http_sub_module --with-http_dav_module; \
-    make -j"$(nproc)" modules && make -j"$(nproc)" && make install; \
+    make -j"$(nproc)" && make install; \
     mkdir -p /var/cache/nginx/client_temp /var/log/nginx; \
     /usr/sbin/nginx -V
 
-# The same nginx under ASan/UBSan with CI's exact flags (asan.yml): ASan errors are fatal,
-# UBSan recovers; nonnull-attribute/null are excluded because nginx core trips them at init.
+# nginx under ASan/UBSan, at the version and with the flags of CI's sanitizer and soak jobs
+# (asan.yml, NGINX_VERSION): ASan errors are fatal, UBSan recovers; nonnull-attribute/null
+# are excluded because nginx core trips them at init.
 # Not installed: run /src/nginx-asan-<ver>/objs/nginx with its own module path.
 RUN set -eu; . /src/.github/versions.env; \
     printf 'int main(void){return 0;}\n' > /tmp/asan-probe.c; \
     gcc -fsanitize=address,undefined /tmp/asan-probe.c -o /tmp/asan-probe; \
     timeout 30 /tmp/asan-probe || { echo "ASan runtime does not start on this kernel" >&2; exit 1; }; \
     rm -f /tmp/asan-probe /tmp/asan-probe.c; \
-    cp -r "nginx-${NGINX_MAINLINE}" "nginx-asan-${NGINX_MAINLINE}"; \
-    cd "nginx-asan-${NGINX_MAINLINE}" && make clean; \
+    bash .github/scripts/fetch-verify.sh \
+      "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+      "$NGINX_VERSION_SHA256" nginx-asan.tar.gz; \
+    mkdir "nginx-asan-${NGINX_VERSION}"; \
+    tar -xzf nginx-asan.tar.gz -C "nginx-asan-${NGINX_VERSION}" --strip-components=1; \
+    rm nginx-asan.tar.gz; \
+    cd "nginx-asan-${NGINX_VERSION}"; \
     SAN_LD="-fsanitize=address,undefined"; \
     SAN_CC="$SAN_LD -fno-sanitize=nonnull-attribute,null -fno-sanitize-recover=address"; \
     ./configure \
@@ -122,8 +128,8 @@ RUN set -eu; . /src/.github/versions.env; \
       --with-http_sub_module --with-http_dav_module \
       --add-dynamic-module=/src \
       --with-cc-opt="-DNGX_DEBUG_PALLOC=1 -g3 -O0 -fno-omit-frame-pointer -funwind-tables $SAN_CC $(pkg-config --cflags libpcre2-8)" \
-      --with-ld-opt="$SAN_LD $(pkg-config --libs libpcre2-8)"; \
-    make -j"$(nproc)" modules && make -j"$(nproc)"; \
+      --with-ld-opt="-fuse-ld=mold $SAN_LD $(pkg-config --libs libpcre2-8)"; \
+    make -j"$(nproc)"; \
     ASAN_OPTIONS=verify_asan_link_order=0 ./objs/nginx -V
 
 # Both libFuzzer targets (clang + ASan/UBSan), next to their seed corpora in /src/fuzz.
@@ -187,13 +193,9 @@ ENV TEST_NGINX_BINARY=/usr/sbin/nginx \
     ASAN_OPTIONS=verify_asan_link_order=0:detect_odr_violation=0
 
 # The static source contracts are cheap and must pass on a clean checkout (a failure here is
-# a CI failure anyway). Then run the integration suite once so the image is known to work,
-# without letting a failing test abort the build; the full run takes about three minutes.
-# /tmp is a tmpfs for it: coraza-response-body.t serves files with `directio`, and overlayfs
-# fails O_DIRECT reads with EIO.
+# a CI failure anyway). The integration suite is not run here: oss-scanner-image.yml runs it
+# inside the built image, offline.
 RUN prove lint/*.t
-RUN --mount=type=tmpfs,target=/tmp cd nginx-tests && (timeout --kill-after=30s 15m prove --timer coraza*.t \
-      || echo "WARNING: prove reported failures")
 
 # No Go toolchain work is needed at run time, but keep `go` usable offline for anyone who
 # rebuilds libcoraza: serve the module cache as the proxy, as the engine's image does.
