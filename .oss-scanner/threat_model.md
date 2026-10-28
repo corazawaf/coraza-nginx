@@ -36,7 +36,8 @@ promises (a rule the engine never sees fire, a limit accepted but not enforced, 
 response the engine never inspected) is in scope: that is the module's whole job.
 
 **In scope**: everything under `src/` — the C/Go boundary (symbol gate and ABI
-assumptions in `dl.c`, the packed header buffers handed to `coraza_add_*_headers`, string
+assumptions in `dl.c`, the header packer in `utils.c` and the buffers it hands to
+`coraza_add_*_headers`, string
 lifetimes across cgo calls), request-body buffering and replay to the backend, the
 response-header delay and the finalisation of phase 4 before headers go out, the body
 filter's delayed and file-backed brigades, intervention enforcement at every phase site,
@@ -68,12 +69,14 @@ Most, in this order:
    disruptive action: deny/redirect/drop, status remapping, `Location` replacement),
    context creation and cleanup (transaction lifetime, double-free and reuse), WAF
    construction and the rule-content deduplication cache, directive parsing.
-5. `src/ngx_http_coraza_dl.c` — `dlopen()` of libcoraza, the version floor, the ABI
-   assumptions on every symbol, and the bulk header packing format
-   ([u16 len][name][u32 len][value]) the engine decodes.
-6. `src/ngx_http_coraza_rewrite.c`, `ngx_http_coraza_log.c`, `ngx_http_coraza_utils.c`
-   — phase-1 helpers, the LOG-phase audit fallback for headerless exits, string
-   conversions.
+5. `src/ngx_http_coraza_utils.c` — `ngx_http_coraza_pack_headers()`, which packs
+   attacker-controlled headers into the bulk format ([u16 len][name][u32 len][value]) the
+   engine decodes (length limits, overflow guards, allocation), and `ngx_str_to_char()`. Both are
+   fuzzed (`fuzz/`).
+6. `src/ngx_http_coraza_dl.c` — `dlopen()` of libcoraza, the version floor, the ABI
+   assumptions on every symbol; it documents the packing format but does not pack.
+7. `src/ngx_http_coraza_rewrite.c`, `ngx_http_coraza_log.c` — phase-1 helpers, the
+   LOG-phase audit fallback for headerless exits.
 
 Less: `lint/` and `t/` (the suites themselves), `tools/` (soak harness), `fuzz/` (the
 harnesses — the functions they extract are in scope, the harness code is not), `debian/`,
@@ -185,7 +188,8 @@ Not vulnerabilities, do not report:
   the ModSecurity-nginx behaviour for the same case when parity is part of the argument.
 - A patch that keeps the project's shape: the fix at the one site all callers route
   through (interventions go through `ngx_http_coraza_process_intervention()`, fail-closed
-  exits through the existing finalisers, header packing through `dl.c`), a regression case
+  exits through the existing finalisers, header packing through
+  `ngx_http_coraza_pack_headers()`), a regression case
   in `t/`, a `lint/` contract when the fix pins a structural property (an ordering, a
   guard), nothing under a new `ci/` tree, no new test harness that extracts and recompiles
   production code. It must pass `prove lint/*.t`, the full `prove coraza*.t`, and stay
