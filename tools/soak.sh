@@ -75,12 +75,19 @@ LOAD_MODULE_DIRECTIVE=""
 if [ -f "$MODULE_SO" ]; then
     LOAD_MODULE_DIRECTIVE="load_module $MODULE_SO;"
 fi
+# Run as root (the OSS Scanner image), nginx would start its workers as nobody, who
+# cannot enter the 0700 $WORK: keep them on the caller's account.
+USER_DIRECTIVE=""
+if [ "$(id -u)" = 0 ]; then
+    USER_DIRECTIVE="user root;"
+fi
 
 # In-config SecRules: block a URI-arg attack marker and a request-body
 # marker so both the header/URI path and the body-inspection path are
 # exercised. Benign traffic hits neither.
 cat > "$WORK/conf/nginx.conf" <<EOF
 $LOAD_MODULE_DIRECTIVE
+$USER_DIRECTIVE
 daemon off;
 master_process on;
 worker_processes 4;
