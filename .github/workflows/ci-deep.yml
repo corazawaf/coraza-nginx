@@ -67,7 +67,7 @@ jobs:
       CCACHE_MAXSIZE: 200M
     steps:
       - name: Checkout module
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -128,7 +128,7 @@ jobs:
 
       - name: Upload crash artifacts
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fuzz-deep-crashes-${{ matrix.target }}
           path: ${{ github.workspace }}/fuzz/crash-*
@@ -136,7 +136,7 @@ jobs:
 
       - name: Upload fuzz execution log
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fuzz-deep-log-${{ matrix.target }}
           path: ${{ github.workspace }}/fuzz-${{ matrix.target }}.log
@@ -144,7 +144,7 @@ jobs:
 
       - name: Upload minimized corpus
         if: success()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fuzz-corpus-${{ matrix.target }}
           path: ${{ github.workspace }}/fuzz/corpus-min-${{ matrix.target }}
@@ -171,7 +171,7 @@ jobs:
             runner: ubuntu-26.04
     steps:
       - name: Checkout module
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Load version pins
@@ -290,7 +290,7 @@ jobs:
           bash tools/soak.sh "$SERVER_BIN" 300 8
       - name: Upload failed soak evidence
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: soak-memcheck-${{ matrix.server }}-${{ matrix.arch }}
           path: ${{ runner.temp }}/soak-evidence/
@@ -314,7 +314,7 @@ jobs:
             runner: ubuntu-26.04
     steps:
       - name: Checkout module
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Load version pins
@@ -433,7 +433,7 @@ jobs:
           bash tools/soak.sh "$SERVER_BIN" 300 8
       - name: Upload failed soak evidence
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: soak-helgrind-${{ matrix.server }}-${{ matrix.arch }}
           path: ${{ runner.temp }}/soak-evidence/
@@ -445,7 +445,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout module
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Load version pins
@@ -566,7 +566,7 @@ jobs:
             "$GITHUB_WORKSPACE/src/" 2>&1 | tee semgrep.log
       - name: Upload reports
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: security-reports
           path: |
@@ -592,7 +592,7 @@ jobs:
     # SARIF upload needs Code Scanning enabled on the repo (see codeql.yml).
     steps:
       - name: Checkout module
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -662,7 +662,7 @@ jobs:
     # valgrind memcheck/helgrind soaks are the separate jobs above.)
     steps:
       - name: Checkout module
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -751,7 +751,7 @@ jobs:
             "$GITHUB_WORKSPACE/nginx-${NGINX_VERSION}/objs/nginx" 300 4
       - name: Upload failed soak evidence
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: soak-sanitizer
           path: ${{ runner.temp }}/soak-evidence/
